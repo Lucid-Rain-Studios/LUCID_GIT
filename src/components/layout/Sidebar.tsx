@@ -86,7 +86,8 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
       <aside
         style={{
           display: 'flex', flexDirection: 'column',
-          background: '#10131c',
+          background: '#0c0f17',
+          borderRight: '1px solid #1a2030',
           width: panelWidth,
           transition: collapsed ? 'width 0.2s ease' : 'none',
           overflow: 'hidden', flexShrink: 0,
@@ -100,11 +101,11 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             height: 36,
             background: 'transparent', border: 'none',
-            borderBottom: '1px solid #252d42',
-            color: '#4e5870', cursor: 'pointer', flexShrink: 0,
+            borderBottom: '1px solid #1a2030',
+            color: '#3d4a60', cursor: 'pointer', flexShrink: 0,
           }}
-          onMouseEnter={e => (e.currentTarget.style.color = '#8b94b0')}
-          onMouseLeave={e => (e.currentTarget.style.color = '#4e5870')}
+          onMouseEnter={e => (e.currentTarget.style.color = '#7b8499')}
+          onMouseLeave={e => (e.currentTarget.style.color = '#3d4a60')}
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
             {collapsed
@@ -115,16 +116,20 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
         </button>
 
         {/* Nav */}
-        <nav style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', paddingTop: 8, paddingBottom: 8 }}>
-          {NAV_GROUPS.map(group => (
+        <nav style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', paddingTop: 6, paddingBottom: 6 }}>
+          {NAV_GROUPS.map((group, gi) => (
             <div key={group.label}>
+              {/* Group separator line (between groups) */}
+              {gi > 0 && !collapsed && (
+                <div style={{ height: 1, background: '#1a2030', margin: '6px 10px' }} />
+              )}
               {/* Group label */}
               {!collapsed && (
                 <div style={{
-                  paddingLeft: 12, paddingTop: 10, paddingBottom: 4,
+                  paddingLeft: 13, paddingTop: 8, paddingBottom: 3,
                   fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
-                  fontSize: 10, fontWeight: 600,
-                  color: '#4e5870', letterSpacing: '0.1em', textTransform: 'uppercase',
+                  fontSize: 10, fontWeight: 700,
+                  color: '#344057', letterSpacing: '0.12em', textTransform: 'uppercase',
                   userSelect: 'none',
                 }}>
                   {group.label}
@@ -153,11 +158,11 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
         <div
           onMouseDown={onDragStart}
           style={{
-            width: 4, flexShrink: 0, cursor: 'col-resize',
-            background: '#252d42', transition: 'background 0.15s', zIndex: 5,
+            width: 3, flexShrink: 0, cursor: 'col-resize',
+            background: 'transparent', transition: 'background 0.15s', zIndex: 5,
           }}
-          onMouseEnter={e => (e.currentTarget.style.background = '#e8622f')}
-          onMouseLeave={e => (e.currentTarget.style.background = '#252d42')}
+          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(232,98,47,0.5)')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
         />
       )}
     </div>
@@ -184,28 +189,36 @@ function NavItem({
       title={collapsed ? item.label : undefined}
       style={{
         display: 'flex', alignItems: 'center',
-        gap: collapsed ? 0 : 9,
-        width: '100%', height: 34,
-        paddingLeft: collapsed ? 0 : 12,
-        paddingRight: collapsed ? 0 : 10,
+        gap: collapsed ? 0 : 8,
+        width: '100%', height: 32,
+        paddingLeft: collapsed ? 0 : 11,
+        paddingRight: collapsed ? 0 : 9,
         justifyContent: collapsed ? 'center' : 'flex-start',
-        background: isActive ? 'rgba(232,98,47,0.15)' : hover ? '#1e2436' : 'transparent',
+        background: isActive
+          ? 'linear-gradient(90deg, rgba(232,98,47,0.16) 0%, rgba(232,98,47,0.05) 100%)'
+          : hover ? 'rgba(255,255,255,0.04)' : 'transparent',
         border: 'none',
-        borderLeft: `2px solid ${isActive ? '#e8622f' : 'transparent'}`,
-        color: isActive ? '#dde1f0' : hover ? '#dde1f0' : '#8b94b0',
+        borderLeft: `2.5px solid ${isActive ? '#e8622f' : 'transparent'}`,
+        color: isActive ? '#e2e6f4' : hover ? '#c8cdd8' : '#7b8499',
         cursor: 'pointer', transition: 'all 0.12s ease',
         position: 'relative', flexShrink: 0,
       }}
     >
-      <span style={{ color: isActive ? '#e8622f' : 'currentColor', flexShrink: 0, display: 'flex' }}>
-        <Icon size={16} />
+      <span style={{
+        color: isActive ? '#e8622f' : hover ? '#a0a8b8' : 'currentColor',
+        flexShrink: 0, display: 'flex',
+        filter: isActive ? 'drop-shadow(0 0 5px rgba(232,98,47,0.5))' : 'none',
+        transition: 'filter 0.12s ease, color 0.12s ease',
+      }}>
+        <Icon size={15} />
       </span>
 
       {!collapsed && (
         <span style={{
           fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
-          fontSize: 13, fontWeight: isActive ? 600 : 400,
+          fontSize: 12.5, fontWeight: isActive ? 600 : 400,
           flex: 1, textAlign: 'left', whiteSpace: 'nowrap',
+          letterSpacing: '-0.01em',
         }}>
           {item.label}
         </span>
@@ -213,13 +226,14 @@ function NavItem({
 
       {!collapsed && badge > 0 && (
         <span style={{
-          background: isActive ? 'rgba(232,98,47,0.30)' : '#242a3d',
-          color: isActive ? '#e8622f' : '#4e5870',
+          background: isActive ? 'rgba(232,98,47,0.25)' : 'rgba(255,255,255,0.07)',
+          color: isActive ? '#e8622f' : '#7b8499',
           fontFamily: "'JetBrains Mono', monospace",
-          fontSize: 11, fontWeight: 600,
-          borderRadius: 10, minWidth: 18, height: 18,
+          fontSize: 10, fontWeight: 700,
+          borderRadius: 9, minWidth: 17, height: 17,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          paddingLeft: 5, paddingRight: 5,
+          paddingLeft: 4, paddingRight: 4,
+          border: isActive ? '1px solid rgba(232,98,47,0.3)' : '1px solid rgba(255,255,255,0.07)',
         }}>
           {badge}
         </span>
@@ -227,9 +241,11 @@ function NavItem({
 
       {collapsed && badge > 0 && (
         <span style={{
-          position: 'absolute', top: 6, right: 6,
-          width: 7, height: 7, borderRadius: '50%',
-          background: '#e8622f', border: '2px solid #10131c',
+          position: 'absolute', top: 5, right: 5,
+          width: 6, height: 6, borderRadius: '50%',
+          background: '#e8622f',
+          boxShadow: '0 0 6px rgba(232,98,47,0.7)',
+          border: '1.5px solid #0c0f17',
         }} />
       )}
     </button>
@@ -247,25 +263,26 @@ function TerminalBtn({ collapsed, repoPath, onClick }: { collapsed: boolean; rep
       onMouseLeave={() => setHover(false)}
       title={collapsed ? 'Open Terminal' : undefined}
       style={{
-        display: 'flex', alignItems: 'center', gap: collapsed ? 0 : 9,
+        display: 'flex', alignItems: 'center', gap: collapsed ? 0 : 8,
         width: '100%', height: 34,
-        paddingLeft: collapsed ? 0 : 12, paddingRight: collapsed ? 0 : 10,
+        paddingLeft: collapsed ? 0 : 11, paddingRight: collapsed ? 0 : 9,
         justifyContent: collapsed ? 'center' : 'flex-start',
-        background: hover ? '#1e2436' : 'transparent',
-        border: 'none', borderTop: '1px solid #252d42',
-        color: hover ? '#dde1f0' : '#4e5870',
+        background: hover ? 'rgba(255,255,255,0.04)' : 'transparent',
+        border: 'none', borderTop: '1px solid #1a2030',
+        color: hover ? '#a0a8b8' : '#3d4a60',
         cursor: repoPath ? 'pointer' : 'default',
-        opacity: repoPath ? 1 : 0.4,
+        opacity: repoPath ? 1 : 0.35,
         transition: 'all 0.12s ease', flexShrink: 0,
       }}
     >
       <span style={{ color: 'currentColor', flexShrink: 0, display: 'flex' }}>
-        <TerminalIcon size={16} />
+        <TerminalIcon size={15} />
       </span>
       {!collapsed && (
         <span style={{
           fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
-          fontSize: 13, flex: 1, textAlign: 'left', whiteSpace: 'nowrap',
+          fontSize: 12.5, flex: 1, textAlign: 'left', whiteSpace: 'nowrap',
+          letterSpacing: '-0.01em',
         }}>Terminal</span>
       )}
     </button>

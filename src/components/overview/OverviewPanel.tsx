@@ -36,7 +36,7 @@ function timeAgoStr(iso: string): string {
 }
 
 function authorColor(name: string): string {
-  const palette = ['#4d9dff', '#a27ef0', '#2ec573', '#f5a832', '#e8622f', '#1abc9c', '#e91e63']
+  const palette = ['#4a9eff', '#a27ef0', '#2dbd6e', '#f5a832', '#e8622f', '#1abc9c', '#e91e63']
   let h = 0
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
   return palette[h % palette.length]
@@ -63,30 +63,34 @@ function Card({
 }) {
   return (
     <div style={{
-      background: '#161a27', border: '1px solid #252d42', borderRadius: 10,
+      background: '#131720',
+      border: '1px solid #1a2030',
+      borderRadius: 10,
+      boxShadow: '0 2px 8px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.025)',
       display: 'flex', flexDirection: 'column', overflow: 'hidden',
       ...xStyle,
     }}>
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 8, height: 36,
-        paddingLeft: 14, paddingRight: 10, flexShrink: 0,
-        borderBottom: '1px solid #252d42', background: '#10131c',
+        display: 'flex', alignItems: 'center', gap: 8, height: 34,
+        paddingLeft: 13, paddingRight: 9, flexShrink: 0,
+        borderBottom: '1px solid #18202e',
+        background: 'rgba(0,0,0,0.15)',
       }}>
-        <span style={{ color: accentColor ?? '#4e5870', display: 'flex', flexShrink: 0 }}>{icon}</span>
+        <span style={{ color: accentColor ?? '#344057', display: 'flex', flexShrink: 0 }}>{icon}</span>
         <span style={{
-          fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, fontWeight: 600,
-          color: '#8b94b0', flex: 1, letterSpacing: '0.07em', textTransform: 'uppercase',
+          fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10.5, fontWeight: 700,
+          color: '#4a566a', flex: 1, letterSpacing: '0.08em', textTransform: 'uppercase',
         }}>{title}</span>
         {actionLabel && onAction && (
           <button
             onClick={onAction}
             style={{
-              fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#4d9dff',
+              fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#4a9eff',
               background: 'none', border: 'none', cursor: 'pointer',
-              padding: '2px 8px', borderRadius: 4, transition: 'all 0.1s',
+              padding: '2px 8px', borderRadius: 4,
             }}
-            onMouseEnter={e => { e.currentTarget.style.color = '#e8622f'; e.currentTarget.style.background = 'rgba(232,98,47,0.1)' }}
-            onMouseLeave={e => { e.currentTarget.style.color = '#4d9dff'; e.currentTarget.style.background = 'none' }}
+            onMouseEnter={e => { e.currentTarget.style.color = '#e8622f'; e.currentTarget.style.background = 'rgba(232,98,47,0.08)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = '#4a9eff'; e.currentTarget.style.background = 'none' }}
           >{actionLabel} →</button>
         )}
       </div>
@@ -103,7 +107,7 @@ function Btn({
   label: string; onClick: () => void; loading?: boolean; color?: string; disabled?: boolean
 }) {
   const [hover, setHover] = useState(false)
-  const c = color ?? '#8b94b0'
+  const c = color ?? '#7b8499'
   const off = loading || disabled
   return (
     <button
@@ -111,12 +115,13 @@ function Btn({
       onMouseEnter={() => !off && setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
-        height: 26, paddingLeft: 14, paddingRight: 14, borderRadius: 5,
-        background: hover ? `${c}18` : 'transparent',
-        border: `1px solid ${hover ? c + '66' : '#252d42'}`,
-        color: off ? '#4e5870' : hover ? c : '#8b94b0',
-        fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, fontWeight: 500,
-        cursor: off ? 'default' : 'pointer', transition: 'all 0.12s', opacity: off ? 0.55 : 1,
+        height: 25, paddingLeft: 13, paddingRight: 13, borderRadius: 5,
+        background: hover ? `${c}14` : 'rgba(255,255,255,0.02)',
+        border: `1px solid ${hover ? c + '55' : '#1a2030'}`,
+        color: off ? '#344057' : hover ? c : '#5a6880',
+        fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11.5, fontWeight: 500,
+        cursor: off ? 'default' : 'pointer', opacity: off ? 0.5 : 1,
+        boxShadow: hover && !off ? `0 0 12px ${c}18` : 'none',
       }}
     >{loading ? '…' : label}</button>
   )
@@ -134,16 +139,18 @@ function StatusChip({
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
-        display: 'flex', alignItems: 'center', gap: 7,
-        height: 28, paddingLeft: 10, paddingRight: 12,
-        background: hover && onClick ? '#1d2235' : '#161a27',
-        border: '1px solid #252d42', borderRadius: 6,
+        display: 'flex', alignItems: 'center', gap: 6,
+        height: 26, paddingLeft: 9, paddingRight: 11,
+        background: hover && onClick ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.02)',
+        border: `1px solid ${hover && onClick ? '#283047' : '#18202e'}`,
+        borderRadius: 6,
         cursor: onClick ? 'pointer' : 'default',
-        transition: 'background 0.1s', flexShrink: 0,
+        flexShrink: 0,
+        boxShadow: hover && onClick ? `0 0 10px ${dot}18` : 'none',
       }}
     >
-      <div style={{ width: 7, height: 7, borderRadius: '50%', background: dot, boxShadow: `0 0 4px ${dot}88`, flexShrink: 0 }} />
-      <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#8b94b0', whiteSpace: 'nowrap' }}>
+      <div style={{ width: 6, height: 6, borderRadius: '50%', background: dot, boxShadow: `0 0 5px ${dot}99`, flexShrink: 0 }} />
+      <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11.5, color: '#5a6880', whiteSpace: 'nowrap' }}>
         {label}
       </span>
     </div>
@@ -155,9 +162,9 @@ function StatusChip({
 function Metric({ label, value, color, sub }: { label: string; value: string | number; color: string; sub?: string }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 9, fontWeight: 600, color: '#4e5870', letterSpacing: '0.09em', textTransform: 'uppercase' }}>{label}</span>
-      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color, lineHeight: 1 }}>{value}</span>
-      {sub && <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#4e5870', marginTop: 1 }}>{sub}</span>}
+      <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 9, fontWeight: 700, color: '#344057', letterSpacing: '0.1em', textTransform: 'uppercase' }}>{label}</span>
+      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 21, fontWeight: 700, color, lineHeight: 1, textShadow: `0 0 20px ${color}40` }}>{value}</span>
+      {sub && <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#344057', marginTop: 1 }}>{sub}</span>}
     </div>
   )
 }
@@ -165,7 +172,7 @@ function Metric({ label, value, color, sub }: { label: string; value: string | n
 // ── Divider ───────────────────────────────────────────────────────────────────
 
 function Divider() {
-  return <div style={{ height: 1, background: '#1d2235', margin: '2px 0' }} />
+  return <div style={{ height: 1, background: '#18202e', margin: '2px 0' }} />
 }
 
 // ── Sync card ─────────────────────────────────────────────────────────────────
@@ -181,8 +188,8 @@ function SyncCard({ sync, branch, repoPath, onDone }: {
     try { await opRun(label, fn) } finally { setBusy(null); onDone() }
   }
 
-  const aheadColor  = !sync || sync.ahead  === 0 ? '#4e5870' : '#e8622f'
-  const behindColor = !sync || sync.behind === 0 ? '#4e5870' : '#f5a832'
+  const aheadColor  = !sync || sync.ahead  === 0 ? '#344057' : '#e8622f'
+  const behindColor = !sync || sync.behind === 0 ? '#344057' : '#f5a832'
   const upToDate    = sync && sync.ahead === 0 && sync.behind === 0
 
   return (
@@ -190,10 +197,10 @@ function SyncCard({ sync, branch, repoPath, onDone }: {
       <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
         {/* Branch + remote */}
         <div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: '#4d9dff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 2 }}>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: '#4a9eff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 2 }}>
             {branch || '—'}
           </div>
-          <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#4e5870' }}>
+          <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#344057' }}>
             {sync?.hasUpstream ? `tracking ${sync.remoteName}/${sync.remoteBranch}` : 'no upstream configured'}
           </div>
         </div>
@@ -206,8 +213,8 @@ function SyncCard({ sync, branch, repoPath, onDone }: {
 
         {upToDate && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ color: '#2ec573', fontSize: 13 }}>✓</span>
-            <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#4e5870' }}>In sync with remote</span>
+            <span style={{ color: '#2dbd6e', fontSize: 13 }}>✓</span>
+            <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>In sync with remote</span>
           </div>
         )}
 
@@ -238,14 +245,14 @@ function WorkingCopyCard({
     >
       <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', gap: 20 }}>
-          <Metric label="Staged"   value={staged}   color={staged   > 0 ? '#2ec573' : '#4e5870'} sub={staged   === 0 ? 'nothing staged' : `file${staged   !== 1 ? 's' : ''} ready`} />
-          <Metric label="Modified" value={unstaged}  color={unstaged > 0 ? '#f5a832' : '#4e5870'} sub={unstaged === 0 ? 'no changes'     : `file${unstaged !== 1 ? 's' : ''} changed`} />
+          <Metric label="Staged"   value={staged}   color={staged   > 0 ? '#2dbd6e' : '#344057'} sub={staged   === 0 ? 'nothing staged' : `file${staged   !== 1 ? 's' : ''} ready`} />
+          <Metric label="Modified" value={unstaged}  color={unstaged > 0 ? '#f5a832' : '#344057'} sub={unstaged === 0 ? 'no changes'     : `file${unstaged !== 1 ? 's' : ''} changed`} />
         </div>
 
         {total === 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ color: '#2ec573', fontSize: 13 }}>✓</span>
-            <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#4e5870' }}>Working directory clean</span>
+            <span style={{ color: '#2dbd6e', fontSize: 13 }}>✓</span>
+            <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>Working directory clean</span>
           </div>
         )}
 
@@ -253,7 +260,7 @@ function WorkingCopyCard({
           <>
             <Divider />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-              <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, fontWeight: 600, color: '#4e5870', letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 2 }}>
+              <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, fontWeight: 600, color: '#344057', letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 2 }}>
                 {stash.length} stashed
               </span>
               {stash.slice(0, 3).map((s, i) => (
@@ -264,13 +271,13 @@ function WorkingCopyCard({
                     border: '1px solid rgba(162,126,240,0.25)', borderRadius: 3, padding: '1px 5px', flexShrink: 0,
                   }}>stash@{`{${s.index}}`}</span>
                   <span style={{
-                    fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#8b94b0',
+                    fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#5a6880',
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
                   }}>{s.message || `WIP on ${s.branch}`}</span>
                 </div>
               ))}
               {stash.length > 3 && (
-                <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#4e5870' }}>+{stash.length - 3} more</span>
+                <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#344057' }}>+{stash.length - 3} more</span>
               )}
             </div>
           </>
@@ -302,21 +309,21 @@ function LfsCard({ lfs, onNavigate }: { lfs: LFSStatus | null; onNavigate: (t: s
 
             {/* Tracked patterns */}
             <div>
-              <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, fontWeight: 600, color: '#4e5870', letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 6 }}>
+              <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, fontWeight: 600, color: '#344057', letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 6 }}>
                 {lfs.tracked.length} tracked pattern{lfs.tracked.length !== 1 ? 's' : ''}
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                 {lfs.tracked.slice(0, 8).map((p, i) => (
                   <span key={i} style={{
                     fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
-                    background: '#1d2235', color: '#8b94b0', borderRadius: 4, padding: '2px 7px',
+                    background: 'rgba(255,255,255,0.04)', color: '#5a6880', borderRadius: 4, padding: '2px 7px',
                   }}>{p}</span>
                 ))}
                 {lfs.tracked.length > 8 && (
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#4e5870', padding: '2px 0' }}>+{lfs.tracked.length - 8}</span>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#344057', padding: '2px 0' }}>+{lfs.tracked.length - 8}</span>
                 )}
                 {lfs.tracked.length === 0 && (
-                  <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#4e5870' }}>No patterns — LFS not configured</span>
+                  <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#344057' }}>No patterns — LFS not configured</span>
                 )}
               </div>
             </div>
@@ -331,16 +338,16 @@ function LfsCard({ lfs, onNavigate }: { lfs: LFSStatus | null; onNavigate: (t: s
                   ⚠ {warnCount} large file{warnCount !== 1 ? 's' : ''} not in LFS
                 </div>
                 {lfs!.untracked.slice(0, 4).map((f, i) => (
-                  <div key={i} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#8b94b0', padding: '1px 0' }}>{f}</div>
+                  <div key={i} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#5a6880', padding: '1px 0' }}>{f}</div>
                 ))}
                 {warnCount > 4 && (
-                  <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#4e5870', marginTop: 2 }}>+{warnCount - 4} more</div>
+                  <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#344057', marginTop: 2 }}>+{warnCount - 4} more</div>
                 )}
               </div>
             )}
           </>
         ) : (
-          <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#4e5870' }}>LFS data unavailable</span>
+          <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>LFS data unavailable</span>
         )}
       </div>
     </Card>
@@ -368,7 +375,7 @@ function LocksCard({
     <Card
       title="Active Locks"
       icon={<LockCardIcon />}
-      accentColor={locks.length > 0 ? '#e8622f' : '#2ec573'}
+      accentColor={locks.length > 0 ? '#e8622f' : '#2dbd6e'}
     >
       {locks.length === 0 ? (
         <div style={{ padding: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
@@ -376,7 +383,7 @@ function LocksCard({
             <rect x="7" y="12" width="14" height="10" rx="2" stroke="#2ec573" strokeWidth="1.3" />
             <path d="M10 12V9a4 4 0 0 1 8 0v3" stroke="#2ec573" strokeWidth="1.3" strokeLinecap="round" />
           </svg>
-          <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#4e5870' }}>No active locks</span>
+          <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>No active locks</span>
         </div>
       ) : (
         <div style={{ overflowY: 'auto', maxHeight: 320 }}>
@@ -395,7 +402,7 @@ function LockSection({ label, locks, isOwn, onUnlock, unlocking }: {
     <>
       <div style={{
         padding: '6px 14px 2px', fontFamily: "'IBM Plex Sans', system-ui",
-        fontSize: 9, fontWeight: 600, color: '#4e5870', letterSpacing: '0.09em', textTransform: 'uppercase',
+        fontSize: 9, fontWeight: 600, color: '#344057', letterSpacing: '0.09em', textTransform: 'uppercase',
       }}>{label}</div>
       {locks.map(lock => <LockRow key={lock.id} lock={lock} isOwn={isOwn} onUnlock={() => onUnlock(lock.path)} loading={unlocking === lock.path} />)}
     </>
@@ -407,7 +414,7 @@ function LockRow({ lock, isOwn, onUnlock, loading }: {
 }) {
   const [hover, setHover] = useState(false)
   const fileName = lock.path.split('/').pop() ?? lock.path
-  const lockColor = isOwn ? '#2ec573' : '#f5a832'
+  const lockColor = isOwn ? '#2dbd6e' : '#f5a832'
 
   return (
     <div
@@ -416,8 +423,8 @@ function LockRow({ lock, isOwn, onUnlock, loading }: {
       style={{
         display: 'flex', alignItems: 'center', gap: 10,
         minHeight: 44, paddingLeft: 14, paddingRight: 14, paddingTop: 8, paddingBottom: 8,
-        borderBottom: '1px solid #1d2235',
-        background: hover ? '#1e2436' : 'transparent', transition: 'background 0.1s',
+        borderBottom: '1px solid #18202e',
+        background: hover ? 'rgba(255,255,255,0.03)' : 'transparent', transition: 'background 0.1s',
       }}
     >
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0, color: lockColor }}>
@@ -426,14 +433,14 @@ function LockRow({ lock, isOwn, onUnlock, loading }: {
         <circle cx="7" cy="9" r="1" fill="currentColor" />
       </svg>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#dde1f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lock.path}>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#e2e6f4', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lock.path}>
           {fileName}
         </div>
-        <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#4e5870', marginTop: 1 }}>
+        <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#344057', marginTop: 1 }}>
           {lock.owner.name || lock.owner.login} · {timeAgoStr(lock.lockedAt)}
         </div>
         {fileName !== lock.path && (
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: '#4e5870', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: '#344057', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>
             {lock.path}
           </div>
         )}
@@ -460,20 +467,20 @@ function SizeCard({ size, onNavigate }: { size: SizeBreakdown | null; onNavigate
   if (!size) return (
     <Card title="Repository Size" icon={<SizeCardIcon />} accentColor="#a27ef0">
       <div style={{ padding: 14 }}>
-        <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#4e5870' }}>Size data unavailable</span>
+        <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>Size data unavailable</span>
       </div>
     </Card>
   )
 
   const sizeColor = size.totalBytes > 5 * 1_073_741_824 ? '#e84545'
     : size.totalBytes > 2 * 1_073_741_824 ? '#f5a832'
-    : '#2ec573'
+    : '#2dbd6e'
 
   const bars: { label: string; bytes: number; color: string }[] = [
-    { label: 'Git Objects', bytes: size.objectsBytes,  color: '#4d9dff' },
+    { label: 'Git Objects', bytes: size.objectsBytes,  color: '#4a9eff' },
     { label: 'Pack Files',  bytes: size.packsBytes,    color: '#a27ef0' },
-    { label: 'LFS Cache',   bytes: size.lfsCacheBytes, color: '#2ec573' },
-    { label: 'Logs',        bytes: size.logsBytes,     color: '#4e5870' },
+    { label: 'LFS Cache',   bytes: size.lfsCacheBytes, color: '#2dbd6e' },
+    { label: 'Logs',        bytes: size.logsBytes,     color: '#344057' },
   ].filter(b => b.bytes > 0)
 
   const maxBytes = Math.max(...bars.map(b => b.bytes), 1)
@@ -493,10 +500,10 @@ function SizeCard({ size, onNavigate }: { size: SizeBreakdown | null; onNavigate
           {bars.map(b => (
             <div key={b.label}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#8b94b0' }}>{b.label}</span>
-                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#4e5870' }}>{fmtBytes(b.bytes)}</span>
+                <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#5a6880' }}>{b.label}</span>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#344057' }}>{fmtBytes(b.bytes)}</span>
               </div>
-              <div style={{ height: 4, background: '#1d2235', borderRadius: 2 }}>
+              <div style={{ height: 4, background: 'rgba(255,255,255,0.05)', borderRadius: 2 }}>
                 <div style={{
                   height: 4, borderRadius: 2, background: b.color,
                   width: `${(b.bytes / maxBytes) * 100}%`,
@@ -533,7 +540,7 @@ function ActivityCard({ activity, onNavigate }: { activity: BranchActivity[]; on
       onAction={() => onNavigate('history')}
     >
       {activity.length === 0 ? (
-        <div style={{ padding: '16px 14px', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#4e5870' }}>
+        <div style={{ padding: '16px 14px', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>
           No recent branch activity
         </div>
       ) : (
@@ -547,10 +554,10 @@ function ActivityCard({ activity, onNavigate }: { activity: BranchActivity[]; on
                 key={i}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 9,
-                  padding: '8px 14px', borderBottom: '1px solid #1d2235',
+                  padding: '8px 14px', borderBottom: '1px solid #18202e',
                   transition: 'background 0.1s',
                 }}
-                onMouseEnter={e => (e.currentTarget.style.background = '#1e2436')}
+                onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.03)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
               >
                 <div style={{
@@ -562,10 +569,10 @@ function ActivityCard({ activity, onNavigate }: { activity: BranchActivity[]; on
                 }}>{ini}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#4d9dff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>{branch}</span>
-                    <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#4e5870', flexShrink: 0 }}>{timeAgoStr(item.date)}</span>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#4a9eff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>{branch}</span>
+                    <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#344057', flexShrink: 0 }}>{timeAgoStr(item.date)}</span>
                   </div>
-                  <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#8b94b0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#5a6880', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {item.message}
                   </div>
                 </div>
@@ -590,7 +597,7 @@ function CommitsCard({ commits, onNavigate }: { commits: CommitEntry[]; onNaviga
       onAction={() => onNavigate('history')}
     >
       {commits.length === 0 ? (
-        <div style={{ padding: '16px 14px', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#4e5870' }}>No commits yet</div>
+        <div style={{ padding: '16px 14px', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>No commits yet</div>
       ) : (
         <div>
           {commits.map(c => {
@@ -603,9 +610,9 @@ function CommitsCard({ commits, onNavigate }: { commits: CommitEntry[]; onNaviga
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10,
                   height: 46, paddingLeft: 14, paddingRight: 14,
-                  borderBottom: '1px solid #1d2235', transition: 'background 0.1s',
+                  borderBottom: '1px solid #18202e', transition: 'background 0.1s',
                 }}
-                onMouseEnter={e => (e.currentTarget.style.background = '#1e2436')}
+                onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.03)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
               >
                 <div style={{
@@ -618,7 +625,7 @@ function CommitsCard({ commits, onNavigate }: { commits: CommitEntry[]; onNaviga
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
                     <span style={{
-                      fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, fontWeight: 500, color: '#dde1f0',
+                      fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, fontWeight: 500, color: '#e2e6f4',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
                     }}>{c.message}</span>
                     {isMerge && (
@@ -631,11 +638,11 @@ function CommitsCard({ commits, onNavigate }: { commits: CommitEntry[]; onNaviga
                     )}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#8b94b0' }}>{c.author}</span>
-                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#4e5870' }}>{timeAgoMs(c.timestamp)}</span>
+                    <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#5a6880' }}>{c.author}</span>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#344057' }}>{timeAgoMs(c.timestamp)}</span>
                   </div>
                 </div>
-                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#4e5870', flexShrink: 0 }}>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#344057', flexShrink: 0 }}>
                   {c.hash.slice(0, 7)}
                 </span>
               </div>
@@ -758,29 +765,29 @@ export function OverviewPanel({ repoPath, onNavigate, onRefresh }: OverviewPanel
   const currentLogin  = accounts.find(a => a.userId === currentAccountId)?.login ?? null
 
   // ── Compute health status chips ──────────────────────────────────────────────
-  const syncDot = !sync ? '#4e5870'
+  const syncDot = !sync ? '#344057'
     : sync.behind > 0   ? '#f5a832'
     : sync.ahead  > 0   ? '#e8622f'
-    : '#2ec573'
+    : '#2dbd6e'
   const syncLabel = !sync             ? 'No upstream'
     : sync.behind > 0 && sync.ahead > 0 ? `↑${sync.ahead} ↓${sync.behind}`
     : sync.behind > 0                   ? `↓${sync.behind} behind`
     : sync.ahead  > 0                   ? `↑${sync.ahead} to push`
     : 'In sync'
 
-  const changesDot   = (stagedCount + unstagedCount) > 0 ? '#f5a832' : '#2ec573'
+  const changesDot   = (stagedCount + unstagedCount) > 0 ? '#f5a832' : '#2dbd6e'
   const changesLabel = stagedCount + unstagedCount === 0 ? 'Clean' : `${stagedCount + unstagedCount} change${stagedCount + unstagedCount !== 1 ? 's' : ''}`
 
-  const locksDot   = locks.length > 0 ? '#e8622f' : '#4e5870'
+  const locksDot   = locks.length > 0 ? '#e8622f' : '#344057'
   const locksLabel = locks.length === 0 ? 'No locks' : `${locks.length} lock${locks.length !== 1 ? 's' : ''}`
 
-  const lfsWarnDot   = (lfs?.untracked.length ?? 0) > 0 ? '#f5a832' : lfs ? '#2ec573' : '#4e5870'
+  const lfsWarnDot   = (lfs?.untracked.length ?? 0) > 0 ? '#f5a832' : lfs ? '#2dbd6e' : '#344057'
   const lfsLabel     = !lfs ? 'LFS —' : (lfs.untracked.length > 0 ? `⚠ ${lfs.untracked.length} untracked` : `LFS OK`)
 
-  const sizeDot   = !size ? '#4e5870'
+  const sizeDot   = !size ? '#344057'
     : size.totalBytes > 5 * 1_073_741_824 ? '#e84545'
     : size.totalBytes > 2 * 1_073_741_824 ? '#f5a832'
-    : '#4e5870'
+    : '#344057'
   const sizeLabel = size ? fmtBytes(size.totalBytes) : 'Size —'
 
   // ── Warnings ─────────────────────────────────────────────────────────────────
@@ -794,32 +801,32 @@ export function OverviewPanel({ repoPath, onNavigate, onRefresh }: OverviewPanel
   if (stash.length > 5)
     warnings.push({ msg: `${stash.length} stashed changesets accumulating`, color: '#a27ef0' })
   if (sync && !sync.hasUpstream)
-    warnings.push({ msg: 'Branch has no remote upstream configured', color: '#4e5870' })
+    warnings.push({ msg: 'Branch has no remote upstream configured', color: '#344057' })
 
   const repoName = repoPath.split(/[/\\]/).pop() ?? repoPath
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', background: '#0b0d13' }}>
-      <div style={{ padding: 18, minWidth: 640, display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div style={{ flex: 1, overflowY: 'auto', background: '#0d0f15' }}>
+      <div style={{ padding: 18, minWidth: 640, display: 'flex', flexDirection: 'column', gap: 14, animation: 'fade-in 0.25s ease both' }}>
 
         {/* ── Header ───────────────────────────────────────────────────────── */}
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 18, fontWeight: 700, color: '#dde1f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 17, fontWeight: 700, color: '#e2e6f4', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.02em' }}>
               {repoName}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-              <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><circle cx="3" cy="3" r="2" stroke="#4d9dff" strokeWidth="1.2"/><circle cx="3" cy="9" r="2" stroke="#4d9dff" strokeWidth="1.2"/><path d="M3 5v2M9 6c0-1.7-1.3-3-3-3" stroke="#4d9dff" strokeWidth="1.1" strokeLinecap="round"/></svg>
-              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#4d9dff' }}>{branch || '—'}</span>
-              <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#4e5870' }}>·</span>
-              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#4e5870', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 3 }}>
+              <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><circle cx="3" cy="3" r="2" stroke="#4a9eff" strokeWidth="1.2"/><circle cx="3" cy="9" r="2" stroke="#4a9eff" strokeWidth="1.2"/><path d="M3 5v2M9 6c0-1.7-1.3-3-3-3" stroke="#4a9eff" strokeWidth="1.1" strokeLinecap="round"/></svg>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#4a9eff' }}>{branch || '—'}</span>
+              <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#1e2a3a' }}>·</span>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: '#283047', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {repoPath}
               </span>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
             {lastUpdate && (
-              <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#4e5870' }}>
+              <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#283047' }}>
                 {timeAgoMs(lastUpdate)}
               </span>
             )}
@@ -827,18 +834,17 @@ export function OverviewPanel({ repoPath, onNavigate, onRefresh }: OverviewPanel
               onClick={() => { loadAll(); onRefresh() }}
               disabled={refreshing}
               style={{
-                height: 30, paddingLeft: 14, paddingRight: 14, borderRadius: 6,
-                background: 'transparent', border: '1px solid #252d42',
-                color: refreshing ? '#4e5870' : '#8b94b0',
-                fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12,
+                height: 28, paddingLeft: 12, paddingRight: 12, borderRadius: 6,
+                background: 'rgba(255,255,255,0.02)', border: '1px solid #1a2030',
+                color: refreshing ? '#344057' : '#5a6880',
+                fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11.5,
                 cursor: refreshing ? 'default' : 'pointer',
-                display: 'flex', alignItems: 'center', gap: 6,
-                transition: 'all 0.12s',
+                display: 'flex', alignItems: 'center', gap: 5,
               }}
               onMouseEnter={e => { if (!refreshing) { e.currentTarget.style.borderColor = '#e8622f'; e.currentTarget.style.color = '#e8622f' } }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = '#252d42'; e.currentTarget.style.color = refreshing ? '#4e5870' : '#8b94b0' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = '#1a2030'; e.currentTarget.style.color = refreshing ? '#344057' : '#5a6880' }}
             >
-              <span style={{ fontSize: 15 }}>{refreshing ? '…' : '↺'}</span>
+              <span style={{ fontSize: 14 }}>{refreshing ? '…' : '↺'}</span>
               Refresh
             </button>
           </div>
@@ -855,19 +861,20 @@ export function OverviewPanel({ repoPath, onNavigate, onRefresh }: OverviewPanel
 
         {/* ── Warnings ─────────────────────────────────────────────────────── */}
         {warnings.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
             {warnings.map((w, i) => (
               <div key={i} style={{
                 display: 'flex', alignItems: 'center', gap: 8,
-                padding: '8px 12px', borderRadius: 7,
-                background: `${w.color}0d`, border: `1px solid ${w.color}35`,
+                padding: '7px 11px', borderRadius: 7,
+                background: `${w.color}09`, border: `1px solid ${w.color}28`,
+                boxShadow: `0 0 12px ${w.color}0c`,
               }}>
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ color: w.color, flexShrink: 0 }}>
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style={{ color: w.color, flexShrink: 0 }}>
                   <path d="M8 2 L14.5 13.5 H1.5 Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
                   <path d="M8 6.5v3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
                   <circle cx="8" cy="11.5" r="0.8" fill="currentColor" />
                 </svg>
-                <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: w.color }}>{w.msg}</span>
+                <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11.5, color: w.color }}>{w.msg}</span>
               </div>
             ))}
           </div>

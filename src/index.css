@@ -4,40 +4,53 @@
 
 @layer base {
   :root {
-    /* Lucid Git design tokens */
-    --lg-bg-primary:     #0d0f14;
-    --lg-bg-secondary:   #13161e;
-    --lg-bg-elevated:    #1a1e2a;
-    --lg-accent:         #e85d2f;
+    /* ── Lucid Git core tokens ─────────────────────────────────────────── */
+    --lg-bg-primary:     #0d0f15;
+    --lg-bg-secondary:   #131720;
+    --lg-bg-elevated:    #1b2030;
+    --lg-accent:         #e8622f;
+    --lg-accent-hover:   #f0714d;
     --lg-accent-blue:    #4a9eff;
     --lg-success:        #2dbd6e;
     --lg-warning:        #f5a623;
     --lg-error:          #e84040;
-    --lg-text-primary:   #e8eaf2;
-    --lg-text-secondary: #8892a4;
+    --lg-text-primary:   #e2e6f4;
+    --lg-text-secondary: #7b8499;
     --lg-lock-mine:      #2dbd6e;
     --lg-lock-other:     #e85d2f;
-    --lg-border:         #252a38;
+    --lg-border:         #1d2535;
+    --lg-border-strong:  #283047;
 
-    /* shadcn/ui compatibility (HSL channel values, no hsl() wrapper) */
-    --background:          222 20% 7%;
+    /* ── Depth & elevation ─────────────────────────────────────────────── */
+    --lg-shadow-sm:   0 1px 2px rgba(0,0,0,0.4), 0 1px 4px rgba(0,0,0,0.2);
+    --lg-shadow-md:   0 4px 16px rgba(0,0,0,0.5), 0 1px 4px rgba(0,0,0,0.3);
+    --lg-shadow-lg:   0 8px 32px rgba(0,0,0,0.65), 0 2px 8px rgba(0,0,0,0.4);
+    --lg-shadow-card: 0 2px 8px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.025);
+    --lg-shadow-top:  0 -1px 0 rgba(255,255,255,0.03), 0 -4px 12px rgba(0,0,0,0.2);
+
+    /* ── Glows ─────────────────────────────────────────────────────────── */
+    --lg-glow-accent: 0 0 18px rgba(232,98,47,0.22), 0 0 4px rgba(232,98,47,0.18);
+    --lg-glow-blue:   0 0 14px rgba(74,158,255,0.22);
+
+    /* ── shadcn/ui compatibility (HSL channel values) ───────────────────── */
+    --background:          224 22% 7%;
     --foreground:          226 17% 90%;
-    --card:                222 20% 9%;
+    --card:                222 22% 9%;
     --card-foreground:     226 17% 90%;
-    --popover:             222 20% 9%;
+    --popover:             222 22% 9%;
     --popover-foreground:  226 17% 90%;
     --primary:             19 79% 55%;
     --primary-foreground:  0 0% 100%;
-    --secondary:           222 20% 11%;
+    --secondary:           222 22% 11%;
     --secondary-foreground:226 17% 90%;
-    --muted:               222 20% 11%;
-    --muted-foreground:    222 14% 55%;
+    --muted:               222 22% 11%;
+    --muted-foreground:    222 14% 52%;
     --accent:              19 79% 55%;
     --accent-foreground:   0 0% 100%;
     --destructive:         0 72% 57%;
     --destructive-foreground: 0 0% 100%;
-    --border:              222 20% 17%;
-    --input:               222 20% 17%;
+    --border:              222 22% 16%;
+    --input:               222 22% 16%;
     --ring:                19 79% 55%;
     --radius:              0.375rem;
   }
@@ -64,34 +77,105 @@ body {
   user-select: none;
 }
 
-/* Scrollbar styling */
+/* ── Selection ──────────────────────────────────────────────────────────── */
+::selection {
+  background: rgba(232, 98, 47, 0.28);
+  color: #fff;
+}
+
+/* ── Smooth transitions on all interactive elements ─────────────────────── */
+button {
+  transition: color 0.12s ease, background-color 0.12s ease, border-color 0.12s ease,
+              box-shadow 0.12s ease, opacity 0.12s ease, filter 0.12s ease;
+}
+
+/* ── Scrollbars ─────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--lg-border);
+  background: rgba(255,255,255,0.1);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--lg-text-secondary);
+  background: rgba(255,255,255,0.18);
 }
 
+/* ── Mono font ──────────────────────────────────────────────────────────── */
 code,
 pre,
 .font-mono {
-  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace;
 }
 
-/* Loading bar animations */
+/* ── Focus rings ────────────────────────────────────────────────────────── */
+:focus-visible {
+  outline: 1.5px solid rgba(232, 98, 47, 0.6);
+  outline-offset: 2px;
+}
+
+/* ── Animations ─────────────────────────────────────────────────────────── */
+@keyframes sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(450%); }
+}
+
 @keyframes progress-sweep {
   0%   { transform: translateX(-100%); }
   100% { transform: translateX(350%); }
 }
+
 @keyframes progress-pulse {
   0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
   50%       { opacity: 0.4; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-down {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(232,98,47,0.15); }
+  50%       { box-shadow: 0 0 18px rgba(232,98,47,0.35); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Welcome screen dot-grid ────────────────────────────────────────────── */
+.lg-dot-grid {
+  background-image: radial-gradient(rgba(255,255,255,0.045) 1px, transparent 1px);
+  background-size: 22px 22px;
+  -webkit-mask-image: radial-gradient(ellipse 65% 65% at 50% 50%, black 0%, transparent 100%);
+  mask-image: radial-gradient(ellipse 65% 65% at 50% 50%, black 0%, transparent 100%);
+}
+
+/* ── Animation utilities ────────────────────────────────────────────────── */
+.lg-fade-in {
+  animation: fade-in 0.3s ease both;
+}
+
+.lg-slide-down {
+  animation: slide-down 0.2s ease both;
 }

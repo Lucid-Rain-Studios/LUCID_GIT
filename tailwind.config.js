@@ -40,34 +40,24 @@ module.exports = {
           foreground: 'hsl(var(--card-foreground))',
         },
         // ── Lucid Git design tokens ───────────────────────────────────────
-        // bg0 — canvas / outermost shell
-        'lg-bg-primary':    '#0b0d13',
-        // bg1 — sidebar, panels
-        'lg-bg-base':       '#10131c',
-        // bg2 — topbar, section headers
-        'lg-bg-secondary':  '#161a27',
-        // bg3 — elevated surfaces, dropdowns
-        'lg-bg-overlay':    '#1d2235',
-        // bg4 — hover targets, chips
-        'lg-bg-elevated':   '#242a3d',
-        // hover bg
-        'lg-bg-hover':      '#1e2436',
-        // borders
-        'lg-border':        '#252d42',
-        'lg-border-strong': '#2f3a54',
-        // text
-        'lg-text-primary':  '#dde1f0',
-        'lg-text-secondary':'#8b94b0',
-        'lg-text-muted':    '#4e5870',
-        // accent colours
+        'lg-bg-primary':    '#0d0f15',
+        'lg-bg-base':       '#0c0f17',
+        'lg-bg-secondary':  '#131720',
+        'lg-bg-overlay':    '#161c2b',
+        'lg-bg-elevated':   '#1b2030',
+        'lg-bg-hover':      '#ffffff0a',
+        'lg-border':        '#1d2535',
+        'lg-border-strong': '#283047',
+        'lg-text-primary':  '#e2e6f4',
+        'lg-text-secondary':'#7b8499',
+        'lg-text-muted':    '#344057',
         'lg-accent':        '#e8622f',
-        'lg-accent-blue':   '#4d9dff',
-        'lg-success':       '#2ec573',
-        'lg-warning':       '#f5a832',
-        'lg-error':         '#e84545',
+        'lg-accent-blue':   '#4a9eff',
+        'lg-success':       '#2dbd6e',
+        'lg-warning':       '#f5a623',
+        'lg-error':         '#e84040',
         'lg-purple':        '#a27ef0',
-        // lock aliases
-        'lg-lock-mine':     '#2ec573',
+        'lg-lock-mine':     '#2dbd6e',
         'lg-lock-other':    '#e8622f',
       },
       borderRadius: {

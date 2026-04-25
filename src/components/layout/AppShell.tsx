@@ -51,6 +51,32 @@ function isRecognizedAsset(filePath: string): boolean {
   return ASSET_EXTS.has(ext)
 }
 
+function WelcomeBtn({ onClick, label, accent }: { onClick: () => void; label: string; accent?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        height: 38, paddingLeft: 22, paddingRight: 22, borderRadius: 7,
+        background: accent ? '#e8622f' : 'rgba(255,255,255,0.04)',
+        border: `1px solid ${accent ? '#e8622f' : '#1d2535'}`,
+        color: accent ? '#fff' : '#7b8499',
+        fontFamily: "'IBM Plex Sans', system-ui", fontSize: 13.5,
+        fontWeight: accent ? 600 : 400, cursor: 'pointer',
+        boxShadow: accent ? '0 0 18px rgba(232,98,47,0.3), 0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.2)',
+        letterSpacing: '-0.01em',
+      }}
+      onMouseEnter={e => {
+        if (accent) { e.currentTarget.style.background = '#f0714d'; e.currentTarget.style.boxShadow = '0 0 28px rgba(232,98,47,0.5), 0 2px 8px rgba(0,0,0,0.3)' }
+        else { e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; e.currentTarget.style.borderColor = '#283047' }
+      }}
+      onMouseLeave={e => {
+        if (accent) { e.currentTarget.style.background = '#e8622f'; e.currentTarget.style.boxShadow = '0 0 18px rgba(232,98,47,0.3), 0 2px 8px rgba(0,0,0,0.3)' }
+        else { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.borderColor = '#1d2535' }
+      }}
+    >{label}</button>
+  )
+}
+
 export function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [sidebarWidth,     setSidebarWidth]     = useState(200)
@@ -203,8 +229,8 @@ export function AppShell() {
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
         style={{
-          width: 4, flexShrink: 0, cursor: 'col-resize',
-          background: hover ? '#e8622f' : '#252d42',
+          width: 3, flexShrink: 0, cursor: 'col-resize',
+          background: hover ? 'rgba(232,98,47,0.5)' : 'transparent',
           transition: 'background 0.15s', zIndex: 5,
         }}
       />
@@ -212,7 +238,7 @@ export function AppShell() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#0b0d13', color: '#dde1f0', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#0d0f15', color: '#e2e6f4', overflow: 'hidden' }}>
       <TopBar
         onOpen={handleOpenRepo}
         onClone={() => setShowCloneDialog(true)}
@@ -239,33 +265,58 @@ export function AppShell() {
             <SettingsPage repoPath={repoPath} />
           ) : !repoPath ? (
             /* ── Welcome ── */
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 36, fontWeight: 700, color: '#e8622f', letterSpacing: '0.1em' }}>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden', background: '#0d0f15' }}>
+              {/* Radial ambient glow */}
+              <div style={{
+                position: 'absolute', width: 560, height: 560, borderRadius: '50%',
+                background: 'radial-gradient(circle, rgba(232,98,47,0.07) 0%, transparent 70%)',
+                pointerEvents: 'none',
+              }} />
+              {/* Dot grid */}
+              <div className="lg-dot-grid" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
+              <div style={{ textAlign: 'center', position: 'relative', zIndex: 1, animation: 'fade-in 0.4s ease both' }}>
+                {/* Logo cluster */}
+                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 18 }}>
+                  <div style={{
+                    width: 52, height: 52, borderRadius: 14,
+                    background: 'linear-gradient(145deg, #1c2235, #131720)',
+                    border: '1px solid #1d2535',
+                    boxShadow: '0 0 0 1px rgba(232,98,47,0.1), 0 8px 24px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <svg width="26" height="26" viewBox="0 0 16 16" fill="none">
+                      <circle cx="8" cy="3" r="2.2" fill="#e8622f" />
+                      <circle cx="3" cy="12.5" r="1.6" fill="#e8622f" fillOpacity="0.55" />
+                      <circle cx="13" cy="12.5" r="1.6" fill="#e8622f" fillOpacity="0.55" />
+                      <line x1="8" y1="5.2" x2="3.6" y2="11" stroke="#e8622f" strokeWidth="1.1" strokeOpacity="0.45" strokeLinecap="round" />
+                      <line x1="8" y1="5.2" x2="12.4" y2="11" stroke="#e8622f" strokeWidth="1.1" strokeOpacity="0.45" strokeLinecap="round" />
+                    </svg>
+                  </div>
+                </div>
+                <div style={{
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: 28, fontWeight: 700,
+                  color: '#e2e6f4', letterSpacing: '0.12em',
+                  textShadow: '0 2px 20px rgba(0,0,0,0.5)',
+                }}>
                   LUCID GIT
                 </div>
-                <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 14, color: '#4e5870', marginTop: 6 }}>
+                <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 13, color: '#3d4a60', marginTop: 7, letterSpacing: '0.02em' }}>
                   Git client for game development teams
                 </div>
                 {error && (
                   <div style={{
-                    marginTop: 16, background: 'rgba(232,69,69,0.1)', border: '1px solid rgba(232,69,69,0.3)',
-                    borderRadius: 6, padding: '8px 16px',
-                    fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#e84545',
+                    marginTop: 18, background: 'rgba(232,64,64,0.08)', border: '1px solid rgba(232,64,64,0.25)',
+                    borderRadius: 7, padding: '10px 16px',
+                    fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#e84040',
                     maxWidth: 400, textAlign: 'left', whiteSpace: 'pre-wrap',
                   }}>{error}</div>
                 )}
-                <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 24 }}>
-                  <button onClick={handleOpenRepo} style={{
-                    height: 36, paddingLeft: 20, paddingRight: 20, borderRadius: 6,
-                    background: '#1d2235', border: '1px solid #2f3a54', color: '#dde1f0',
-                    fontFamily: "'IBM Plex Sans', system-ui", fontSize: 14, cursor: 'pointer',
-                  }}>Open Repository</button>
-                  <button onClick={() => setShowCloneDialog(true)} style={{
-                    height: 36, paddingLeft: 20, paddingRight: 20, borderRadius: 6,
-                    background: '#e8622f', border: '1px solid #e8622f', color: '#fff',
-                    fontFamily: "'IBM Plex Sans', system-ui", fontSize: 14, fontWeight: 600, cursor: 'pointer',
-                  }}>Clone Repository</button>
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 28 }}>
+                  <WelcomeBtn onClick={handleOpenRepo} label="Open Repository" />
+                  <WelcomeBtn onClick={() => setShowCloneDialog(true)} label="Clone Repository" accent />
+                </div>
+                <div style={{ marginTop: 20, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#253040', letterSpacing: '0.05em' }}>
+                  Press ⌘K to open command palette
                 </div>
               </div>
             </div>
@@ -346,7 +397,7 @@ export function AppShell() {
               <DragHandle onMouseDown={onFileDragStart} />
 
               {/* Right: diff or blame */}
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#0b0d13' }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#0d0f15' }}>
                 {blameTarget ? (
                   <DependencyBlamePanel
                     repoPath={blameTarget.repoPath}
@@ -357,7 +408,7 @@ export function AppShell() {
                   <>
                     {diffLoading && (
                       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: '#4e5870', animation: 'pulse 1.5s infinite' }}>
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: '#344057', animation: 'pulse 1.5s infinite' }}>
                           Loading diff…
                         </span>
                       </div>
@@ -370,12 +421,19 @@ export function AppShell() {
                         : <TextDiff diff={diffContent} />
                     )}
                     {!diffLoading && !diffContent && (
-                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                        <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
-                          <rect x="7" y="5" width="22" height="26" rx="3" stroke="#2f3a54" strokeWidth="1.5" />
-                          <path d="M12 12h12M12 17h8M12 22h10" stroke="#2f3a54" strokeWidth="1.5" strokeLinecap="round" />
-                        </svg>
-                        <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 13, color: '#4e5870' }}>
+                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+                        <div style={{
+                          width: 44, height: 44, borderRadius: 11,
+                          background: 'rgba(255,255,255,0.025)',
+                          border: '1px solid #1d2535',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          <svg width="22" height="22" viewBox="0 0 36 36" fill="none">
+                            <rect x="7" y="5" width="22" height="26" rx="3" stroke="#283047" strokeWidth="1.5" />
+                            <path d="M12 12h12M12 17h8M12 22h10" stroke="#283047" strokeWidth="1.5" strokeLinecap="round" />
+                          </svg>
+                        </div>
+                        <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5, color: '#2e3a50', letterSpacing: '-0.01em' }}>
                           Select a file to view diff
                         </span>
                       </div>

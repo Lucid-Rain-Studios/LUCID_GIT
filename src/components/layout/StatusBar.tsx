@@ -19,7 +19,6 @@ export function StatusBar() {
   const stepLabel  = latestStep?.label ?? label
   const stepDetail = latestStep?.detail
 
-  // Show detail text; append "X%" only when the detail doesn't already contain one
   const displayText = stepDetail
     ? progress !== undefined && !stepDetail.includes('%')
       ? `${stepDetail}  ${progress}%`
@@ -31,33 +30,40 @@ export function StatusBar() {
   return (
     <footer style={{
       position: 'relative', display: 'flex', flexDirection: 'column',
-      background: '#161a27', borderTop: '1px solid #252d42',
+      background: '#0f1219',
+      borderTop: '1px solid #151c28',
       flexShrink: 0, overflow: 'hidden', zIndex: 10,
     }}>
       {/* Progress strip */}
-      <div style={{ height: 2, width: '100%', background: '#252d42', overflow: 'hidden' }}>
+      <div style={{ height: 2, width: '100%', background: '#141924', overflow: 'hidden' }}>
         {isRunning && (
           progress !== undefined
-            ? <div style={{ height: '100%', background: '#e8622f', width: `${progress}%`, transition: 'width 0.3s ease' }} />
+            ? <div style={{
+                height: '100%',
+                background: 'linear-gradient(90deg, #e8622f, #f5a832)',
+                width: `${progress}%`,
+                transition: 'width 0.3s ease',
+                boxShadow: '0 0 6px rgba(232,98,47,0.6)',
+              }} />
             : <div style={{
-                height: '100%', width: '30%',
-                background: 'linear-gradient(90deg, transparent, #e8622f, transparent)',
-                animation: 'sweep 1.4s ease-in-out infinite',
+                height: '100%', width: '28%',
+                background: 'linear-gradient(90deg, transparent, #e8622f 40%, #f5a832 60%, transparent)',
+                animation: 'sweep 1.5s ease-in-out infinite',
               }} />
         )}
       </div>
 
       {/* Content row */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 28, paddingLeft: 16, paddingRight: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 26, paddingLeft: 14, paddingRight: 14 }}>
         {/* Left: branch */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {currentBranch ? (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#4d9dff' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: '#4a9eff' }}>
               <BranchIcon />
               {currentBranch}
             </span>
           ) : (
-            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#4e5870' }}>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: '#283047' }}>
               {repoPath ? 'No branch' : 'No repository'}
             </span>
           )}
@@ -67,23 +73,23 @@ export function StatusBar() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {repoPath && (
             fetching
-              ? <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#4e5870' }}>checking…</span>
+              ? <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, color: '#283047' }}>checking…</span>
               : permission === 'admin'
-                ? <PermBadge label="Admin" color="#2ec573" bg="rgba(46,197,115,0.15)" title="You have admin access to this repository" />
+                ? <PermBadge label="Admin" color="#2dbd6e" bg="rgba(45,189,110,0.1)" title="You have admin access to this repository" />
                 : permission === 'write'
-                  ? <PermBadge label="Collaborator" color="#8b94b0" bg="rgba(139,148,176,0.1)" title="You have write access (collaborator)" />
+                  ? <PermBadge label="Collaborator" color="#7b8499" bg="rgba(123,132,153,0.08)" title="You have write access (collaborator)" />
                   : null
           )}
           {isRunning ? (
             <span style={{
-              fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#e8622f',
+              fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: '#e8622f',
               animation: 'pulse 1.6s ease-in-out infinite',
               maxWidth: 480, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}>
               {displayText}
             </span>
           ) : (
-            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#4e5870' }}>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#1e2a3a', letterSpacing: '0.03em' }}>
               Ready
             </span>
           )}
@@ -99,10 +105,10 @@ function PermBadge({ label, color, bg, title }: { label: string; color: string; 
       title={title}
       style={{
         display: 'inline-flex', alignItems: 'center',
-        paddingLeft: 6, paddingRight: 6, height: 16, borderRadius: 10,
-        background: bg, border: `1px solid ${color}44`,
-        color, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600,
-        cursor: 'default', userSelect: 'none', flexShrink: 0,
+        paddingLeft: 6, paddingRight: 6, height: 15, borderRadius: 9,
+        background: bg, border: `1px solid ${color}33`,
+        color, fontFamily: "'JetBrains Mono', monospace", fontSize: 9, fontWeight: 700,
+        cursor: 'default', userSelect: 'none', flexShrink: 0, letterSpacing: '0.04em',
       }}
     >{label}</span>
   )
