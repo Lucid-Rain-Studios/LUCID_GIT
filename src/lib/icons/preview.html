@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>LUCID — Studio & Git Icon System</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #050810;
+    color: #e8eaf2;
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    padding: 64px 48px;
+    min-height: 100vh;
+  }
+  h1 {
+    font-size: 14px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #8892a4;
+    font-weight: 500;
+    margin-bottom: 8px;
+  }
+  h2 {
+    font-size: 28px;
+    font-weight: 300;
+    letter-spacing: -0.01em;
+    margin-bottom: 48px;
+    color: #e8eaf2;
+  }
+  .section { margin-bottom: 96px; max-width: 1400px; margin-left: auto; margin-right: auto; }
+
+  .pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 48px;
+    margin-bottom: 64px;
+  }
+  .card {
+    background: linear-gradient(180deg, #0d1220 0%, #0a0e1a 100%);
+    border: 1px solid #1a2540;
+    border-radius: 16px;
+    padding: 48px;
+    text-align: center;
+  }
+  .card .icon-wrap {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 32px;
+  }
+  .card .icon-wrap img {
+    width: 256px;
+    height: 256px;
+    border-radius: 56px;
+  }
+  .card .label {
+    font-size: 11px;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: #8892a4;
+    margin-bottom: 8px;
+  }
+  .card .name {
+    font-size: 22px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+  .card .name .accent { color: #9fc0f0; }
+  .card .name .accent-warm { color: #ffb585; }
+  .card .desc {
+    margin-top: 16px;
+    font-size: 13px;
+    color: #8892a4;
+    line-height: 1.6;
+  }
+
+  /* Size scale */
+  .scale {
+    display: flex;
+    align-items: flex-end;
+    gap: 32px;
+    flex-wrap: wrap;
+    background: linear-gradient(180deg, #0d1220 0%, #0a0e1a 100%);
+    border: 1px solid #1a2540;
+    border-radius: 16px;
+    padding: 48px;
+  }
+  .scale-item { text-align: center; }
+  .scale-item img {
+    display: block;
+    margin: 0 auto 12px;
+    border-radius: calc(var(--s) * 0.22);
+  }
+  .scale-item .px {
+    font-size: 11px;
+    color: #8892a4;
+    letter-spacing: 0.1em;
+    font-family: "SF Mono", "Consolas", monospace;
+  }
+
+  /* Wordmark / lockup */
+  .lockup {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 40px 48px;
+    background: linear-gradient(180deg, #0d1220 0%, #0a0e1a 100%);
+    border: 1px solid #1a2540;
+    border-radius: 16px;
+    margin-bottom: 24px;
+  }
+  .lockup img { width: 80px; height: 80px; border-radius: 18px; }
+  .lockup .text-block { display: flex; flex-direction: column; }
+  .lockup .brand {
+    font-size: 32px;
+    font-weight: 200;
+    letter-spacing: 0.18em;
+  }
+  .lockup .brand strong { font-weight: 600; }
+  .lockup .tag {
+    font-size: 12px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #8892a4;
+    margin-top: 4px;
+  }
+
+  /* Light bg test */
+  .light-test {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  .light-test .swatch {
+    padding: 48px;
+    border-radius: 16px;
+    text-align: center;
+  }
+  .light-test .swatch img { width: 128px; height: 128px; border-radius: 28px; }
+  .light-test .swatch .px {
+    margin-top: 12px;
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    font-family: "SF Mono", monospace;
+    color: #8892a4;
+  }
+  .light-test .light { background: #f5f5f7; }
+  .light-test .light .px { color: #6a6a72; }
+
+  /* Modules row — Studio with Git as a child module */
+  .ecosystem {
+    background: linear-gradient(180deg, #0d1220 0%, #0a0e1a 100%);
+    border: 1px solid #1a2540;
+    border-radius: 16px;
+    padding: 64px 48px;
+  }
+  .ecosystem-grid {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 64px;
+    align-items: center;
+  }
+  .ecosystem-grid .core {
+    text-align: center;
+  }
+  .ecosystem-grid .core img { width: 160px; height: 160px; border-radius: 36px; }
+  .ecosystem-grid .core .lbl {
+    margin-top: 12px;
+    font-size: 11px;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: #c8dcf5;
+  }
+  .modules-row {
+    display: flex;
+    gap: 24px;
+    align-items: center;
+  }
+  .modules-row .connector {
+    flex: 0 0 80px;
+    height: 2px;
+    background: linear-gradient(90deg, #1a2540 0%, #3d6aa8 50%, #1a2540 100%);
+  }
+  .module-tile {
+    flex: 1;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid #1a2540;
+    border-radius: 12px;
+    padding: 24px;
+    text-align: center;
+    max-width: 180px;
+  }
+  .module-tile img { width: 80px; height: 80px; border-radius: 18px; margin-bottom: 12px; }
+  .module-tile .name {
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #e8eaf2;
+  }
+  .module-tile.placeholder {
+    opacity: 0.35;
+    border-style: dashed;
+  }
+  .module-tile.placeholder .ph-icon {
+    width: 80px; height: 80px;
+    border-radius: 18px;
+    background: rgba(255,255,255,0.04);
+    border: 1px dashed #3a4560;
+    margin: 0 auto 12px;
+  }
+
+  .footer-note {
+    margin-top: 64px;
+    text-align: center;
+    color: #5a6478;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+  }
+</style>
+</head>
+<body>
+
+<div class="section">
+  <h1>LUCID</h1>
+  <h2>Brand system — studio core + module mark</h2>
+  <div class="pair">
+    <div class="card">
+      <div class="icon-wrap"><img src="lucid_studio.svg" alt="Lucid Studio"></div>
+      <div class="label">CORE BRAND</div>
+      <div class="name">LUCID <span class="accent">STUDIO</span></div>
+      <div class="desc">The luminous prism — refractive, multi-faceted, the<br>foundation that every module emerges from.</div>
+    </div>
+    <div class="card">
+      <div class="icon-wrap"><img src="lucid_git.svg" alt="Lucid Git"></div>
+      <div class="label">MODULE</div>
+      <div class="name">LUCID <span class="accent-warm">GIT</span></div>
+      <div class="desc">Same prism geometry, warm-shifted to mark it as a module.<br>The branch motif at its core makes the function legible at a glance.</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h1>SCALE</h1>
+  <h2>Legibility check across icon sizes</h2>
+  <div class="scale">
+    <div class="scale-item" style="--s:16px">
+      <img src="lucid_studio.svg" style="width:16px;height:16px">
+      <div class="px">16</div>
+    </div>
+    <div class="scale-item" style="--s:24px">
+      <img src="lucid_studio.svg" style="width:24px;height:24px">
+      <div class="px">24</div>
+    </div>
+    <div class="scale-item" style="--s:32px">
+      <img src="lucid_studio.svg" style="width:32px;height:32px">
+      <div class="px">32</div>
+    </div>
+    <div class="scale-item" style="--s:48px">
+      <img src="lucid_studio.svg" style="width:48px;height:48px">
+      <div class="px">48</div>
+    </div>
+    <div class="scale-item" style="--s:64px">
+      <img src="lucid_studio.svg" style="width:64px;height:64px">
+      <div class="px">64</div>
+    </div>
+    <div class="scale-item" style="--s:96px">
+      <img src="lucid_studio.svg" style="width:96px;height:96px">
+      <div class="px">96</div>
+    </div>
+    <div class="scale-item" style="--s:128px">
+      <img src="lucid_studio.svg" style="width:128px;height:128px">
+      <div class="px">128</div>
+    </div>
+    <div class="scale-item" style="--s:192px">
+      <img src="lucid_studio.svg" style="width:192px;height:192px">
+      <div class="px">192</div>
+    </div>
+  </div>
+  <div class="scale" style="margin-top:24px">
+    <div class="scale-item" style="--s:16px">
+      <img src="lucid_git.svg" style="width:16px;height:16px">
+      <div class="px">16</div>
+    </div>
+    <div class="scale-item" style="--s:24px">
+      <img src="lucid_git.svg" style="width:24px;height:24px">
+      <div class="px">24</div>
+    </div>
+    <div class="scale-item" style="--s:32px">
+      <img src="lucid_git.svg" style="width:32px;height:32px">
+      <div class="px">32</div>
+    </div>
+    <div class="scale-item" style="--s:48px">
+      <img src="lucid_git.svg" style="width:48px;height:48px">
+      <div class="px">48</div>
+    </div>
+    <div class="scale-item" style="--s:64px">
+      <img src="lucid_git.svg" style="width:64px;height:64px">
+      <div class="px">64</div>
+    </div>
+    <div class="scale-item" style="--s:96px">
+      <img src="lucid_git.svg" style="width:96px;height:96px">
+      <div class="px">96</div>
+    </div>
+    <div class="scale-item" style="--s:128px">
+      <img src="lucid_git.svg" style="width:128px;height:128px">
+      <div class="px">128</div>
+    </div>
+    <div class="scale-item" style="--s:192px">
+      <img src="lucid_git.svg" style="width:192px;height:192px">
+      <div class="px">192</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h1>LOCKUPS</h1>
+  <h2>Wordmark + icon as they'd appear in app chrome</h2>
+  <div class="lockup">
+    <img src="lucid_studio.svg" alt="">
+    <div class="text-block">
+      <div class="brand">LUCID <strong>STUDIO</strong></div>
+      <div class="tag">Game development platform</div>
+    </div>
+  </div>
+  <div class="lockup">
+    <img src="lucid_git.svg" alt="">
+    <div class="text-block">
+      <div class="brand">LUCID <strong>GIT</strong></div>
+      <div class="tag">Version control for game teams</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h1>BACKGROUNDS</h1>
+  <h2>Dark and light surface contrast</h2>
+  <div class="light-test">
+    <div class="swatch" style="background:#0d1220">
+      <img src="lucid_studio.svg">
+      <div class="px">DARK</div>
+    </div>
+    <div class="swatch light">
+      <img src="lucid_studio.svg">
+      <div class="px">LIGHT</div>
+    </div>
+    <div class="swatch" style="background:#0d1220">
+      <img src="lucid_git.svg">
+      <div class="px">DARK</div>
+    </div>
+    <div class="swatch light">
+      <img src="lucid_git.svg">
+      <div class="px">LIGHT</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h1>ECOSYSTEM</h1>
+  <h2>How the system extends as you add modules</h2>
+  <div class="ecosystem">
+    <div class="ecosystem-grid">
+      <div class="core">
+        <img src="lucid_studio.svg" alt="">
+        <div class="lbl">CORE</div>
+      </div>
+      <div class="modules-row">
+        <div class="connector"></div>
+        <div class="module-tile">
+          <img src="lucid_git.svg" alt="">
+          <div class="name">GIT</div>
+        </div>
+        <div class="module-tile placeholder">
+          <div class="ph-icon"></div>
+          <div class="name">FUTURE</div>
+        </div>
+        <div class="module-tile placeholder">
+          <div class="ph-icon"></div>
+          <div class="name">FUTURE</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="footer-note">LUCID brand system — v0.1 concept</div>
+
+</body>
+</html>

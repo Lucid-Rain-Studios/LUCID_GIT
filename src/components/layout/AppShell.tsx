@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
+import lucidGitIcon from '@/lib/icons/lucid_git.svg'
 import { ipc, OperationStep, FileStatus, DiffContent, Lock, AppNotification } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useOperationStore } from '@/stores/operationStore'
@@ -51,6 +52,73 @@ function isRecognizedAsset(filePath: string): boolean {
   return ASSET_EXTS.has(ext)
 }
 
+function RecentRepoRow({ name, path, divider, onOpen, onRemove }: {
+  name: string; path: string; divider: boolean
+  onOpen: () => void; onRemove: () => void
+}) {
+  const [hover, setHover] = React.useState(false)
+  const [removeHover, setRemoveHover] = React.useState(false)
+  return (
+    <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: 'flex', alignItems: 'center',
+        borderBottom: divider ? '1px solid #1a2030' : 'none',
+        background: hover ? 'rgba(255,255,255,0.03)' : 'transparent',
+        transition: 'background 0.1s',
+      }}
+    >
+      <button
+        onClick={onOpen}
+        style={{
+          flex: 1, display: 'flex', alignItems: 'center', gap: 10,
+          height: 38, paddingLeft: 12, paddingRight: 8,
+          background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left',
+        }}
+      >
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, color: hover ? '#e8622f' : '#344057' }}>
+          <path d="M1.5 4.5h4.2l1 1.5h7.8v7.5h-13V4.5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+        </svg>
+        <span style={{
+          fontFamily: "'IBM Plex Sans', system-ui", fontSize: 13,
+          color: hover ? '#c8cdd8' : '#7b8499', fontWeight: 500,
+          letterSpacing: '-0.01em', flex: 1,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {name}
+        </span>
+        <span style={{
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+          color: '#2e3a50',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          maxWidth: 160, flexShrink: 0,
+        }} title={path}>
+          {path.replace(/\\/g, '/')}
+        </span>
+      </button>
+      <button
+        onClick={e => { e.stopPropagation(); onRemove() }}
+        onMouseEnter={() => setRemoveHover(true)}
+        onMouseLeave={() => setRemoveHover(false)}
+        title="Remove from recent"
+        style={{
+          width: 30, height: 38, flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'transparent', border: 'none', cursor: 'pointer',
+          color: removeHover ? '#e84040' : '#283047',
+          transition: 'color 0.1s',
+          opacity: hover || removeHover ? 1 : 0,
+        }}
+      >
+        <svg width="9" height="9" viewBox="0 0 10 10" fill="none">
+          <path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      </button>
+    </div>
+  )
+}
+
 function WelcomeBtn({ onClick, label, accent }: { onClick: () => void; label: string; accent?: boolean }) {
   return (
     <button
@@ -92,7 +160,7 @@ export function AppShell() {
   const [diffLoading,  setDiffLoading]  = useState(false)
   const [blameTarget,  setBlameTarget]  = useState<{ filePath: string; repoPath: string } | null>(null)
 
-  const { repoPath, fileStatus, isLoading, error, openRepo, refreshStatus, silentRefresh } = useRepoStore()
+  const { repoPath, fileStatus, isLoading, error, openRepo, refreshStatus, silentRefresh, recentRepos, removeRecentRepo } = useRepoStore()
   const { updateStep } = useOperationStore()
   const { loadAccounts, accounts, currentAccountId } = useAuthStore()
   const { locks, loadLocks, setLocks } = useLockStore()
@@ -103,6 +171,7 @@ export function AppShell() {
   const currentUserName = accounts.find(a => a.userId === currentAccountId)?.login ?? null
 
   // ── Drag resize — file panel ───────────────────────────────────────────────
+  const filePanelRef   = useRef<HTMLDivElement>(null)
   const fileDragging   = useRef(false)
   const fileDragStartX = useRef(0)
   const fileDragStartW = useRef(0)
@@ -113,14 +182,17 @@ export function AppShell() {
     fileDragStartW.current = filePanelWidth
     document.body.style.cursor     = 'col-resize'
     document.body.style.userSelect = 'none'
+    const clamp = (v: number) => Math.max(180, Math.min(520, v))
     const onMove = (ev: MouseEvent) => {
       if (!fileDragging.current) return
-      setFilePanelWidth(Math.max(180, Math.min(520, fileDragStartW.current + (ev.clientX - fileDragStartX.current))))
+      const w = clamp(fileDragStartW.current + (ev.clientX - fileDragStartX.current))
+      if (filePanelRef.current) filePanelRef.current.style.width = `${w}px`
     }
-    const onUp = () => {
+    const onUp = (ev: MouseEvent) => {
       fileDragging.current = false
       document.body.style.cursor     = ''
       document.body.style.userSelect = ''
+      setFilePanelWidth(clamp(fileDragStartW.current + (ev.clientX - fileDragStartX.current)))
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
@@ -238,7 +310,7 @@ export function AppShell() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#0d0f15', color: '#e2e6f4', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--lg-bg-primary)', color: 'var(--lg-text-primary)', overflow: 'hidden' }}>
       <TopBar
         onOpen={handleOpenRepo}
         onClone={() => setShowCloneDialog(true)}
@@ -257,6 +329,8 @@ export function AppShell() {
           onWidthChange={setSidebarWidth}
           repoPath={repoPath}
           onOpenTerminal={() => { if (repoPath) ipc.openTerminal(repoPath) }}
+          onOpenRepo={handleOpenRepo}
+          onOpenExplorer={() => { if (repoPath) ipc.showInFolder(repoPath) }}
         />
 
         <main style={{ display: 'flex', flex: 1, overflow: 'hidden', flexDirection: 'column' }}>
@@ -265,7 +339,7 @@ export function AppShell() {
             <SettingsPage repoPath={repoPath} />
           ) : !repoPath ? (
             /* ── Welcome ── */
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden', background: '#0d0f15' }}>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden', background: 'var(--lg-bg-primary)' }}>
               {/* Radial ambient glow */}
               <div style={{
                 position: 'absolute', width: 560, height: 560, borderRadius: '50%',
@@ -277,21 +351,13 @@ export function AppShell() {
               <div style={{ textAlign: 'center', position: 'relative', zIndex: 1, animation: 'fade-in 0.4s ease both' }}>
                 {/* Logo cluster */}
                 <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 18 }}>
-                  <div style={{
-                    width: 52, height: 52, borderRadius: 14,
-                    background: 'linear-gradient(145deg, #1c2235, #131720)',
-                    border: '1px solid #1d2535',
-                    boxShadow: '0 0 0 1px rgba(232,98,47,0.1), 0 8px 24px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}>
-                    <svg width="26" height="26" viewBox="0 0 16 16" fill="none">
-                      <circle cx="8" cy="3" r="2.2" fill="#e8622f" />
-                      <circle cx="3" cy="12.5" r="1.6" fill="#e8622f" fillOpacity="0.55" />
-                      <circle cx="13" cy="12.5" r="1.6" fill="#e8622f" fillOpacity="0.55" />
-                      <line x1="8" y1="5.2" x2="3.6" y2="11" stroke="#e8622f" strokeWidth="1.1" strokeOpacity="0.45" strokeLinecap="round" />
-                      <line x1="8" y1="5.2" x2="12.4" y2="11" stroke="#e8622f" strokeWidth="1.1" strokeOpacity="0.45" strokeLinecap="round" />
-                    </svg>
-                  </div>
+                  <img
+                    src={lucidGitIcon}
+                    alt="Lucid Git"
+                    width={72}
+                    height={72}
+                    style={{ display: 'block', borderRadius: 18, boxShadow: '0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05)' }}
+                  />
                 </div>
                 <div style={{
                   fontFamily: "'JetBrains Mono', monospace", fontSize: 28, fontWeight: 700,
@@ -318,6 +384,37 @@ export function AppShell() {
                 <div style={{ marginTop: 20, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#253040', letterSpacing: '0.05em' }}>
                   Press ⌘K to open command palette
                 </div>
+
+                {recentRepos.length > 0 && (
+                  <div style={{ marginTop: 32, width: 340, textAlign: 'left' }}>
+                    <div style={{
+                      fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, fontWeight: 700,
+                      color: '#344057', letterSpacing: '0.1em', textTransform: 'uppercase',
+                      marginBottom: 6,
+                    }}>
+                      Recent
+                    </div>
+                    <div style={{
+                      background: 'rgba(255,255,255,0.02)',
+                      border: '1px solid #1a2030',
+                      borderRadius: 8, overflow: 'hidden',
+                    }}>
+                      {recentRepos.map((path, i) => {
+                        const name = path.replace(/\\/g, '/').split('/').pop() ?? path
+                        return (
+                          <RecentRepoRow
+                            key={path}
+                            name={name}
+                            path={path}
+                            divider={i < recentRepos.length - 1}
+                            onOpen={() => openRepo(path)}
+                            onRemove={() => removeRecentRepo(path)}
+                          />
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           ) : leftTab === 'overview' ? (
@@ -363,7 +460,7 @@ export function AppShell() {
             /* ── Split: left panel | diff ── */
             <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
               {/* Left panel */}
-              <div style={{ width: filePanelWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <div ref={filePanelRef} style={{ width: filePanelWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 {leftTab === 'changes' ? (
                   <>
                     <FileTree
@@ -397,7 +494,7 @@ export function AppShell() {
               <DragHandle onMouseDown={onFileDragStart} />
 
               {/* Right: diff or blame */}
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#0d0f15' }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--lg-bg-primary)' }}>
                 {blameTarget ? (
                   <DependencyBlamePanel
                     repoPath={blameTarget.repoPath}

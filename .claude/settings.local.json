@@ -31,7 +31,10 @@
       "Bash(node -e \"require\\('d3-force'\\); console.log\\('d3-force ok'\\)\")",
       "Bash(node -e \"require\\('better-sqlite3'\\); console.log\\('sqlite ok'\\)\")",
       "Bash(node -e \"const e = require\\('electron'\\); console.log\\('electron bin:', e\\)\")",
-      "Bash(npx @electron/rebuild -f -w better-sqlite3)"
+      "Bash(npx @electron/rebuild -f -w better-sqlite3)",
+      "Bash(git lfs *)",
+      "Bash(git config *)",
+      "Bash(npx electron-builder *)"
     ]
   }
 }

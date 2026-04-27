@@ -89,6 +89,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GIT_COMMIT_FILES, repoPath, hash),
   checkout: (repoPath: string, branch: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_CHECKOUT, repoPath, branch),
+  branchDiff: (repoPath: string, base: string, compare: string) =>
+    ipcRenderer.invoke(CHANNELS.GIT_BRANCH_DIFF, repoPath, base, compare),
   mergePreview: (repoPath: string, targetBranch: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_MERGE_PREVIEW, repoPath, targetBranch),
   merge: (repoPath: string, targetBranch: string) =>

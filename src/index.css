@@ -5,9 +5,9 @@
 @layer base {
   :root {
     /* ── Lucid Git core tokens ─────────────────────────────────────────── */
-    --lg-bg-primary:     #0d0f15;
-    --lg-bg-secondary:   #131720;
-    --lg-bg-elevated:    #1b2030;
+    --lg-bg-primary:     #0b0d13;
+    --lg-bg-secondary:   #10131c;
+    --lg-bg-elevated:    #161a27;
     --lg-accent:         #e8622f;
     --lg-accent-hover:   #f0714d;
     --lg-accent-blue:    #4a9eff;
@@ -20,6 +20,17 @@
     --lg-lock-other:     #e85d2f;
     --lg-border:         #1d2535;
     --lg-border-strong:  #283047;
+
+    --lg-accent-rgb:     232, 98, 47;
+
+    /* ── Typography tokens ─────────────────────────────────────────────── */
+    --lg-font-ui:        'IBM Plex Sans', system-ui, sans-serif;
+    --lg-font-mono:      'JetBrains Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace;
+    --lg-font-size:      13px;
+    --lg-font-weight:    400;
+    --lg-radius:         6px;
+    --lg-row-height:     32px;
+    --lg-row-pad:        6px;
 
     /* ── Depth & elevation ─────────────────────────────────────────────── */
     --lg-shadow-sm:   0 1px 2px rgba(0,0,0,0.4), 0 1px 4px rgba(0,0,0,0.2);
@@ -71,7 +82,9 @@ body,
 body {
   background-color: var(--lg-bg-primary);
   color: var(--lg-text-primary);
-  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  font-family: var(--lg-font-ui);
+  font-size: var(--lg-font-size);
+  font-weight: var(--lg-font-weight);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   user-select: none;
@@ -109,7 +122,7 @@ button {
 code,
 pre,
 .font-mono {
-  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  font-family: var(--lg-font-mono);
 }
 
 /* ── Focus rings ────────────────────────────────────────────────────────── */

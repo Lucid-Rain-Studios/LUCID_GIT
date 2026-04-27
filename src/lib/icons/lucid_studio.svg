@@ -1,0 +1,107 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Outer rounded square background -->
+    <linearGradient id="bgStudio" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0d1220"/>
+      <stop offset="100%" stop-color="#070a13"/>
+    </linearGradient>
+
+    <!-- Prism main faces -->
+    <linearGradient id="prismFront" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#e8f1ff"/>
+      <stop offset="55%" stop-color="#9fc0f0"/>
+      <stop offset="100%" stop-color="#3d6aa8"/>
+    </linearGradient>
+    <linearGradient id="prismLeft" x1="0" y1="0" x2="1" y2="0.6">
+      <stop offset="0%" stop-color="#3a5d92"/>
+      <stop offset="100%" stop-color="#1c2d4a"/>
+    </linearGradient>
+    <linearGradient id="prismRight" x1="0" y1="0" x2="1" y2="0.6">
+      <stop offset="0%" stop-color="#c5d8f2"/>
+      <stop offset="100%" stop-color="#5e85b8"/>
+    </linearGradient>
+    <linearGradient id="prismTop" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#a8c4e8"/>
+    </linearGradient>
+
+    <!-- Inner glow / refraction -->
+    <radialGradient id="coreGlow" cx="0.5" cy="0.45" r="0.5">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="40%" stop-color="#a8d0ff" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#3d6aa8" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Outer ambient glow -->
+    <radialGradient id="ambient" cx="0.5" cy="0.5" r="0.6">
+      <stop offset="0%" stop-color="#5a8fd4" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#5a8fd4" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Refraction beam -->
+    <linearGradient id="beam" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#e0ecff" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+
+    <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Rounded background -->
+  <rect width="1024" height="1024" rx="224" ry="224" fill="url(#bgStudio)"/>
+
+  <!-- Subtle radial ambient -->
+  <rect width="1024" height="1024" rx="224" ry="224" fill="url(#ambient)"/>
+
+  <!-- Faint grid for "studio precision" feel -->
+  <g stroke="#1a2540" stroke-width="1" opacity="0.5">
+    <line x1="0" y1="256" x2="1024" y2="256"/>
+    <line x1="0" y1="512" x2="1024" y2="512"/>
+    <line x1="0" y1="768" x2="1024" y2="768"/>
+    <line x1="256" y1="0" x2="256" y2="1024"/>
+    <line x1="512" y1="0" x2="512" y2="1024"/>
+    <line x1="768" y1="0" x2="768" y2="1024"/>
+  </g>
+
+  <!-- Horizontal refraction beam passing through prism -->
+  <rect x="80" y="500" width="864" height="24" fill="url(#beam)" opacity="0.7"/>
+
+  <!-- The prism — isometric octahedron / cut-gem -->
+  <!-- Coordinates centered around (512, 512) -->
+  <g filter="url(#softGlow)">
+    <!-- Right face (lighter) -->
+    <polygon points="512,232 512,792 740,580 740,420" fill="url(#prismRight)"/>
+    <!-- Left face (darker) -->
+    <polygon points="512,232 512,792 284,580 284,420" fill="url(#prismLeft)"/>
+    <!-- Top facet -->
+    <polygon points="512,232 740,420 512,460 284,420" fill="url(#prismTop)"/>
+    <!-- Bottom facet -->
+    <polygon points="512,792 740,580 512,540 284,580" fill="url(#prismFront)" opacity="0.85"/>
+    <!-- Center band highlight -->
+    <polygon points="284,420 512,460 740,420 740,580 512,540 284,580" fill="url(#prismFront)" opacity="0.55"/>
+  </g>
+
+  <!-- Edge strokes for definition -->
+  <g fill="none" stroke="#c8dcf5" stroke-width="2.5" stroke-linejoin="round" opacity="0.85">
+    <polygon points="512,232 740,420 740,580 512,792 284,580 284,420"/>
+    <line x1="284" y1="420" x2="512" y2="460"/>
+    <line x1="740" y1="420" x2="512" y2="460"/>
+    <line x1="284" y1="580" x2="512" y2="540"/>
+    <line x1="740" y1="580" x2="512" y2="540"/>
+    <line x1="512" y1="232" x2="512" y2="460"/>
+    <line x1="512" y1="540" x2="512" y2="792"/>
+  </g>
+
+  <!-- Inner core glow -->
+  <ellipse cx="512" cy="500" rx="140" ry="80" fill="url(#coreGlow)"/>
+
+  <!-- Tiny specular highlight -->
+  <ellipse cx="455" cy="380" rx="22" ry="8" fill="#ffffff" opacity="0.9" transform="rotate(-25 455 380)"/>
+</svg>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { ipc, SyncStatus, UpdateInfo } from '@/ipc'
+import lucidGitIcon from '@/lib/icons/lucid_git.svg'
+import { ipc, SyncStatus, UpdateInfo, PresenceEntry } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useOperationStore } from '@/stores/operationStore'
@@ -13,9 +14,11 @@ interface TopBarProps {
   onSynced?:    () => void
 }
 
+const CONFIRM_BRANCH_KEY = 'lucid-git:confirm-branch-switch'
+
 export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps) {
-  const { repoPath, currentBranch, refreshStatus } = useRepoStore()
-  const { accounts, currentAccountId, permissionErrors, fetchRepoPermission } = useAuthStore()
+  const { repoPath, currentBranch, refreshStatus, recentRepos, openRepo, removeRecentRepo, clearRepo, branches, checkout, fileStatus } = useRepoStore()
+  const { accounts, currentAccountId, permissionErrors, fetchRepoPermission, viewAsRole, setViewAsRole } = useAuthStore()
   const opRun   = useOperationStore(s => s.run)
   const pushErr = useErrorStore(s => s.pushRaw)
 
@@ -24,6 +27,25 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
   const [syncErr, setSyncErr] = useState<string | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [repoMenuOpen, setRepoMenuOpen] = useState(false)
+  const [branchMenuOpen, setBranchMenuOpen] = useState(false)
+  const [branchConfirm, setBranchConfirm] = useState<string | null>(null)
+
+  const localBranches  = branches.filter(b => !b.isRemote)
+  const remoteBranches = branches.filter(b => b.isRemote)
+
+  const hasChanges = fileStatus.length > 0
+
+  const handleBranchSelect = (branchName: string) => {
+    setBranchMenuOpen(false)
+    if (branchName === currentBranch) return
+    // Always show dialog when there are uncommitted changes (stash choice)
+    // Otherwise respect "don't ask again" preference
+    if (!hasChanges && localStorage.getItem(CONFIRM_BRANCH_KEY) === 'false') {
+      checkout(branchName)
+    } else {
+      setBranchConfirm(branchName)
+    }
+  }
 
   const [updateInfo, setUpdateInfo]       = useState<UpdateInfo | null>(null)
   const [updateReady, setUpdateReady]     = useState(false)
@@ -86,7 +108,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
         : { label: 'Fetch', action: doFetch, color: '#7b8499', colorDim: 'transparent', count: 0, icon: <FetchIcon /> }
 
   const hasPending = primary.count > 0 && !syncErr
-  const borderColor = syncErr ? '#e84040' : hasPending ? primary.color : '#1d2535'
+  const borderColor = syncErr ? '#e84040' : hasPending ? primary.color : 'var(--lg-border)'
   const bgColor     = syncErr ? 'rgba(232,64,64,0.1)' : hasPending ? primary.colorDim : 'transparent'
   const labelColor  = syncErr ? '#e84040' : hasPending ? primary.color : '#7b8499'
 
@@ -95,9 +117,23 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
     : null
 
   const currentAccount = accounts.find(a => a.userId === currentAccountId)
-  const initials = currentAccount
-    ? currentAccount.login.slice(0, 2).toUpperCase()
-    : null
+
+  const [branchPresence, setBranchPresence] = useState<Record<string, PresenceEntry[]>>({})
+
+  useEffect(() => {
+    if (!branchMenuOpen || !repoPath) return
+    ipc.presenceRead(repoPath).then(file => {
+      const cutoff = Date.now() - 30 * 60 * 1000
+      const byBranch: Record<string, PresenceEntry[]> = {}
+      Object.values(file.entries)
+        .filter(e => new Date(e.lastSeen).getTime() > cutoff)
+        .forEach(e => {
+          if (!byBranch[e.branch]) byBranch[e.branch] = []
+          byBranch[e.branch].push(e)
+        })
+      setBranchPresence(byBranch)
+    }).catch(() => {})
+  }, [branchMenuOpen, repoPath])
 
   const showBanner = !updateDismissed && (updateReady || !!updateInfo)
   const [permWarnDismissed, setPermWarnDismissed] = useState(false)
@@ -129,6 +165,33 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
               ✕
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Role preview banner — visible whenever an admin is viewing as another role */}
+      {viewAsRole && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 16px', height: 28, fontSize: 11,
+          fontFamily: "'JetBrains Mono', monospace", flexShrink: 0,
+          background: 'rgba(167,139,250,0.08)',
+          borderBottom: '1px solid rgba(167,139,250,0.2)',
+          color: '#a78bfa',
+        }}>
+          <span>
+            Previewing as {viewAsRole === 'write' ? 'Collaborator' : 'Read-only'} — admin features are restricted.
+          </span>
+          <button
+            onClick={() => setViewAsRole(null)}
+            style={{
+              padding: '0 8px', height: 20, borderRadius: 4,
+              border: '1px solid currentColor', background: 'transparent',
+              color: 'inherit', fontFamily: 'inherit', fontSize: 10,
+              fontWeight: 600, cursor: 'pointer',
+            }}
+          >
+            Switch back to Admin
+          </button>
         </div>
       )}
 
@@ -172,28 +235,35 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
         </div>
       )}
 
+      {/* Branch switch confirmation */}
+      {branchConfirm && (
+        <BranchConfirmDialog
+          from={currentBranch}
+          to={branchConfirm}
+          hasChanges={hasChanges}
+          onConfirm={async ({ dontAskAgain, stash }) => {
+            if (dontAskAgain) localStorage.setItem(CONFIRM_BRANCH_KEY, 'false')
+            if (stash && repoPath) await ipc.stashSave(repoPath, `Auto-stash before switching to ${branchConfirm}`)
+            checkout(branchConfirm)
+            setBranchConfirm(null)
+          }}
+          onCancel={() => setBranchConfirm(null)}
+        />
+      )}
+
       {/* Main bar */}
       <header style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         height: 46, paddingLeft: 14, paddingRight: 12,
-        background: 'linear-gradient(180deg, #181d2c 0%, #131720 100%)',
-        borderBottom: '1px solid #1a2030',
+        background: 'var(--lg-bg-secondary)',
+        borderBottom: '1px solid var(--lg-border)',
         boxShadow: '0 1px 0 rgba(0,0,0,0.3), 0 4px 20px rgba(0,0,0,0.2)',
         flexShrink: 0, gap: 12, zIndex: 20, position: 'relative',
       }}>
         {/* Left: wordmark + repo + branch */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-          {/* Logo mark + wordmark */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-            <LucidLogoMark />
-            <span style={{
-              fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700,
-              color: '#e8622f', letterSpacing: '0.1em', userSelect: 'none',
-              textShadow: '0 0 18px rgba(232,98,47,0.35)',
-            }}>
-              LUCID GIT
-            </span>
-          </div>
+          {/* Logo mark + wordmark — clickable when repo is open to return to welcome */}
+          <LogoWordmark hasRepo={!!repoPath} onClick={() => repoPath && clearRepo()} />
 
           {repoName ? (
             <>
@@ -215,8 +285,8 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
                     />
                     <div style={{
                       position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 100,
-                      background: 'linear-gradient(180deg, #161c2b 0%, #131720 100%)',
-                      border: '1px solid #1d2535',
+                      background: 'var(--lg-bg-elevated)',
+                      border: '1px solid var(--lg-border)',
                       borderRadius: 8,
                       boxShadow: '0 12px 36px rgba(0,0,0,0.6), 0 2px 8px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04)',
                       minWidth: 210, overflow: 'hidden',
@@ -225,7 +295,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
                       {/* Current repo path label */}
                       <div style={{
                         padding: '9px 12px 7px',
-                        borderBottom: '1px solid #18202e',
+                        borderBottom: '1px solid var(--lg-border)',
                       }}>
                         <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, fontWeight: 700, color: '#344057', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 3 }}>
                           Current repository
@@ -254,24 +324,113 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
                           onClick={() => { setRepoMenuOpen(false); onClone() }}
                         />
                       </div>
+
+                      {/* Recent repos (excluding current) */}
+                      {recentRepos.filter(p => p !== repoPath).length > 0 && (
+                        <>
+                          <div style={{ height: 1, background: 'var(--lg-border)' }} />
+                          <div style={{ padding: '7px 12px 3px', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, fontWeight: 700, color: '#344057', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+                            Recent
+                          </div>
+                          <div style={{ padding: '2px 0 4px' }}>
+                            {recentRepos.filter(p => p !== repoPath).map(p => {
+                              const name = p.replace(/\\/g, '/').split('/').pop() ?? p
+                              return (
+                                <RepoMenuItemWithRemove
+                                  key={p}
+                                  name={name}
+                                  path={p}
+                                  onClick={() => { setRepoMenuOpen(false); openRepo(p) }}
+                                  onRemove={() => removeRecentRepo(p)}
+                                />
+                              )
+                            })}
+                          </div>
+                        </>
+                      )}
                     </div>
                   </>
                 )}
               </div>
 
               {currentBranch && (
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 5,
-                  background: 'rgba(74,158,255,0.1)', border: '1px solid rgba(74,158,255,0.2)',
-                  borderRadius: 20, paddingLeft: 8, paddingRight: 10, height: 22, flexShrink: 0,
-                }}>
-                  <BranchIconSm />
-                  <span style={{
-                    fontFamily: "'JetBrains Mono', monospace", fontSize: 11.5,
-                    color: '#4a9eff', fontWeight: 500, letterSpacing: '0.01em',
-                  }}>
-                    {currentBranch}
-                  </span>
+                <div style={{ position: 'relative', flexShrink: 0 }}>
+                  <button
+                    onClick={() => setBranchMenuOpen(o => !o)}
+                    title="Switch branch"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 5,
+                      background: branchMenuOpen ? 'rgba(74,158,255,0.18)' : 'rgba(74,158,255,0.1)',
+                      border: '1px solid rgba(74,158,255,0.2)',
+                      borderRadius: 20, paddingLeft: 8, paddingRight: 7, height: 22,
+                      cursor: 'pointer', transition: 'background 0.12s',
+                    }}
+                    onMouseEnter={e => { if (!branchMenuOpen) e.currentTarget.style.background = 'rgba(74,158,255,0.16)' }}
+                    onMouseLeave={e => { if (!branchMenuOpen) e.currentTarget.style.background = 'rgba(74,158,255,0.1)' }}
+                  >
+                    <BranchIconSm />
+                    <span style={{
+                      fontFamily: "'JetBrains Mono', monospace", fontSize: 11.5,
+                      color: '#4a9eff', fontWeight: 500, letterSpacing: '0.01em',
+                    }}>
+                      {currentBranch}
+                    </span>
+                    <svg width="9" height="9" viewBox="0 0 10 10" fill="none" style={{ color: '#4a9eff', opacity: 0.7, transform: branchMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
+                      <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </button>
+
+                  {branchMenuOpen && (
+                    <>
+                      <div onClick={() => setBranchMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 90 }} />
+                      <div style={{
+                        position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 100,
+                        background: 'var(--lg-bg-elevated)', border: '1px solid var(--lg-border)',
+                        borderRadius: 8, boxShadow: '0 12px 36px rgba(0,0,0,0.6), 0 2px 8px rgba(0,0,0,0.4)',
+                        minWidth: 240, maxHeight: 380, overflowY: 'auto',
+                        animation: 'slide-down 0.14s ease both',
+                      }}>
+                        {/* Local */}
+                        <BranchGroupHeader label="Local" />
+                        {localBranches.length === 0 ? (
+                          <div style={{ padding: '6px 12px 8px', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#4a566a' }}>No local branches</div>
+                        ) : (
+                          <div style={{ padding: '2px 0 4px' }}>
+                            {localBranches.map(b => (
+                              <BranchMenuItem
+                                key={b.name}
+                                name={b.displayName}
+                                current={b.current}
+                                presence={branchPresence[b.displayName] ?? []}
+                                onClick={() => handleBranchSelect(b.displayName)}
+                              />
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Remote (origin) */}
+                        {remoteBranches.length > 0 && (
+                          <>
+                            <div style={{ height: 1, background: 'var(--lg-border)' }} />
+                            <BranchGroupHeader label="Origin" />
+                            <div style={{ padding: '2px 0 6px' }}>
+                              {remoteBranches.map(b => (
+                                <BranchMenuItem
+                                  key={b.name}
+                                  name={b.displayName}
+                                  current={false}
+                                  remote
+                                  hasLocal={b.hasLocal}
+                                  presence={branchPresence[b.displayName] ?? []}
+                                  onClick={() => handleBranchSelect(b.displayName)}
+                                />
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </>
@@ -348,7 +507,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
                   <div onClick={() => setMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 90 }} />
                   <div style={{
                     position: 'absolute', top: 34, right: 0, zIndex: 100,
-                    background: '#161c2b', border: '1px solid #1d2535',
+                    background: 'var(--lg-bg-elevated)', border: '1px solid var(--lg-border)',
                     borderRadius: 7, boxShadow: '0 8px 28px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.35)',
                     minWidth: 152, overflow: 'hidden',
                     animation: 'slide-down 0.14s ease both',
@@ -364,7 +523,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
                           display: 'flex', alignItems: 'center', gap: 8,
                           width: '100%', height: 34, paddingLeft: 12, paddingRight: 12,
                           background: 'transparent', border: 'none',
-                          borderBottom: i < arr.length - 1 ? '1px solid #1a2030' : 'none',
+                          borderBottom: i < arr.length - 1 ? '1px solid var(--lg-border)' : 'none',
                           color: item.count > 0 ? item.color : '#7b8499',
                           fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5, cursor: 'pointer',
                         }}
@@ -389,7 +548,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
             </div>
           )}
 
-          {repoPath && <div style={{ width: 1, height: 18, background: '#1d2535', flexShrink: 0, marginLeft: 2, marginRight: 2 }} />}
+          {repoPath && <div style={{ width: 1, height: 18, background: 'var(--lg-border)', flexShrink: 0, marginLeft: 2, marginRight: 2 }} />}
 
           {/* Notification bell */}
           <NotificationBell />
@@ -406,14 +565,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
               onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.borderColor = '#1d2535' }}
               onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent' }}
             >
-              <span style={{
-                width: 24, height: 24, borderRadius: '50%',
-                background: 'linear-gradient(135deg, #4a9eff, #a27ef0)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontFamily: "'JetBrains Mono', monospace", fontSize: 9, fontWeight: 700, color: '#fff',
-                flexShrink: 0,
-                boxShadow: '0 0 0 1.5px rgba(74,158,255,0.3)',
-              }}>{initials}</span>
+              <AccountAvatar login={currentAccount.login} avatarUrl={currentAccount.avatarUrl} size={24} />
               <span style={{
                 fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5, color: '#7b8499',
                 fontWeight: 500, letterSpacing: '-0.01em',
@@ -437,17 +589,294 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
   )
 }
 
-// ── Logo mark ─────────────────────────────────────────────────────────────────
+// ── Avatar helpers ─────────────────────────────────────────────────────────────
 
-function LucidLogoMark() {
+function avatarColor(login: string): string {
+  const palette = ['#4d9dff', '#a27ef0', '#2ec573', '#f5a832', '#e8622f', '#1abc9c', '#e91e63']
+  let h = 0
+  for (let i = 0; i < login.length; i++) h = (h * 31 + login.charCodeAt(i)) >>> 0
+  return palette[h % palette.length]
+}
+
+function AccountAvatar({ login, avatarUrl, size = 24 }: { login: string; avatarUrl: string; size?: number }) {
+  const [failed, setFailed] = React.useState(false)
+  if (failed) {
+    return (
+      <span style={{
+        width: size, height: size, borderRadius: '50%',
+        background: 'linear-gradient(135deg, #4a9eff, #a27ef0)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontFamily: "'JetBrains Mono', monospace", fontSize: Math.round(size * 0.37), fontWeight: 700, color: '#fff',
+        flexShrink: 0, boxShadow: '0 0 0 1.5px rgba(74,158,255,0.3)',
+      }}>
+        {login.slice(0, 2).toUpperCase()}
+      </span>
+    )
+  }
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-      <circle cx="8" cy="3" r="2.2" fill="#e8622f" />
-      <circle cx="3" cy="12.5" r="1.6" fill="#e8622f" fillOpacity="0.55" />
-      <circle cx="13" cy="12.5" r="1.6" fill="#e8622f" fillOpacity="0.55" />
-      <line x1="8" y1="5.2" x2="3.6" y2="11" stroke="#e8622f" strokeWidth="1.1" strokeOpacity="0.4" strokeLinecap="round" />
-      <line x1="8" y1="5.2" x2="12.4" y2="11" stroke="#e8622f" strokeWidth="1.1" strokeOpacity="0.4" strokeLinecap="round" />
-    </svg>
+    <img
+      src={avatarUrl}
+      alt={login}
+      onError={() => setFailed(true)}
+      style={{
+        width: size, height: size, borderRadius: '50%', objectFit: 'cover',
+        flexShrink: 0, boxShadow: '0 0 0 1.5px rgba(74,158,255,0.3)',
+      }}
+    />
+  )
+}
+
+function GhAvatar({ login, size = 20 }: { login: string; size?: number }) {
+  const [failed, setFailed] = React.useState(false)
+  const col = avatarColor(login)
+  if (failed) {
+    return (
+      <div
+        title={login}
+        style={{
+          width: size, height: size, borderRadius: '50%', flexShrink: 0,
+          background: `linear-gradient(135deg, ${col}88, ${col}44)`,
+          border: `1.5px solid var(--lg-bg-elevated)`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontFamily: "'JetBrains Mono', monospace", fontSize: Math.round(size * 0.38), fontWeight: 700, color: col,
+        }}
+      >
+        {login.slice(0, 2).toUpperCase()}
+      </div>
+    )
+  }
+  return (
+    <img
+      src={`https://github.com/${login}.png?size=${size * 2}`}
+      alt={login}
+      title={login}
+      onError={() => setFailed(true)}
+      style={{
+        width: size, height: size, borderRadius: '50%', objectFit: 'cover',
+        flexShrink: 0, border: '1.5px solid var(--lg-bg-elevated)',
+      }}
+    />
+  )
+}
+
+// ── Logo + wordmark (clickable when repo open) ────────────────────────────────
+
+function LogoWordmark({ hasRepo, onClick }: { hasRepo: boolean; onClick: () => void }) {
+  const [hover, setHover] = React.useState(false)
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => hasRepo && setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      title={hasRepo ? 'Close repository' : undefined}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
+        cursor: hasRepo ? 'pointer' : 'default',
+        borderRadius: 6, padding: '2px 5px', margin: '-2px -5px',
+        background: hover ? 'rgba(255,255,255,0.04)' : 'transparent',
+        transition: 'background 0.12s',
+      }}
+    >
+      <img
+        src={lucidGitIcon}
+        alt="Lucid Git"
+        width={22}
+        height={22}
+        style={{ display: 'block', flexShrink: 0, opacity: hover ? 1 : 0.85, transition: 'opacity 0.12s' }}
+      />
+    </div>
+  )
+}
+
+// ── Branch group header ────────────────────────────────────────────────────────
+
+function BranchGroupHeader({ label }: { label: string }) {
+  return (
+    <div style={{ padding: '7px 12px 3px', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, fontWeight: 700, color: '#344057', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+      {label}
+    </div>
+  )
+}
+
+// ── Branch menu item ───────────────────────────────────────────────────────────
+
+function BranchMenuItem({ name, current, remote, hasLocal, presence = [], onClick }: {
+  name: string
+  current: boolean
+  remote?: boolean
+  hasLocal?: boolean
+  presence?: PresenceEntry[]
+  onClick: () => void
+}) {
+  const [hover, setHover] = React.useState(false)
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      disabled={current}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        width: '100%', height: 32, paddingLeft: 12, paddingRight: 10,
+        background: current ? 'rgba(74,158,255,0.08)' : hover ? 'rgba(255,255,255,0.05)' : 'transparent',
+        border: 'none',
+        color: current ? '#4a9eff' : hover ? '#e2e6f4' : '#7b8499',
+        cursor: current ? 'default' : 'pointer',
+        transition: 'background 0.1s, color 0.1s',
+      }}
+    >
+      <span style={{ flexShrink: 0, display: 'flex', color: current ? '#4a9eff' : remote ? '#4a566a' : hover ? '#7b8499' : '#344057' }}>
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+          <circle cx="5" cy="4" r="1.6" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="5" cy="12" r="1.6" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="11" cy="5" r="1.6" stroke="currentColor" strokeWidth="1.3" />
+          <path d="M5 5.6V10.4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+          <path d="M5 5.6C5 7.2 11 7.2 11 5.6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        </svg>
+      </span>
+      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11.5, flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {name}
+      </span>
+
+      {/* Teammate avatars on this branch */}
+      {presence.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', marginRight: 2 }}>
+          {presence.slice(0, 4).map((p, i) => (
+            <div key={p.login} style={{ marginLeft: i === 0 ? 0 : -5, zIndex: presence.length - i }}>
+              <GhAvatar login={p.login} size={16} />
+            </div>
+          ))}
+          {presence.length > 4 && (
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: '#4a566a', marginLeft: 3 }}>
+              +{presence.length - 4}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Remote-only indicator */}
+      {remote && !hasLocal && (
+        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: '#344057', flexShrink: 0 }}>
+          remote
+        </span>
+      )}
+
+      {current && (
+        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0 }}>
+          <path d="M2 6l3 3 5-5" stroke="#4a9eff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+    </button>
+  )
+}
+
+// ── Branch confirmation dialog ─────────────────────────────────────────────────
+
+function BranchConfirmDialog({ from, to, hasChanges, onConfirm, onCancel }: {
+  from: string; to: string; hasChanges: boolean
+  onConfirm: (opts: { dontAskAgain: boolean; stash: boolean }) => void
+  onCancel: () => void
+}) {
+  const [dontAsk, setDontAsk] = React.useState(false)
+  const [stash, setStash]     = React.useState(false)
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 500,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(2px)',
+    }}>
+      <div style={{
+        background: 'var(--lg-bg-elevated)',
+        border: '1px solid var(--lg-border)',
+        borderRadius: 10,
+        boxShadow: '0 20px 60px rgba(0,0,0,0.7), 0 4px 16px rgba(0,0,0,0.4)',
+        width: 380, padding: '20px 20px 16px',
+        animation: 'slide-down 0.16s ease both',
+      }}>
+        <div style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 14, fontWeight: 600, color: 'var(--lg-text-primary)', marginBottom: 10 }}>
+          Switch Branch
+        </div>
+        <div style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 12.5, color: 'var(--lg-text-secondary)', lineHeight: 1.5, marginBottom: 16 }}>
+          Switch from{' '}
+          <code style={{ fontFamily: 'var(--lg-font-mono)', fontSize: 11.5, background: 'rgba(255,255,255,0.06)', borderRadius: 4, padding: '1px 5px', color: '#f5a832' }}>{from}</code>
+          {' '}to{' '}
+          <code style={{ fontFamily: 'var(--lg-font-mono)', fontSize: 11.5, background: 'rgba(255,255,255,0.06)', borderRadius: 4, padding: '1px 5px', color: '#4a9eff' }}>{to}</code>
+          ?
+        </div>
+
+        {/* Stash choice — only when uncommitted changes exist */}
+        {hasChanges && (
+          <div style={{ marginBottom: 16, borderRadius: 7, border: '1px solid var(--lg-border)', overflow: 'hidden' }}>
+            {[
+              { value: false, label: 'Bring changes over', desc: 'Carry uncommitted changes to the new branch' },
+              { value: true,  label: 'Stash changes',      desc: 'Save changes to the stash, switch cleanly' },
+            ].map(opt => (
+              <label
+                key={String(opt.value)}
+                style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px',
+                  cursor: 'pointer', borderBottom: opt.value ? 'none' : '1px solid var(--lg-border)',
+                  background: stash === opt.value ? 'rgba(74,158,255,0.06)' : 'transparent',
+                  transition: 'background 0.1s',
+                }}
+              >
+                <input
+                  type="radio"
+                  checked={stash === opt.value}
+                  onChange={() => setStash(opt.value)}
+                  style={{ accentColor: 'var(--lg-accent)', marginTop: 2, cursor: 'pointer' }}
+                />
+                <div>
+                  <div style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 12.5, color: 'var(--lg-text-primary)', fontWeight: 500 }}>{opt.label}</div>
+                  <div style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 11, color: 'var(--lg-text-secondary)', marginTop: 2 }}>{opt.desc}</div>
+                </div>
+              </label>
+            ))}
+          </div>
+        )}
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18, cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={dontAsk}
+            onChange={e => setDontAsk(e.target.checked)}
+            style={{ accentColor: 'var(--lg-accent)', width: 13, height: 13, cursor: 'pointer' }}
+          />
+          <span style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 11.5, color: 'var(--lg-text-secondary)' }}>
+            Don't ask again
+          </span>
+        </label>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button
+            onClick={onCancel}
+            style={{
+              height: 30, paddingLeft: 14, paddingRight: 14, borderRadius: 5,
+              background: 'transparent', border: '1px solid var(--lg-border)',
+              color: 'var(--lg-text-secondary)', fontFamily: 'var(--lg-font-ui)', fontSize: 12.5,
+              cursor: 'pointer',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onConfirm({ dontAskAgain: dontAsk, stash })}
+            style={{
+              height: 30, paddingLeft: 14, paddingRight: 14, borderRadius: 5,
+              background: 'rgba(74,158,255,0.15)', border: '1px solid rgba(74,158,255,0.4)',
+              color: '#4a9eff', fontFamily: 'var(--lg-font-ui)', fontSize: 12.5, fontWeight: 600,
+              cursor: 'pointer',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(74,158,255,0.25)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'rgba(74,158,255,0.15)'}
+          >
+            Switch Branch
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -540,21 +969,71 @@ function RepoMenuItem({
   )
 }
 
+function RepoMenuItemWithRemove({
+  name, path, onClick, onRemove,
+}: {
+  name: string; path: string; onClick: () => void; onRemove: () => void
+}) {
+  const [hover, setHover] = React.useState(false)
+  const [removeHover, setRemoveHover] = React.useState(false)
+  return (
+    <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{ display: 'flex', alignItems: 'center', background: hover ? 'rgba(255,255,255,0.05)' : 'transparent', transition: 'background 0.1s' }}
+    >
+      <button
+        onClick={onClick}
+        style={{
+          flex: 1, display: 'flex', alignItems: 'center', gap: 9,
+          height: 34, paddingLeft: 12, paddingRight: 6,
+          background: 'transparent', border: 'none', cursor: 'pointer',
+        }}
+      >
+        <span style={{ flexShrink: 0, display: 'flex', color: hover ? '#e8622f' : '#4a566a', transition: 'color 0.1s' }}>
+          <FolderOpenIcon />
+        </span>
+        <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5, flex: 1, textAlign: 'left', letterSpacing: '-0.01em', color: hover ? '#e2e6f4' : '#7b8499', transition: 'color 0.1s', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {name}
+        </span>
+      </button>
+      <button
+        onClick={e => { e.stopPropagation(); onRemove() }}
+        onMouseEnter={() => setRemoveHover(true)}
+        onMouseLeave={() => setRemoveHover(false)}
+        title="Remove from recent"
+        style={{
+          width: 28, height: 34, flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'transparent', border: 'none', cursor: 'pointer',
+          color: removeHover ? '#e84040' : '#344057',
+          transition: 'color 0.1s',
+          opacity: hover || removeHover ? 1 : 0,
+        }}
+      >
+        <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
+          <path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      </button>
+    </div>
+  )
+}
+
 // ── Small inline components ─────────────────────────────────────────────────────
 
 function TopBtn({ onClick, label, accent }: { onClick: () => void; label: string; accent?: boolean }) {
   return (
     <button onClick={onClick} style={{
       height: 28, paddingLeft: 13, paddingRight: 13, borderRadius: 5,
-      background: accent ? '#e8622f' : 'rgba(255,255,255,0.04)',
-      border: `1px solid ${accent ? '#e8622f' : '#1d2535'}`,
-      color: accent ? '#fff' : '#7b8499',
-      fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5,
+      background: accent ? 'var(--lg-accent)' : 'rgba(255,255,255,0.04)',
+      border: `1px solid ${accent ? 'var(--lg-accent)' : 'var(--lg-border)'}`,
+      color: accent ? '#fff' : 'var(--lg-text-secondary)',
+      fontFamily: 'var(--lg-font-ui)', fontSize: 12.5,
       fontWeight: accent ? 600 : 400, cursor: 'pointer',
-      boxShadow: accent ? '0 0 12px rgba(232,98,47,0.3)' : 'none',
+      boxShadow: accent ? '0 0 12px rgba(var(--lg-accent-rgb), 0.3)' : 'none',
     }}
-    onMouseEnter={e => { if (accent) { e.currentTarget.style.background = '#f0714d'; e.currentTarget.style.boxShadow = '0 0 18px rgba(232,98,47,0.45)' } else { e.currentTarget.style.background = 'rgba(255,255,255,0.07)' } }}
-    onMouseLeave={e => { if (accent) { e.currentTarget.style.background = '#e8622f'; e.currentTarget.style.boxShadow = '0 0 12px rgba(232,98,47,0.3)' } else { e.currentTarget.style.background = 'rgba(255,255,255,0.04)' } }}
+    onMouseEnter={e => { if (accent) { e.currentTarget.style.background = 'var(--lg-accent-hover)'; e.currentTarget.style.boxShadow = '0 0 18px rgba(var(--lg-accent-rgb), 0.45)' } else { e.currentTarget.style.background = 'rgba(255,255,255,0.07)' } }}
+    onMouseLeave={e => { if (accent) { e.currentTarget.style.background = 'var(--lg-accent)'; e.currentTarget.style.boxShadow = '0 0 12px rgba(var(--lg-accent-rgb), 0.3)' } else { e.currentTarget.style.background = 'rgba(255,255,255,0.04)' } }}
     >{label}</button>
   )
 }

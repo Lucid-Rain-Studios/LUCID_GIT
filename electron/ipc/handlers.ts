@@ -502,6 +502,10 @@ export function registerHandlers(): void {
     gitService.branchActivity(repoPath)
   )
 
+  ipcMain.handle(CHANNELS.GIT_BRANCH_DIFF, (_event, repoPath: string, base: string, compare: string) =>
+    gitService.branchDiff(repoPath, base, compare)
+  )
+
   ipcMain.handle(CHANNELS.GIT_DEFAULT_BRANCH, (_event, repoPath: string) =>
     gitService.defaultBranch(repoPath)
   )
@@ -521,8 +525,10 @@ export function registerHandlers(): void {
 
   // ── File-system watcher ───────────────────────────────────────────────────
   ipcMain.handle(CHANNELS.GIT_WATCH_STATUS, (event, repoPath: string) => {
+    const sender = event.sender
     watcherService.watch(repoPath, () => {
-      const win = BrowserWindow.fromWebContents(event.sender)
+      if (sender.isDestroyed()) return
+      const win = BrowserWindow.fromWebContents(sender)
       if (win && !win.isDestroyed()) {
         win.webContents.send(CHANNELS.EVT_STATUS_CHANGED)
       }

@@ -3,6 +3,7 @@ import path from 'path'
 import { autoUpdater } from 'electron-updater'
 import { registerHandlers } from './ipc/handlers'
 import { CHANNELS } from './ipc/channels'
+import { watcherService } from './services/WatcherService'
 
 const isDev = !app.isPackaged
 
@@ -57,12 +58,17 @@ function fmt(bytes: number): string {
 // ── Window ────────────────────────────────────────────────────────────────────
 
 function createWindow(): BrowserWindow {
+  const iconPath = isDev
+    ? path.join(process.cwd(), 'assets/icon.png')
+    : path.join(process.resourcesPath, 'assets/icon.png')
+
   const win = new BrowserWindow({
     width:     1400,
     height:    900,
     minWidth:  900,
     minHeight: 600,
     backgroundColor: '#0d0f14',
+    icon:      iconPath,
     show: false,
     webPreferences: {
       preload:          path.join(__dirname, 'preload.js'),
@@ -95,6 +101,7 @@ function createWindow(): BrowserWindow {
   mainWin = win
 
   win.on('closed', () => {
+    watcherService.unwatchAll()
     mainWin = null
   })
 
@@ -123,8 +130,8 @@ function registerUpdaterHandlers() {
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 
-// Suppress "Autofill.enable wasn't found" DevTools noise.
-// Electron's embedded Chromium doesn't expose the Autofill CDP domain.
+// Suppress GPU shader cache noise (cache_util_win.cc errors) and Autofill CDP noise.
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
 app.commandLine.appendSwitch('disable-features', 'AutofillServerCommunication')
 
 app.whenReady().then(() => {

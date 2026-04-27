@@ -119,6 +119,7 @@ export const CHANNELS = {
   GIT_RESET_TO:        'git:reset-to',
   GIT_FILE_LOG:        'git:file-log',
   GIT_BRANCH_ACTIVITY: 'git:branch-activity',
+  GIT_BRANCH_DIFF:     'git:branch-diff',
   GIT_DEFAULT_BRANCH:  'git:default-branch',
 
   // Asset diff previews (Phase 17)

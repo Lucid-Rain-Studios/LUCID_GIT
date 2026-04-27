@@ -30,6 +30,43 @@ function initials(name: string): string {
   return name.slice(0, 2).toUpperCase()
 }
 
+// ── GitHub avatar with initials fallback ──────────────────────────────────────
+
+function UserAvatar({ login, size, color, stale }: { login: string; size: number; color: string; stale?: boolean }) {
+  const [failed, setFailed] = React.useState(false)
+  const ini = initials(login)
+  const fontSize = Math.round(size * 0.38)
+  const shared: React.CSSProperties = {
+    width: size, height: size, borderRadius: '50%', flexShrink: 0,
+    opacity: stale ? 0.5 : 1,
+  }
+  if (failed) {
+    return (
+      <div style={{
+        ...shared,
+        background: `linear-gradient(135deg, ${color}88, ${color}44)`,
+        border: `1.5px solid ${stale ? '#252d42' : color + '55'}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontFamily: "'JetBrains Mono', monospace", fontSize, fontWeight: 700, color,
+      }}>
+        {ini}
+      </div>
+    )
+  }
+  return (
+    <img
+      src={`https://github.com/${login}.png?size=${size * 2}`}
+      alt={login}
+      onError={() => setFailed(true)}
+      style={{
+        ...shared,
+        objectFit: 'cover',
+        border: `1.5px solid ${stale ? '#252d42' : color + '55'}`,
+      }}
+    />
+  )
+}
+
 // ── Section header ─────────────────────────────────────────────────────────────
 
 function SectionHeader({ label, count }: { label: string; count?: number }) {
@@ -59,7 +96,6 @@ function SectionHeader({ label, count }: { label: string; count?: number }) {
 function PresenceCard({ entry, isMe }: { entry: PresenceEntry; isMe: boolean }) {
   const [expanded, setExpanded] = useState(false)
   const col = authorColor(entry.name || entry.login)
-  const ini = initials(entry.name || entry.login)
   const isStale = Date.now() - new Date(entry.lastSeen).getTime() > 10 * 60 * 1000
 
   return (
@@ -77,14 +113,7 @@ function PresenceCard({ entry, isMe }: { entry: PresenceEntry; isMe: boolean }) 
         onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
       >
         {/* Avatar */}
-        <div style={{
-          width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-          background: `linear-gradient(135deg, ${col}88, ${col}44)`,
-          border: `1.5px solid ${isStale ? '#252d42' : col + '55'}`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 700, color: col,
-          opacity: isStale ? 0.5 : 1,
-        }}>{ini}</div>
+        <UserAvatar login={entry.login} size={28} color={col} stale={isStale} />
 
         {/* Info */}
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -192,6 +221,7 @@ function ActivityRow({ item }: { item: BranchActivity }) {
       onMouseEnter={e => (e.currentTarget.style.background = '#1e2436')}
       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
     >
+      {/* git commit author — no GitHub login available, use colored initials */}
       <div style={{
         width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
         background: `linear-gradient(135deg, ${col}88, ${col}44)`,

@@ -12,25 +12,32 @@ interface SidebarProps {
   onWidthChange: (w: number) => void
   repoPath: string | null
   onOpenTerminal: () => void
+  onOpenRepo: () => void
+  onOpenExplorer: () => void
 }
 
-const NAV_GROUPS: { label: string; items: { id: TabId; label: string; Icon: React.FC<{ size?: number }> }[] }[] = [
+type NavItem = { id: TabId; label: string; Icon: React.FC<{ size?: number }>; repoOnly?: boolean }
+type NavGroup = { label: string; items: NavItem[]; repoOnly?: boolean }
+
+const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Workspace',
+    repoOnly: true,
     items: [
-      { id: 'overview', label: 'Overview',  Icon: OverviewIcon },
-      { id: 'changes',  label: 'Changes',   Icon: ChangesIcon },
-      { id: 'content',  label: 'Browser',   Icon: ContentIcon },
-      { id: 'map',      label: 'File Map',  Icon: MapIcon },
-      { id: 'history',  label: 'History',   Icon: HistoryIcon },
-      { id: 'tools',    label: 'Tools',     Icon: ToolsIcon },
-      { id: 'presence', label: 'Team',      Icon: PresenceIcon },
+      { id: 'overview', label: 'Overview', Icon: OverviewIcon },
+      { id: 'changes',  label: 'Changes',  Icon: ChangesIcon },
+      { id: 'content',  label: 'Browser',  Icon: ContentIcon },
+      { id: 'map',      label: 'File Map', Icon: MapIcon },
+      { id: 'history',  label: 'History',  Icon: HistoryIcon },
+      { id: 'tools',    label: 'Tools',    Icon: ToolsIcon },
+      { id: 'presence', label: 'Team',     Icon: PresenceIcon },
       { id: 'heatmap',  label: 'Heatmap',  Icon: HeatmapIcon },
       { id: 'forecast', label: 'Forecast', Icon: ForecastIcon },
     ],
   },
   {
     label: 'Manage',
+    repoOnly: true,
     items: [
       { id: 'branches', label: 'Branches', Icon: BranchNavIcon },
       { id: 'lfs',      label: 'LFS',      Icon: LFSIcon },
@@ -40,19 +47,20 @@ const NAV_GROUPS: { label: string; items: { id: TabId; label: string; Icon: Reac
   {
     label: 'Configure',
     items: [
-      { id: 'unreal',   label: 'Unreal',   Icon: UnrealIcon },
-      { id: 'hooks',    label: 'Hooks',    Icon: HooksIcon },
+      { id: 'unreal',   label: 'Unreal',   Icon: UnrealIcon,   repoOnly: true },
+      { id: 'hooks',    label: 'Hooks',    Icon: HooksIcon,    repoOnly: true },
       { id: 'settings', label: 'Settings', Icon: SettingsIcon },
     ],
   },
 ]
 
-export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthChange, repoPath, onOpenTerminal }: SidebarProps) {
+export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthChange, repoPath, onOpenTerminal, onOpenRepo, onOpenExplorer }: SidebarProps) {
   const { fileStatus } = useRepoStore()
   const stagedCount   = fileStatus.filter(f => f.staged).length
   const unstagedCount = fileStatus.filter(f => !f.staged).length
   const totalChanges  = stagedCount + unstagedCount
 
+  const asideRef   = useRef<HTMLElement>(null)
   const dragging   = useRef(false)
   const dragStartX = useRef(0)
   const dragStartW = useRef(0)
@@ -63,15 +71,17 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
     dragStartW.current = width
     document.body.style.cursor     = 'col-resize'
     document.body.style.userSelect = 'none'
-
+    const clamp = (v: number) => Math.max(140, Math.min(320, v))
     const onMove = (ev: MouseEvent) => {
       if (!dragging.current) return
-      onWidthChange(Math.max(140, Math.min(320, dragStartW.current + (ev.clientX - dragStartX.current))))
+      const w = clamp(dragStartW.current + (ev.clientX - dragStartX.current))
+      if (asideRef.current) asideRef.current.style.width = `${w}px`
     }
-    const onUp = () => {
+    const onUp = (ev: MouseEvent) => {
       dragging.current = false
       document.body.style.cursor     = ''
       document.body.style.userSelect = ''
+      onWidthChange(clamp(dragStartW.current + (ev.clientX - dragStartX.current)))
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
@@ -84,10 +94,11 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
   return (
     <div style={{ display: 'flex', flexShrink: 0 }}>
       <aside
+        ref={asideRef as React.RefObject<HTMLDivElement>}
         style={{
           display: 'flex', flexDirection: 'column',
-          background: '#0c0f17',
-          borderRight: '1px solid #1a2030',
+          background: 'var(--lg-bg-secondary)',
+          borderRight: '1px solid var(--lg-border)',
           width: panelWidth,
           transition: collapsed ? 'width 0.2s ease' : 'none',
           overflow: 'hidden', flexShrink: 0,
@@ -101,11 +112,12 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             height: 36,
             background: 'transparent', border: 'none',
-            borderBottom: '1px solid #1a2030',
-            color: '#3d4a60', cursor: 'pointer', flexShrink: 0,
+            borderBottom: '1px solid var(--lg-border)',
+            color: 'var(--lg-text-secondary)', cursor: 'pointer', flexShrink: 0,
+            opacity: 0.5,
           }}
-          onMouseEnter={e => (e.currentTarget.style.color = '#7b8499')}
-          onMouseLeave={e => (e.currentTarget.style.color = '#3d4a60')}
+          onMouseEnter={e => { e.currentTarget.style.opacity = '1' }}
+          onMouseLeave={e => { e.currentTarget.style.opacity = '0.5' }}
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
             {collapsed
@@ -117,39 +129,46 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
 
         {/* Nav */}
         <nav style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', paddingTop: 6, paddingBottom: 6 }}>
-          {NAV_GROUPS.map((group, gi) => (
-            <div key={group.label}>
-              {/* Group separator line (between groups) */}
-              {gi > 0 && !collapsed && (
-                <div style={{ height: 1, background: '#1a2030', margin: '6px 10px' }} />
-              )}
-              {/* Group label */}
-              {!collapsed && (
-                <div style={{
-                  paddingLeft: 13, paddingTop: 8, paddingBottom: 3,
-                  fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
-                  fontSize: 10, fontWeight: 700,
-                  color: '#344057', letterSpacing: '0.12em', textTransform: 'uppercase',
-                  userSelect: 'none',
-                }}>
-                  {group.label}
+          {NAV_GROUPS
+            .filter(g => !g.repoOnly || !!repoPath)
+            .map((group, gi) => {
+              const visibleItems = group.items.filter(i => !i.repoOnly || !!repoPath)
+              if (!visibleItems.length) return null
+              return (
+                <div key={group.label}>
+                  {gi > 0 && !collapsed && (
+                    <div style={{ height: 1, background: 'var(--lg-border)', margin: '6px 10px' }} />
+                  )}
+                  {!collapsed && (
+                    <div style={{
+                      paddingLeft: 13, paddingTop: 8, paddingBottom: 3,
+                      fontFamily: 'var(--lg-font-ui)',
+                      fontSize: 10, fontWeight: 700,
+                      color: 'var(--lg-text-secondary)', letterSpacing: '0.12em', textTransform: 'uppercase',
+                      opacity: 0.6, userSelect: 'none',
+                    }}>
+                      {group.label}
+                    </div>
+                  )}
+                  {visibleItems.map(item => (
+                    <NavItem
+                      key={item.id}
+                      item={item}
+                      isActive={active === item.id}
+                      collapsed={collapsed}
+                      badge={item.id === 'changes' ? totalChanges : 0}
+                      onClick={() => onChange(item.id)}
+                    />
+                  ))}
                 </div>
-              )}
-              {group.items.map(item => (
-                <NavItem
-                  key={item.id}
-                  item={item}
-                  isActive={active === item.id}
-                  collapsed={collapsed}
-                  badge={item.id === 'changes' ? totalChanges : 0}
-                  onClick={() => onChange(item.id)}
-                />
-              ))}
-            </div>
-          ))}
+              )
+            })
+          }
         </nav>
 
-        {/* Terminal button */}
+        {/* Bottom actions */}
+        <OpenRepoBtn collapsed={collapsed} onClick={onOpenRepo} />
+        <ExplorerBtn collapsed={collapsed} repoPath={repoPath} onClick={onOpenExplorer} />
         <TerminalBtn collapsed={collapsed} repoPath={repoPath} onClick={onOpenTerminal} />
       </aside>
 
@@ -190,24 +209,24 @@ function NavItem({
       style={{
         display: 'flex', alignItems: 'center',
         gap: collapsed ? 0 : 8,
-        width: '100%', height: 32,
+        width: '100%', height: 'var(--lg-row-height)',
         paddingLeft: collapsed ? 0 : 11,
         paddingRight: collapsed ? 0 : 9,
         justifyContent: collapsed ? 'center' : 'flex-start',
         background: isActive
-          ? 'linear-gradient(90deg, rgba(232,98,47,0.16) 0%, rgba(232,98,47,0.05) 100%)'
+          ? 'linear-gradient(90deg, rgba(var(--lg-accent-rgb), 0.16) 0%, rgba(var(--lg-accent-rgb), 0.05) 100%)'
           : hover ? 'rgba(255,255,255,0.04)' : 'transparent',
         border: 'none',
-        borderLeft: `2.5px solid ${isActive ? '#e8622f' : 'transparent'}`,
-        color: isActive ? '#e2e6f4' : hover ? '#c8cdd8' : '#7b8499',
-        cursor: 'pointer', transition: 'all 0.12s ease',
+        borderLeft: `2.5px solid ${isActive ? 'var(--lg-accent)' : 'transparent'}`,
+        color: isActive ? 'var(--lg-text-primary)' : hover ? 'var(--lg-text-primary)' : 'var(--lg-text-secondary)',
+        cursor: 'pointer', transition: 'background 0.12s ease, color 0.12s ease',
         position: 'relative', flexShrink: 0,
       }}
     >
       <span style={{
-        color: isActive ? '#e8622f' : hover ? '#a0a8b8' : 'currentColor',
+        color: isActive ? 'var(--lg-accent)' : hover ? 'var(--lg-text-primary)' : 'currentColor',
         flexShrink: 0, display: 'flex',
-        filter: isActive ? 'drop-shadow(0 0 5px rgba(232,98,47,0.5))' : 'none',
+        filter: isActive ? 'drop-shadow(0 0 5px rgba(var(--lg-accent-rgb), 0.5))' : 'none',
         transition: 'filter 0.12s ease, color 0.12s ease',
       }}>
         <Icon size={15} />
@@ -215,7 +234,7 @@ function NavItem({
 
       {!collapsed && (
         <span style={{
-          fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+          fontFamily: 'var(--lg-font-ui)',
           fontSize: 12.5, fontWeight: isActive ? 600 : 400,
           flex: 1, textAlign: 'left', whiteSpace: 'nowrap',
           letterSpacing: '-0.01em',
@@ -226,14 +245,14 @@ function NavItem({
 
       {!collapsed && badge > 0 && (
         <span style={{
-          background: isActive ? 'rgba(232,98,47,0.25)' : 'rgba(255,255,255,0.07)',
-          color: isActive ? '#e8622f' : '#7b8499',
-          fontFamily: "'JetBrains Mono', monospace",
+          background: isActive ? 'rgba(var(--lg-accent-rgb), 0.25)' : 'rgba(255,255,255,0.07)',
+          color: isActive ? 'var(--lg-accent)' : 'var(--lg-text-secondary)',
+          fontFamily: 'var(--lg-font-mono)',
           fontSize: 10, fontWeight: 700,
           borderRadius: 9, minWidth: 17, height: 17,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           paddingLeft: 4, paddingRight: 4,
-          border: isActive ? '1px solid rgba(232,98,47,0.3)' : '1px solid rgba(255,255,255,0.07)',
+          border: isActive ? '1px solid rgba(var(--lg-accent-rgb), 0.3)' : '1px solid rgba(255,255,255,0.07)',
         }}>
           {badge}
         </span>
@@ -243,10 +262,83 @@ function NavItem({
         <span style={{
           position: 'absolute', top: 5, right: 5,
           width: 6, height: 6, borderRadius: '50%',
-          background: '#e8622f',
-          boxShadow: '0 0 6px rgba(232,98,47,0.7)',
-          border: '1.5px solid #0c0f17',
+          background: 'var(--lg-accent)',
+          boxShadow: '0 0 6px rgba(var(--lg-accent-rgb), 0.7)',
+          border: '1.5px solid var(--lg-bg-secondary)',
         }} />
+      )}
+    </button>
+  )
+}
+
+// ── Open repo button ────────────────────────────────────────────────────────────
+
+function OpenRepoBtn({ collapsed, onClick }: { collapsed: boolean; onClick: () => void }) {
+  const [hover, setHover] = React.useState(false)
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      title={collapsed ? 'Open Repository' : undefined}
+      style={{
+        display: 'flex', alignItems: 'center', gap: collapsed ? 0 : 8,
+        width: '100%', height: 'var(--lg-row-height)',
+        paddingLeft: collapsed ? 0 : 11, paddingRight: collapsed ? 0 : 9,
+        justifyContent: collapsed ? 'center' : 'flex-start',
+        background: hover ? 'rgba(255,255,255,0.04)' : 'transparent',
+        border: 'none',
+        color: hover ? 'var(--lg-accent)' : 'var(--lg-text-secondary)',
+        cursor: 'pointer',
+        transition: 'all 0.12s ease', flexShrink: 0,
+      }}
+    >
+      <span style={{ color: 'currentColor', flexShrink: 0, display: 'flex' }}>
+        <FolderOpenSidebarIcon size={15} />
+      </span>
+      {!collapsed && (
+        <span style={{
+          fontFamily: 'var(--lg-font-ui)',
+          fontSize: 12.5, flex: 1, textAlign: 'left', whiteSpace: 'nowrap',
+          letterSpacing: '-0.01em',
+        }}>Open Repository</span>
+      )}
+    </button>
+  )
+}
+
+// ── Explorer button ─────────────────────────────────────────────────────────────
+
+function ExplorerBtn({ collapsed, repoPath, onClick }: { collapsed: boolean; repoPath: string | null; onClick: () => void }) {
+  const [hover, setHover] = React.useState(false)
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      title={collapsed ? 'View in Explorer' : undefined}
+      style={{
+        display: 'flex', alignItems: 'center', gap: collapsed ? 0 : 8,
+        width: '100%', height: 'var(--lg-row-height)',
+        paddingLeft: collapsed ? 0 : 11, paddingRight: collapsed ? 0 : 9,
+        justifyContent: collapsed ? 'center' : 'flex-start',
+        background: hover ? 'rgba(255,255,255,0.04)' : 'transparent',
+        border: 'none',
+        color: hover ? 'var(--lg-text-primary)' : 'var(--lg-text-secondary)',
+        cursor: repoPath ? 'pointer' : 'default',
+        opacity: repoPath ? 1 : 0.35,
+        transition: 'all 0.12s ease', flexShrink: 0,
+      }}
+    >
+      <span style={{ color: 'currentColor', flexShrink: 0, display: 'flex' }}>
+        <ExplorerIcon size={15} />
+      </span>
+      {!collapsed && (
+        <span style={{
+          fontFamily: 'var(--lg-font-ui)',
+          fontSize: 12.5, flex: 1, textAlign: 'left', whiteSpace: 'nowrap',
+          letterSpacing: '-0.01em',
+        }}>View in Explorer</span>
       )}
     </button>
   )
@@ -264,12 +356,12 @@ function TerminalBtn({ collapsed, repoPath, onClick }: { collapsed: boolean; rep
       title={collapsed ? 'Open Terminal' : undefined}
       style={{
         display: 'flex', alignItems: 'center', gap: collapsed ? 0 : 8,
-        width: '100%', height: 34,
+        width: '100%', height: 'var(--lg-row-height)',
         paddingLeft: collapsed ? 0 : 11, paddingRight: collapsed ? 0 : 9,
         justifyContent: collapsed ? 'center' : 'flex-start',
         background: hover ? 'rgba(255,255,255,0.04)' : 'transparent',
-        border: 'none', borderTop: '1px solid #1a2030',
-        color: hover ? '#a0a8b8' : '#3d4a60',
+        border: 'none', borderTop: '1px solid var(--lg-border)',
+        color: hover ? 'var(--lg-text-primary)' : 'var(--lg-text-secondary)',
         cursor: repoPath ? 'pointer' : 'default',
         opacity: repoPath ? 1 : 0.35,
         transition: 'all 0.12s ease', flexShrink: 0,
@@ -280,7 +372,7 @@ function TerminalBtn({ collapsed, repoPath, onClick }: { collapsed: boolean; rep
       </span>
       {!collapsed && (
         <span style={{
-          fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+          fontFamily: 'var(--lg-font-ui)',
           fontSize: 12.5, flex: 1, textAlign: 'left', whiteSpace: 'nowrap',
           letterSpacing: '-0.01em',
         }}>Terminal</span>
@@ -391,6 +483,13 @@ function PresenceIcon({ size = 16 }) {
   </svg>
 }
 
+function FolderOpenSidebarIcon({ size = 16 }) {
+  return <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+    <path d="M1.5 4.5h4.2l1 1.5h7.8v7.5h-13V4.5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+    <path d="M1.5 6.5h13" stroke="currentColor" strokeWidth="0.9" strokeOpacity="0.5" />
+  </svg>
+}
+
 function TerminalIcon({ size = 16 }) {
   return <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
     <rect x="1.5" y="2.5" width="13" height="11" rx="2" stroke="currentColor" strokeWidth="1.3" />
@@ -413,6 +512,15 @@ function HeatmapIcon({ size = 16 }) {
     <rect x="9"   y="1.5" width="5.5" height="5.5" rx="1" stroke="currentColor" strokeWidth="1.3" fill="currentColor" fillOpacity="0.15" />
     <rect x="1.5" y="9"   width="5.5" height="5.5" rx="1" stroke="currentColor" strokeWidth="1.3" fill="currentColor" fillOpacity="0.55" />
     <rect x="9"   y="9"   width="5.5" height="5.5" rx="1" stroke="currentColor" strokeWidth="1.3" fill="currentColor" fillOpacity="0.75" />
+  </svg>
+}
+
+function ExplorerIcon({ size = 16 }) {
+  return <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+    <rect x="1.5" y="3.5" width="13" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
+    <path d="M1.5 6.5h13" stroke="currentColor" strokeWidth="0.9" strokeOpacity="0.5" />
+    <path d="M4 5h.5M6 5h.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    <path d="M5.5 9.5L7 11l3.5-3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 }
 

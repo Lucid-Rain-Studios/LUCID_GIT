@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { exec, execSafe, execWithProgress, ProgressCallback } from '../util/dugite-exec'
 import { parseGitLog, GIT_LOG_FORMAT } from '../util/git-log-parse'
-import { FileStatus, BranchInfo, CommitEntry, DiffContent, StashEntry, ContributorInfo, ConflictPreviewFile, SyncStatus, LFSStatus, SizeBreakdown, CleanupResult, BranchActivity } from '../types'
+import { FileStatus, BranchInfo, CommitEntry, DiffContent, StashEntry, ContributorInfo, ConflictPreviewFile, SyncStatus, LFSStatus, SizeBreakdown, CleanupResult, BranchActivity, BranchDiffSummary, BranchDiffFile } from '../types'
 
 // ── Diff helpers ──────────────────────────────────────────────────────────────
 
@@ -318,6 +318,51 @@ class GitService {
         const [ref, author, email, date, ...msg] = line.split('\t')
         return { ref: ref.trim(), author: author.trim(), email: email.trim(), date: date.trim(), message: msg.join('\t').trim() }
       })
+  }
+
+  /** Diff summary between two branches: commits ahead/behind + changed files with line counts. */
+  async branchDiff(repoPath: string, base: string, compare: string): Promise<BranchDiffSummary> {
+    const [aheadR, behindR, numstatR, namestatR] = await Promise.all([
+      execSafe(['log', '--format=%H\t%s\t%an\t%ai', `${base}..${compare}`], repoPath),
+      execSafe(['log', '--format=%H\t%s\t%an\t%ai', `${compare}..${base}`], repoPath),
+      execSafe(['diff', '--numstat', `${base}...${compare}`], repoPath),
+      execSafe(['diff', '--name-status', `${base}...${compare}`], repoPath),
+    ])
+
+    const parseLog = (out: string) =>
+      out.trim().split('\n').filter(Boolean).map(line => {
+        const [hash, subject, author, date] = line.split('\t')
+        return { hash: hash?.trim() ?? '', message: subject?.trim() ?? '', author: author?.trim() ?? '', date: date?.trim() ?? '' }
+      })
+
+    const statusMap = new Map<string, string>()
+    namestatR.stdout.trim().split('\n').filter(Boolean).forEach(line => {
+      const parts = line.split('\t')
+      // R100\told\tnew  or  M\tpath
+      const status = parts[0]?.charAt(0) ?? 'M'
+      const path   = parts.length >= 3 ? parts[2] : parts[1]
+      if (path) statusMap.set(path.trim(), status)
+    })
+
+    let totalAdditions = 0
+    let totalDeletions = 0
+    const files = numstatR.stdout.trim().split('\n').filter(Boolean).map(line => {
+      const [addStr, delStr, ...pathParts] = line.split('\t')
+      const path      = pathParts.join('\t').trim()
+      const additions = parseInt(addStr ?? '0', 10) || 0
+      const deletions = parseInt(delStr ?? '0', 10) || 0
+      totalAdditions += additions
+      totalDeletions += deletions
+      return { path, status: (statusMap.get(path) ?? 'M') as BranchDiffFile['status'], additions, deletions }
+    })
+
+    return {
+      aheadCommits:  parseLog(aheadR.stdout),
+      behindCommits: parseLog(behindR.stdout),
+      files,
+      totalAdditions,
+      totalDeletions,
+    }
   }
 
   /** Restore a single file to its state at a given commit. */

@@ -22,6 +22,9 @@ interface AuthState {
   permissionFetching: Record<string, boolean>
   permissionErrors: Record<string, boolean>   // true = last fetch failed (fail-open)
 
+  // Admin role preview — lets admins temporarily view the app as another role
+  viewAsRole: RepoPermission | null            // null = use real permission
+
   loadAccounts:    () => Promise<void>
   startDeviceFlow: () => Promise<void>
   pollOnce:        () => Promise<boolean>
@@ -31,6 +34,7 @@ interface AuthState {
   clearError:      () => void
   fetchRepoPermission: (repoPath: string) => Promise<void>
   isAdmin: (repoPath: string) => boolean
+  setViewAsRole: (role: RepoPermission | null) => void
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -43,6 +47,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   repoPermissions:    {},
   permissionFetching: {},
   permissionErrors:   {},
+  viewAsRole:         null,
 
   loadAccounts: async () => {
     set({ isLoading: true, error: null })
@@ -116,6 +121,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   setCurrentAccount: (userId) => set({ currentAccountId: userId }),
   clearDeviceFlow:   ()       => set({ deviceFlow: null, error: null }),
   clearError:        ()       => set({ error: null }),
+  setViewAsRole:     (role)   => set({ viewAsRole: role }),
 
   fetchRepoPermission: async (repoPath: string) => {
     if (get().permissionFetching[repoPath]) return
@@ -137,5 +143,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  isAdmin: (repoPath: string) => get().repoPermissions[repoPath] === 'admin',
+  isAdmin: (repoPath: string) => {
+    if (get().repoPermissions[repoPath] !== 'admin') return false
+    const override = get().viewAsRole
+    return override === null || override === 'admin'
+  },
 }))

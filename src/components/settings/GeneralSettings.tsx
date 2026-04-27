@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react'
 import { ipc, AppSettings } from '@/ipc'
 import { cn } from '@/lib/utils'
 
+const CONFIRM_BRANCH_KEY = 'lucid-git:confirm-branch-switch'
+
 const DEFAULTS: AppSettings = {
   autoFetchIntervalMinutes: 15,
   defaultCloneDepth: 50,
@@ -47,10 +49,19 @@ export function GeneralSettings() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULTS)
   const [saved, setSaved]       = useState(false)
   const [saving, setSaving]     = useState(false)
+  const [confirmBranchSwitch, setConfirmBranchSwitch] = useState(
+    () => localStorage.getItem(CONFIRM_BRANCH_KEY) !== 'false'
+  )
 
   useEffect(() => {
     ipc.settingsGet().then(setSettings).catch(() => {})
   }, [])
+
+  const handleConfirmBranchToggle = (checked: boolean) => {
+    setConfirmBranchSwitch(checked)
+    if (checked) localStorage.removeItem(CONFIRM_BRANCH_KEY)
+    else localStorage.setItem(CONFIRM_BRANCH_KEY, 'false')
+  }
 
   const update = (patch: Partial<AppSettings>) => {
     setSettings(s => ({ ...s, ...patch }))
@@ -160,6 +171,17 @@ export function GeneralSettings() {
               </Row>
             </>
           )}
+        </Section>
+
+        <Section title="Workflow">
+          <Row label="Confirm before switching branches" hint="Show a confirmation dialog when switching branches from the top bar">
+            <input
+              type="checkbox"
+              checked={confirmBranchSwitch}
+              onChange={e => handleConfirmBranchToggle(e.target.checked)}
+              className="accent-lg-accent"
+            />
+          </Row>
         </Section>
 
         <div className="px-3 py-3 flex items-center gap-3">

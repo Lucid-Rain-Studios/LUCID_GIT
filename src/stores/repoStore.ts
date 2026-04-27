@@ -2,6 +2,17 @@ import { create } from 'zustand'
 import { FileStatus, BranchInfo } from '@/ipc'
 import { useOperationStore } from './operationStore'
 
+const RECENT_REPOS_KEY = 'lucid-git:recent-repos'
+const MAX_RECENT = 10
+
+function loadRecentRepos(): string[] {
+  try { return JSON.parse(localStorage.getItem(RECENT_REPOS_KEY) ?? '[]') } catch { return [] }
+}
+
+function saveRecentRepos(paths: string[]) {
+  localStorage.setItem(RECENT_REPOS_KEY, JSON.stringify(paths))
+}
+
 interface RepoState {
   repoPath: string | null
   currentBranch: string
@@ -9,6 +20,7 @@ interface RepoState {
   fileStatus: FileStatus[]
   isLoading: boolean
   error: string | null
+  recentRepos: string[]
 
   openRepo: (path: string) => Promise<void>
   refreshStatus: () => Promise<void>
@@ -17,6 +29,8 @@ interface RepoState {
   checkout: (branch: string) => Promise<void>
   clearRepo: () => void
   setError: (error: string | null) => void
+  addRecentRepo: (path: string) => void
+  removeRecentRepo: (path: string) => void
 }
 
 export const useRepoStore = create<RepoState>((set, get) => ({
@@ -26,6 +40,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
   fileStatus: [],
   isLoading: false,
   error: null,
+  recentRepos: loadRecentRepos(),
 
   openRepo: async (path: string) => {
     set({ isLoading: true, error: null })
@@ -44,6 +59,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
           branches: branches ?? [],
           error: null,
         })
+        get().addRecentRepo(path)
       })
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Failed to open repository' })
@@ -113,4 +129,16 @@ export const useRepoStore = create<RepoState>((set, get) => ({
   clearRepo: () => set({ repoPath: null, fileStatus: [], currentBranch: '', branches: [], error: null }),
 
   setError: (error) => set({ error }),
+
+  addRecentRepo: (path: string) => {
+    const next = [path, ...get().recentRepos.filter(p => p !== path)].slice(0, MAX_RECENT)
+    saveRecentRepos(next)
+    set({ recentRepos: next })
+  },
+
+  removeRecentRepo: (path: string) => {
+    const next = get().recentRepos.filter(p => p !== path)
+    saveRecentRepos(next)
+    set({ recentRepos: next })
+  },
 }))

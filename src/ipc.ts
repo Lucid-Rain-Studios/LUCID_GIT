@@ -263,7 +263,11 @@ export interface AppSettings {
   fontFamily: string
   fontSize: number
   uiDensity: 'compact' | 'normal' | 'relaxed'
-  theme: 'dark' | 'darker' | 'midnight'
+  theme: 'dark' | 'darker' | 'midnight' | 'dracula' | 'nord' | 'catppuccin' | 'tokyo-night' | 'ocean' | 'forest' | 'rose-pine' | 'monokai'
+  codeFontFamily?: string
+  fontWeight?: 300 | 400 | 500 | 600
+  borderRadius?: 'sharp' | 'default' | 'rounded' | 'pill'
+  accentColor?: string
 }
 
 export interface TeamConfig {
@@ -392,6 +396,30 @@ export interface DepRefResult {
   referencedBy: DepNodeInfo[]
 }
 
+// ── Branch diff ───────────────────────────────────────────────────────────────
+
+export interface BranchDiffCommit {
+  hash: string
+  message: string
+  author: string
+  date: string
+}
+
+export interface BranchDiffFile {
+  path: string
+  status: 'A' | 'M' | 'D' | 'R' | 'C'
+  additions: number
+  deletions: number
+}
+
+export interface BranchDiffSummary {
+  aheadCommits:  BranchDiffCommit[]
+  behindCommits: BranchDiffCommit[]
+  files:         BranchDiffFile[]
+  totalAdditions: number
+  totalDeletions: number
+}
+
 // ── Permissions (Phase 20) ────────────────────────────────────────────────────
 
 export type RepoPermission = 'admin' | 'write' | 'read'
@@ -448,6 +476,7 @@ export interface LucidGitAPI {
   stashApply:     (repoPath: string, ref: string) => Promise<void>
   stashDrop:      (repoPath: string, ref: string) => Promise<void>
   checkout: (repoPath: string, branch: string) => Promise<void>
+  branchDiff: (repoPath: string, base: string, compare: string) => Promise<BranchDiffSummary>
   mergePreview: (repoPath: string, targetBranch: string) => Promise<ConflictPreviewFile[]>
   merge: (repoPath: string, targetBranch: string) => Promise<void>
 

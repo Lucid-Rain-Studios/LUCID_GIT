@@ -2,6 +2,7 @@ node_modules/
 dist-electron/
 dist-renderer/
 dist/
+Build/
 *.log
 npm-debug.log*
 .DS_Store

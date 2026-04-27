@@ -20,9 +20,7 @@ const ALL_TABS: { id: SettingsTab; label: string; requiresRepo?: boolean; adminO
 
 export function SettingsPage({ repoPath }: SettingsPageProps) {
   const [tab, setTab] = useState<SettingsTab>('appearance')
-  const { repoPermissions } = useAuthStore()
-  const permission = repoPath ? (repoPermissions[repoPath] ?? 'write') : 'write'
-  const isAdmin = permission === 'admin'
+  const isAdmin = useAuthStore(s => s.isAdmin(repoPath ?? ''))
 
   const tabs = ALL_TABS.filter(t => !t.requiresRepo || !!repoPath)
   const activeTab = tabs.find(t => t.id === tab) ? tab : 'appearance'

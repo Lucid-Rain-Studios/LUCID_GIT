@@ -195,6 +195,28 @@ export interface BranchActivity {
   message: string
 }
 
+export interface BranchDiffCommit {
+  hash: string
+  message: string
+  author: string
+  date: string
+}
+
+export interface BranchDiffFile {
+  path: string
+  status: 'A' | 'M' | 'D' | 'R' | 'C'
+  additions: number
+  deletions: number
+}
+
+export interface BranchDiffSummary {
+  aheadCommits:  BranchDiffCommit[]
+  behindCommits: BranchDiffCommit[]
+  files:         BranchDiffFile[]
+  totalAdditions: number
+  totalDeletions: number
+}
+
 export interface PresenceEntry {
   login: string
   name: string
