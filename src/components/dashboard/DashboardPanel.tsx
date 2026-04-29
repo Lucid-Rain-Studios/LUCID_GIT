@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { useOperationStore } from '@/stores/operationStore'
 import { useLockStore } from '@/stores/lockStore'
 import { usePRStore } from '@/stores/prStore'
+import { ContributionGraph } from './ContributionGraph'
 
 const sessionFetchedRepos = new Set<string>()
 const sessionRemoteUrls   = new Map<string, string | null>()
@@ -209,8 +210,8 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
         </div>
       )}
 
-      {/* ── Suggestions ─────────────────────────────────────────────────── */}
-      <div style={{ marginBottom: 14 }}>
+      {/* ── Suggestions + Contribution Graph ─────────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: 14, marginBottom: 14 }}>
         <SuggestionsCard
           lastFetch={lastFetch}
           lastPull={lastPull}
@@ -219,6 +220,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
           onFetch={doFetch}
           busy={busy}
         />
+        <ContributionGraph repoPath={repoPath} />
       </div>
 
       {/* ── Daily Flow Guide ───────────────────────────────────────────── */}
