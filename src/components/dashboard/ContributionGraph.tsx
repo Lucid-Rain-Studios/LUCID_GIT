@@ -266,7 +266,7 @@ function ContributionTooltip({ day }: { day: DayActivity }) {
   const color = getContributionColor(level, 'dark')
 
   return (
-    <div style={{ padding: '2px 4px', maxWidth: 220 }}>
+    <div style={{ maxWidth: 220 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
         <div style={{ width: 9, height: 9, borderRadius: 2, background: color, flexShrink: 0, border: '1px solid rgba(255,255,255,0.08)' }} />
         <div style={{ fontSize: 11, fontWeight: 600, color: '#c8d0e8' }}>
