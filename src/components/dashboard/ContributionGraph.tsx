@@ -22,18 +22,12 @@ const WEEKDAY_LABEL_WIDTH = 28
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-const MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December'
-]
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 export function ContributionGraph({ repoPath }: ContributionGraphProps) {
   const [commits, setCommits] = useState<CommitEntry[]>([])
   const [loading, setLoading] = useState(true)
-  const [currentMonth, setCurrentMonth] = useState(() => {
-    const now = new Date()
-    return { year: now.getFullYear(), month: now.getMonth() }
-  })
+  const [currentYear, setCurrentYear] = useState(() => new Date().getFullYear())
 
   // Load commits on mount and when repoPath changes
   useEffect(() => {
@@ -57,80 +51,77 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
     return () => { mounted = false }
   }, [repoPath])
 
-  // Compute activity data for the last 730 days
-  const activity = useMemo(() => {
-    return computeActivity(commits, 730)
-  }, [commits])
+  // Compute activity data for the last 1825 days
+  const activity = useMemo(() => computeActivity(commits, 1825), [commits])
 
-  const stats = useMemo(() => calculateStats(activity), [activity])
+  const goToPreviousYear = useCallback(() => setCurrentYear(y => y - 1), [])
+  const goToNextYear     = useCallback(() => setCurrentYear(y => y + 1), [])
+  const goToThisYear     = useCallback(() => setCurrentYear(new Date().getFullYear()), [])
 
-  // Navigation handlers
-  const goToPreviousMonth = useCallback(() => {
-    setCurrentMonth(prev => {
-      if (prev.month === 0) {
-        return { year: prev.year - 1, month: 11 }
-      }
-      return { year: prev.year, month: prev.month - 1 }
-    })
-  }, [])
+  const todayKey = useMemo(() => toDateKey(Date.now()), [])
 
-  const goToNextMonth = useCallback(() => {
-    setCurrentMonth(prev => {
-      if (prev.month === 11) {
-        return { year: prev.year + 1, month: 0 }
-      }
-      return { year: prev.year, month: prev.month + 1 }
-    })
-  }, [])
+  const yearActivity = useMemo(() => {
+    const prefix = `${currentYear}-`
+    const filtered = new Map<string, DayActivity>()
+    for (const [key, val] of activity) {
+      if (key.startsWith(prefix)) filtered.set(key, val)
+    }
+    return filtered
+  }, [activity, currentYear])
 
-  const goToToday = useCallback(() => {
-    const now = new Date()
-    setCurrentMonth({ year: now.getFullYear(), month: now.getMonth() })
-  }, [])
+  const stats = useMemo(() => calculateStats(yearActivity), [yearActivity])
 
-  // Calculate visible weeks for current month view
-  const visibleWeeks = useMemo(() => {
-    // Use Date.UTC so grid keys always match the UTC-keyed activity map
-    const currentMonthStart = new Date(Date.UTC(currentMonth.year, currentMonth.month, 1))
-    const currentMonthEnd   = new Date(Date.UTC(currentMonth.year, currentMonth.month + 1, 0))
+  // Calculate visible weeks for year view
+  const { yearWeeks, monthLabels, overflowKeys } = useMemo(() => {
+    // Grid bounds — all UTC
+    const jan1  = new Date(Date.UTC(currentYear, 0, 1))
+    const dec31 = new Date(Date.UTC(currentYear, 11, 31))
 
-    // Find the Sunday on or before the first of the month (UTC)
-    const startDate = new Date(currentMonthStart)
-    startDate.setUTCDate(startDate.getUTCDate() - startDate.getUTCDay())
+    // Sunday on or before Jan 1
+    const gridStart = new Date(jan1)
+    gridStart.setUTCDate(gridStart.getUTCDate() - gridStart.getUTCDay())
 
-    // Find the Saturday on or after the last of the month (UTC)
-    const endDate = new Date(currentMonthEnd)
-    endDate.setUTCDate(endDate.getUTCDate() + (6 - endDate.getUTCDay()))
+    // Saturday on or after Dec 31
+    const gridEnd = new Date(dec31)
+    gridEnd.setUTCDate(gridEnd.getUTCDate() + (6 - gridEnd.getUTCDay()))
 
-    const result: DayActivity[][] = []
-    const currentDate = new Date(startDate)
+    const jan1Key  = toDateKey(jan1.getTime())
+    const dec31Key = toDateKey(dec31.getTime())
 
-    while (currentDate <= endDate) {
+    const weeks: DayActivity[][] = []
+    const overflow = new Set<string>()
+    const cur = new Date(gridStart)
+
+    while (cur <= gridEnd) {
       const week: DayActivity[] = []
       for (let i = 0; i < 7; i++) {
-        const key = toDateKey(currentDate.getTime())
+        const key = toDateKey(cur.getTime())
+        if (key < jan1Key || key > dec31Key) overflow.add(key)
         week.push(activity.get(key) ?? {
-          date: key,
-          count: 0,
-          commits: [],
-          authors: new Set(),
-          filesChanged: 0,
+          date: key, count: 0, commits: [], authors: new Set(), filesChanged: 0,
         })
-        currentDate.setUTCDate(currentDate.getUTCDate() + 1)
+        cur.setUTCDate(cur.getUTCDate() + 1)
       }
-      result.push(week)
+      weeks.push(week)
     }
 
-    return result
-  }, [activity, currentMonth])
+    // Month label: find which week column the 1st of each month falls in
+    const labels: Array<{ label: string; weekIdx: number }> = []
+    for (let m = 0; m < 12; m++) {
+      const firstOfMonth = new Date(Date.UTC(currentYear, m, 1))
+      const daysSinceStart = (firstOfMonth.getTime() - gridStart.getTime()) / 86400000
+      const weekIdx = Math.floor(daysSinceStart / 7)
+      if (weekIdx >= 0 && weekIdx < weeks.length) {
+        labels.push({ label: SHORT_MONTHS[m], weekIdx })
+      }
+    }
 
-  const currentMonthName = useMemo(() => {
-    return `${MONTH_NAMES[currentMonth.month]} ${currentMonth.year}`
-  }, [currentMonth])
+    return { yearWeeks: weeks, monthLabels: labels, overflowKeys: overflow }
+  }, [activity, currentYear])
 
   // SVG dimensions
-  const svgWidth = visibleWeeks.length * (DAY_SIZE + DAY_GAP) + WEEKDAY_LABEL_WIDTH + 10
-  const svgHeight = MONTH_LABEL_HEIGHT + (7 * (DAY_SIZE + DAY_GAP)) + 10
+  const svgWidth  = yearWeeks.length * (DAY_SIZE + DAY_GAP) + WEEKDAY_LABEL_WIDTH + 10
+  const svgHeight = MONTH_LABEL_HEIGHT + 7 * (DAY_SIZE + DAY_GAP) + 10
 
   if (loading) {
     return (
@@ -154,15 +145,10 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
             <Stat label="Current" value={`${stats.currentStreak}d`} />
           </div>
           <div style={{ display: 'flex', gap: 4 }}>
-            <NavButton onClick={goToPreviousMonth}>‹</NavButton>
-            <NavButton onClick={goToToday}>Today</NavButton>
-            <NavButton onClick={goToNextMonth}>›</NavButton>
+            <NavButton onClick={goToPreviousYear}>‹</NavButton>
+            <NavButton onClick={goToThisYear}>{currentYear}</NavButton>
+            <NavButton onClick={goToNextYear}>›</NavButton>
           </div>
-        </div>
-
-        {/* Month label */}
-        <div style={{ fontSize: 11, fontWeight: 600, color: '#5a6880', fontFamily: "'IBM Plex Sans', system-ui" }}>
-          {currentMonthName}
         </div>
 
         {/* Graph container */}
@@ -172,6 +158,22 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
             height={svgHeight}
             style={{ display: 'block' }}
           >
+            {/* Month labels */}
+            <g>
+              {monthLabels.map(({ label, weekIdx }) => (
+                <text
+                  key={label}
+                  x={WEEKDAY_LABEL_WIDTH + weekIdx * (DAY_SIZE + DAY_GAP)}
+                  y={13}
+                  fill="#5a6880"
+                  fontSize={9}
+                  fontFamily="'IBM Plex Sans', system-ui"
+                >
+                  {label}
+                </text>
+              ))}
+            </g>
+
             {/* Day of week labels — Mon / Wed / Fri only (indices 1, 3, 5) */}
             <g>
               {WEEKDAY_LABELS.map((label, idx) => {
@@ -195,12 +197,28 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
 
             {/* Contribution squares */}
             <g transform={`translate(${WEEKDAY_LABEL_WIDTH}, ${MONTH_LABEL_HEIGHT})`}>
-              {visibleWeeks.map((week, weekIdx) =>
+              {yearWeeks.map((week, weekIdx) =>
                 week.map((day, dayIdx) => {
-                  const level = getContributionLevel(day.count)
-                  const color = getContributionColor(level, 'dark')
                   const x = weekIdx * (DAY_SIZE + DAY_GAP)
                   const y = dayIdx * (DAY_SIZE + DAY_GAP)
+
+                  if (overflowKeys.has(day.date)) {
+                    return (
+                      <rect
+                        key={`${day.date}-${weekIdx}-${dayIdx}`}
+                        x={x}
+                        y={y}
+                        width={DAY_SIZE}
+                        height={DAY_SIZE}
+                        fill="#0e1520"
+                        rx={2}
+                      />
+                    )
+                  }
+
+                  const level   = getContributionLevel(day.count)
+                  const color   = getContributionColor(level, 'dark')
+                  const isToday = day.date === todayKey
 
                   return (
                     <Tooltip
@@ -217,6 +235,8 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
                         height={DAY_SIZE}
                         fill={color}
                         rx={2}
+                        stroke={isToday ? '#4a9eff' : 'none'}
+                        strokeWidth={isToday ? 1 : 0}
                         style={{ cursor: day.count > 0 ? 'pointer' : 'default' }}
                       />
                     </Tooltip>
