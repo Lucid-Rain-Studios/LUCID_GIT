@@ -2,21 +2,22 @@ import React, { useState, useRef, useCallback } from 'react'
 import ReactDOM from 'react-dom'
 
 interface TooltipProps {
-  content: string
+  content: React.ReactNode
   children: React.ReactElement
   side?: 'top' | 'right' | 'bottom' | 'left'
   delay?: number
+  asSvgGroup?: boolean
 }
 
-export function Tooltip({ content, children, side = 'top', delay = 500 }: TooltipProps) {
+export function Tooltip({ content, children, side = 'top', delay = 500, asSvgGroup = false }: TooltipProps) {
   const [rect, setRect] = useState<DOMRect | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout>>()
-  const wrapRef = useRef<HTMLSpanElement>(null)
+  const wrapRef = useRef<SVGGElement | HTMLSpanElement>(null)
 
   const show = useCallback(() => {
     clearTimeout(timer.current)
     timer.current = setTimeout(() => {
-      if (wrapRef.current) setRect(wrapRef.current.getBoundingClientRect())
+      if (wrapRef.current) setRect((wrapRef.current as Element).getBoundingClientRect())
     }, delay)
   }, [delay])
 
@@ -36,22 +37,33 @@ export function Tooltip({ content, children, side = 'top', delay = 500 }: Toolti
     lineHeight: 1.4,
     color: '#c4cad8',
     fontFamily: "'IBM Plex Sans', system-ui",
-    whiteSpace: 'nowrap',
+    whiteSpace: typeof content === 'string' ? 'nowrap' : 'normal',
     pointerEvents: 'none',
     boxShadow: '0 4px 14px rgba(0,0,0,0.5)',
     ...(side === 'top'    ? { left: rect.left + rect.width / 2, bottom: window.innerHeight - rect.top + 6, transform: 'translateX(-50%)' } :
         side === 'bottom' ? { left: rect.left + rect.width / 2, top: rect.bottom + 6,                      transform: 'translateX(-50%)' } :
-        side === 'right'  ? { left: rect.right + 8,            top: rect.top + rect.height / 2,            transform: 'translateY(-50%)' } :
+        side === 'right'  ? { left: rect.right + 8,             top: rect.top + rect.height / 2,           transform: 'translateY(-50%)' } :
                             { right: window.innerWidth - rect.left + 8, top: rect.top + rect.height / 2,   transform: 'translateY(-50%)' }),
   } : {}
 
+  const portal = rect ? ReactDOM.createPortal(
+    <div style={tipStyle}>{content}</div>,
+    document.body,
+  ) : null
+
+  if (asSvgGroup) {
+    return (
+      <g ref={wrapRef as React.Ref<SVGGElement>} onMouseEnter={show} onMouseLeave={hide}>
+        {children}
+        {portal}
+      </g>
+    )
+  }
+
   return (
-    <span ref={wrapRef} onMouseEnter={show} onMouseLeave={hide} style={{ display: 'contents' }}>
+    <span ref={wrapRef as React.Ref<HTMLSpanElement>} onMouseEnter={show} onMouseLeave={hide} style={{ display: 'contents' }}>
       {children}
-      {rect && ReactDOM.createPortal(
-        <div style={tipStyle}>{content}</div>,
-        document.body,
-      )}
+      {portal}
     </span>
   )
 }
