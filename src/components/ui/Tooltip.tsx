@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react'
+import React, { useState, useRef, useCallback, useEffect } from 'react'
 import ReactDOM from 'react-dom'
 
 interface TooltipProps {
@@ -24,6 +24,10 @@ export function Tooltip({ content, children, side = 'top', delay = 500, asSvgGro
   const hide = useCallback(() => {
     clearTimeout(timer.current)
     setRect(null)
+  }, [])
+
+  useEffect(() => {
+    return () => { clearTimeout(timer.current) }
   }, [])
 
   const tipStyle: React.CSSProperties = rect ? {

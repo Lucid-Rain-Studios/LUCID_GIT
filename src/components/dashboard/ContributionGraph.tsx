@@ -172,17 +172,6 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
             height={svgHeight}
             style={{ display: 'block' }}
           >
-            {/* Month label */}
-            <text
-              x={WEEKDAY_LABEL_WIDTH}
-              y={14}
-              fill="#5a6880"
-              fontSize={9}
-              fontFamily="'IBM Plex Sans', system-ui"
-            >
-              {MONTH_NAMES[currentMonth.month]}
-            </text>
-
             {/* Day of week labels — Mon / Wed / Fri only (indices 1, 3, 5) */}
             <g>
               {WEEKDAY_LABELS.map((label, idx) => {
