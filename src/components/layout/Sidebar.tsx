@@ -1,12 +1,13 @@
-import React, { useCallback, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useRepoStore } from '@/stores/repoStore'
 import { useAuthStore } from '@/stores/authStore'
+import { Tooltip } from '@/components/ui/Tooltip'
 
 export type TabId =
-  | 'dashboard' | 'changes'  | 'history'  | 'branches'
-  | 'tools'     | 'presence' | 'map'      | 'heatmap'  | 'forecast'
+  | 'dashboard' | 'timeline' | 'branches'
+  | 'tools'     | 'presence' | 'map'      | 'heatmap'  | 'forecast' | 'locks'
   | 'lfs'       | 'cleanup'  | 'unreal'   | 'hooks'    | 'overview'
-  | 'settings'  | 'stash'    | 'content'
+  | 'settings'  | 'content'  | 'logs'
 
 interface SidebarProps {
   active: TabId
@@ -29,19 +30,21 @@ const NAV_GROUPS: NavGroup[] = [
     key: 'workspace', label: 'Workspace',
     items: [
       { id: 'dashboard', label: 'Dashboard', Icon: DashboardIcon },
-      { id: 'changes',   label: 'Changes',   Icon: ChangesIcon },
-      { id: 'history',   label: 'History',   Icon: HistoryIcon },
+      { id: 'timeline',  label: 'Timeline',  Icon: TimelineIcon },
       { id: 'branches',  label: 'Branches',  Icon: BranchNavIcon },
     ],
   },
   {
     key: 'tools', label: 'Tools',
     items: [
-      { id: 'tools',    label: 'Tools',    Icon: ToolsIcon },
-      { id: 'presence', label: 'Team',     Icon: PresenceIcon },
-      { id: 'map',      label: 'File Map', Icon: MapIcon },
-      { id: 'heatmap',  label: 'Heatmap',  Icon: HeatmapIcon },
-      { id: 'forecast', label: 'Forecast', Icon: ForecastIcon },
+      { id: 'tools',    label: 'Tools',            Icon: ToolsIcon },
+      { id: 'presence', label: 'Team',             Icon: PresenceIcon },
+      { id: 'locks',    label: 'Locked Files',     Icon: LocksIcon },
+      { id: 'content',  label: 'Content Browser',  Icon: ContentBrowserIcon },
+      { id: 'map',      label: 'File Map',         Icon: MapIcon },
+      { id: 'heatmap',  label: 'Heatmap',          Icon: HeatmapIcon },
+      { id: 'forecast', label: 'Forecast',         Icon: ForecastIcon },
+      { id: 'logs',     label: 'Bug Logs',         Icon: LogsIcon },
     ],
   },
   {
@@ -56,10 +59,41 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ]
 
-const COLLAPSED_KEY = 'lucid-git:sidebar-groups'
+const COLLAPSED_KEY   = 'lucid-git:sidebar-groups'
+const VISIBILITY_KEY  = 'lucid-git:sidebar-visibility'
+
+const VISIBILITY_DEFAULTS: Record<string, string[]> = {
+  workspace: ['dashboard', 'timeline', 'branches'],
+  tools:     ['tools', 'locks', 'content', 'logs'],
+  admin:     ['lfs', 'cleanup', 'unreal', 'hooks', 'overview'],
+}
 
 function loadCollapsed(): Record<string, boolean> {
   try { return JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '{}') } catch { return {} }
+}
+
+function loadVisibility(): Record<string, string[]> {
+  try {
+    const stored = JSON.parse(localStorage.getItem(VISIBILITY_KEY) ?? '{}') as Record<string, string[]>
+    const result: Record<string, string[]> = {}
+    for (const key of Object.keys(VISIBILITY_DEFAULTS)) {
+      if (!Array.isArray(stored[key])) {
+        result[key] = [...VISIBILITY_DEFAULTS[key]]
+      } else {
+        // Merge: keep user preferences but add any new defaults that aren't stored yet
+        const userSet = new Set(stored[key])
+        const newDefaults = VISIBILITY_DEFAULTS[key].filter(id => {
+          // Find IDs that are in defaults but were never seen in any stored section
+          const allStored = Object.values(stored).flat()
+          return !allStored.includes(id)
+        })
+        result[key] = [...stored[key], ...newDefaults]
+      }
+    }
+    return result
+  } catch {
+    return Object.fromEntries(Object.entries(VISIBILITY_DEFAULTS).map(([k, v]) => [k, [...v]]))
+  }
 }
 
 export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthChange, repoPath, onOpenTerminal, onOpenRepo, onOpenExplorer }: SidebarProps) {
@@ -67,7 +101,20 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
   const isAdmin = useAuthStore(s => s.isAdmin(repoPath ?? ''))
   const totalChanges = fileStatus.length
 
-  const [groupsCollapsed, setGroupsCollapsed] = useState<Record<string, boolean>>(loadCollapsed)
+  const [groupsCollapsed,   setGroupsCollapsed]   = useState<Record<string, boolean>>(loadCollapsed)
+  const [sectionVisibility, setSectionVisibility] = useState<Record<string, string[]>>(loadVisibility)
+  const [popover, setPopover] = useState<{ key: string; x: number; y: number } | null>(null)
+
+  const popoverRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!popover) return
+    const handler = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) setPopover(null)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [popover])
 
   const asideRef   = useRef<HTMLElement>(null)
   const dragging   = useRef(false)
@@ -102,6 +149,25 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
     const next = { ...groupsCollapsed, [key]: !groupsCollapsed[key] }
     setGroupsCollapsed(next)
     localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next))
+  }
+
+  const toggleItemVisibility = (groupKey: string, itemId: string) => {
+    setSectionVisibility(prev => {
+      const current = prev[groupKey] ?? VISIBILITY_DEFAULTS[groupKey] ?? []
+      const next    = current.includes(itemId)
+        ? current.filter(id => id !== itemId)
+        : [...current, itemId]
+      const updated = { ...prev, [groupKey]: next }
+      localStorage.setItem(VISIBILITY_KEY, JSON.stringify(updated))
+      return updated
+    })
+  }
+
+  const openPopoverFor = (e: React.MouseEvent, groupKey: string) => {
+    e.stopPropagation()
+    if (popover?.key === groupKey) { setPopover(null); return }
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    setPopover({ key: groupKey, x: rect.right + 8, y: rect.top - 2 })
   }
 
   const visibleGroups = NAV_GROUPS.filter(g => !g.adminOnly || (isAdmin && !!repoPath))
@@ -160,43 +226,76 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
 
                 {/* Group header — only when expanded sidebar */}
                 {!collapsed && (
-                  <button
-                    onClick={() => toggleGroup(group.key)}
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      width: '100%', paddingLeft: 13, paddingRight: 10,
-                      paddingTop: gi === 0 ? 8 : 6, paddingBottom: 3,
-                      background: 'transparent', border: 'none', cursor: 'pointer',
-                    }}
-                  >
-                    <span style={{
-                      fontFamily: 'var(--lg-font-ui)', fontSize: 10, fontWeight: 700,
-                      color: 'var(--lg-text-secondary)', letterSpacing: '0.12em', textTransform: 'uppercase',
-                      opacity: 0.55, userSelect: 'none',
-                    }}>
-                      {group.label}
-                    </span>
-                    <svg
-                      width="10" height="10" viewBox="0 0 10 10" fill="none"
-                      style={{ color: 'var(--lg-text-secondary)', opacity: 0.4, transform: isGroupCollapsed ? 'rotate(-90deg)' : 'none', transition: 'transform 0.15s ease', flexShrink: 0 }}
+                  <div style={{
+                    display: 'flex', alignItems: 'center',
+                    paddingLeft: 13, paddingRight: 6,
+                    paddingTop: gi === 0 ? 8 : 6, paddingBottom: 3,
+                  }}>
+                    {/* Label — clicks collapse/expand */}
+                    <button
+                      onClick={() => toggleGroup(group.key)}
+                      style={{ flex: 1, display: 'flex', alignItems: 'center', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, minWidth: 0 }}
                     >
-                      <path d="M2 3.5l3 3 3-3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </button>
+                      <span style={{
+                        fontFamily: 'var(--lg-font-ui)', fontSize: 10, fontWeight: 700,
+                        color: 'var(--lg-text-secondary)', letterSpacing: '0.12em', textTransform: 'uppercase',
+                        opacity: 0.55, userSelect: 'none',
+                      }}>
+                        {group.label}
+                      </span>
+                    </button>
+
+                    {/* Customise button */}
+                    <button
+                      onClick={(e) => openPopoverFor(e, group.key)}
+                      title="Customise section"
+                      style={{
+                        width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: popover?.key === group.key ? 'rgba(232,98,47,0.15)' : 'transparent',
+                        border: `1px solid ${popover?.key === group.key ? 'rgba(232,98,47,0.35)' : 'transparent'}`,
+                        color: popover?.key === group.key ? 'var(--lg-accent)' : 'var(--lg-text-secondary)',
+                        cursor: 'pointer', opacity: popover?.key === group.key ? 1 : 0.4,
+                        transition: 'all 0.12s',
+                        marginRight: 2,
+                      }}
+                      onMouseEnter={e => { if (popover?.key !== group.key) { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)' } }}
+                      onMouseLeave={e => { if (popover?.key !== group.key) { e.currentTarget.style.opacity = '0.4'; e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent' } }}
+                    >
+                      <svg width="9" height="9" viewBox="0 0 10 10" fill="none">
+                        <path d="M5 2v6M2 5h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                      </svg>
+                    </button>
+
+                    {/* Chevron — clicks collapse/expand */}
+                    <button
+                      onClick={() => toggleGroup(group.key)}
+                      style={{ width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0 }}
+                    >
+                      <svg
+                        width="10" height="10" viewBox="0 0 10 10" fill="none"
+                        style={{ color: 'var(--lg-text-secondary)', opacity: 0.4, transform: isGroupCollapsed ? 'rotate(-90deg)' : 'none', transition: 'transform 0.15s ease' }}
+                      >
+                        <path d="M2 3.5l3 3 3-3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </button>
+                  </div>
                 )}
 
                 {/* Group items */}
-                {(!isGroupCollapsed || collapsed) && group.items.map(item => (
-                  <NavBtn
-                    key={item.id}
-                    item={item}
-                    isActive={active === item.id}
-                    collapsed={collapsed}
-                    badge={item.id === 'changes' ? totalChanges : 0}
-                    disabled={item.id !== 'settings' && !repoPath}
-                    onClick={() => { if (repoPath || item.id === 'settings') onChange(item.id) }}
-                  />
-                ))}
+                {(!isGroupCollapsed || collapsed) && group.items
+                  .filter(item => (sectionVisibility[group.key] ?? VISIBILITY_DEFAULTS[group.key]).includes(item.id))
+                  .map(item => (
+                    <NavBtn
+                      key={item.id}
+                      item={item}
+                      isActive={active === item.id}
+                      collapsed={collapsed}
+                      badge={item.id === 'timeline' ? totalChanges : 0}
+                      disabled={item.id !== 'settings' && item.id !== 'logs' && !repoPath}
+                      onClick={() => { if (repoPath || item.id === 'settings' || item.id === 'logs') onChange(item.id) }}
+                    />
+                  ))}
               </div>
             )
           })}
@@ -244,6 +343,102 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
           onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
         />
       )}
+
+      {/* ── Section visibility popover ── */}
+      {popover && (() => {
+        const group = NAV_GROUPS.find(g => g.key === popover.key)
+        if (!group) return null
+        const visibleIds = sectionVisibility[popover.key] ?? VISIBILITY_DEFAULTS[popover.key]
+        return (
+          <div
+            ref={popoverRef}
+            style={{
+              position: 'fixed', top: popover.y, left: popover.x, zIndex: 200,
+              background: '#1a2030', border: '1px solid #283047',
+              borderRadius: 8, boxShadow: '0 10px 36px rgba(0,0,0,0.6)',
+              minWidth: 170, paddingTop: 6, paddingBottom: 6,
+            }}
+          >
+            {/* Header */}
+            <div style={{
+              paddingLeft: 12, paddingRight: 12, paddingBottom: 6,
+              fontFamily: 'var(--lg-font-ui)', fontSize: 9.5, fontWeight: 700,
+              color: '#344057', letterSpacing: '0.12em', textTransform: 'uppercase',
+              borderBottom: '1px solid #202838', marginBottom: 4,
+            }}>
+              {group.label}
+            </div>
+
+            {/* Items */}
+            {group.items.map(item => {
+              const visible = visibleIds.includes(item.id)
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => toggleItemVisibility(group.key, item.id)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    width: '100%', padding: '5px 12px',
+                    background: 'transparent', border: 'none', cursor: 'pointer',
+                    color: visible ? 'var(--lg-text-primary)' : '#4a566a',
+                    fontFamily: 'var(--lg-font-ui)', fontSize: 12,
+                    transition: 'background 0.1s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                >
+                  {/* Checkbox */}
+                  <div style={{
+                    width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: visible ? 'rgba(232,98,47,0.15)' : 'transparent',
+                    border: `1.5px solid ${visible ? '#e8622f' : '#283047'}`,
+                    transition: 'all 0.1s',
+                  }}>
+                    {visible && (
+                      <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                        <polyline points="1,4 3,6 7,2" stroke="#e8622f" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                  </div>
+                  <span style={{ color: 'var(--lg-text-secondary)', flexShrink: 0, display: 'flex' }}>
+                    <item.Icon size={13} />
+                  </span>
+                  {item.label}
+                </button>
+              )
+            })}
+
+            {/* Reset footer */}
+            <div style={{ borderTop: '1px solid #202838', marginTop: 4, paddingTop: 4 }}>
+              <button
+                onClick={() => {
+                  setSectionVisibility(prev => {
+                    const updated = { ...prev, [popover.key]: [...VISIBILITY_DEFAULTS[popover.key]] }
+                    localStorage.setItem(VISIBILITY_KEY, JSON.stringify(updated))
+                    return updated
+                  })
+                }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  width: '100%', padding: '4px 12px',
+                  background: 'transparent', border: 'none', cursor: 'pointer',
+                  color: '#344057', fontFamily: 'var(--lg-font-ui)', fontSize: 11,
+                  transition: 'color 0.1s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.color = '#5a6880' }}
+                onMouseLeave={e => { e.currentTarget.style.color = '#344057' }}
+              >
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                  <path d="M10 6a4 4 0 1 1-.8-2.4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                  <path d="M9 2.5v2.5H11.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Reset to defaults
+              </button>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
@@ -258,12 +453,11 @@ function NavBtn({ item, isActive, collapsed, badge, disabled, onClick }: {
   const { Icon } = item
   const dim = disabled && !isActive
 
-  return (
+  const btn = (
     <button
       onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      title={collapsed ? item.label : undefined}
       style={{
         display: 'flex', alignItems: 'center',
         gap: collapsed ? 0 : 8,
@@ -320,6 +514,10 @@ function NavBtn({ item, isActive, collapsed, badge, disabled, onClick }: {
       )}
     </button>
   )
+
+  return collapsed ? (
+    <Tooltip content={item.label} side="right" delay={300}>{btn}</Tooltip>
+  ) : btn
 }
 
 // ── Bottom action button ───────────────────────────────────────────────────────
@@ -335,12 +533,11 @@ function BottomBtn({ Icon, label, collapsed, disabled, onClick, active, accent }
       ? hover ? 'var(--lg-accent)' : 'var(--lg-text-secondary)'
       : hover && !disabled ? 'var(--lg-text-primary)' : 'var(--lg-text-secondary)'
 
-  return (
+  const btn = (
     <button
       onClick={disabled ? undefined : onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      title={collapsed ? label : undefined}
       style={{
         display: 'flex', alignItems: 'center', gap: collapsed ? 0 : 8,
         width: '100%', height: 'var(--lg-row-height)',
@@ -367,6 +564,10 @@ function BottomBtn({ Icon, label, collapsed, disabled, onClick, active, accent }
       )}
     </button>
   )
+
+  return collapsed ? (
+    <Tooltip content={label} side="right" delay={300}>{btn}</Tooltip>
+  ) : btn
 }
 
 // ── SVG icons ──────────────────────────────────────────────────────────────────
@@ -380,19 +581,14 @@ function DashboardIcon({ size = 16 }) {
   </svg>
 }
 
-function ChangesIcon({ size = 16 }) {
+function TimelineIcon({ size = 16 }) {
   return <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
-    <rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.3" />
-    <path d="M5 6h6M5 8.5h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-    <circle cx="11" cy="9" r="2.5" fill="currentColor" fillOpacity="0.2" stroke="currentColor" strokeWidth="1.1" />
-    <path d="M10.3 9l.7.7 1.2-1.2" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-}
-
-function HistoryIcon({ size = 16 }) {
-  return <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
-    <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.3" />
-    <path d="M8 5.5V8l2 1.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+    <circle cx="4"  cy="4"  r="1.6" stroke="currentColor" strokeWidth="1.25" />
+    <circle cx="4"  cy="8"  r="1.6" stroke="currentColor" strokeWidth="1.25" />
+    <circle cx="4"  cy="12" r="1.6" stroke="currentColor" strokeWidth="1.25" />
+    <line x1="4" y1="5.6" x2="4" y2="6.4" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+    <line x1="4" y1="9.6" x2="4" y2="10.4" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+    <path d="M7 4h5.5M7 8h3.5M7 12h4.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
   </svg>
 }
 
@@ -421,6 +617,15 @@ function PresenceIcon({ size = 16 }) {
   </svg>
 }
 
+function ContentBrowserIcon({ size = 16 }) {
+  return <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+    <rect x="1.5" y="3" width="13" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
+    <path d="M1.5 6h13" stroke="currentColor" strokeWidth="0.9" strokeOpacity="0.5" />
+    <rect x="3.5" y="8" width="3.5" height="3" rx="0.8" stroke="currentColor" strokeWidth="1.1" />
+    <path d="M9 8.5h3.5M9 10.5h2" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
+  </svg>
+}
+
 function MapIcon({ size = 16 }) {
   return <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
     <rect x="1.5" y="1.5" width="6" height="8" rx="1.2" stroke="currentColor" strokeWidth="1.3" />
@@ -444,6 +649,14 @@ function ForecastIcon({ size = 16 }) {
     <path d="M2 13 L5 8 L8 10 L11 5 L14 7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
     <circle cx="14" cy="7" r="1.5" fill="currentColor" />
     <path d="M2 13h12" stroke="currentColor" strokeWidth="0.9" strokeOpacity="0.4" />
+  </svg>
+}
+
+function LocksIcon({ size = 16 }) {
+  return <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+    <rect x="3" y="7" width="10" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
+    <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    <circle cx="8" cy="10.5" r="1" fill="currentColor" />
   </svg>
 }
 
@@ -510,6 +723,13 @@ function TerminalIcon({ size = 16 }) {
     <rect x="1.5" y="2.5" width="13" height="11" rx="2" stroke="currentColor" strokeWidth="1.3" />
     <path d="M4 6l3 2.5L4 11" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
     <path d="M9 11h3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+  </svg>
+}
+
+function LogsIcon({ size = 16 }) {
+  return <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+    <rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.3" />
+    <path d="M5 5.5h6M5 8h6M5 10.5h3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
   </svg>
 }
 

@@ -4,6 +4,7 @@ import { autoUpdater } from 'electron-updater'
 import { registerHandlers } from './ipc/handlers'
 import { CHANNELS } from './ipc/channels'
 import { watcherService } from './services/WatcherService'
+import { logService } from './services/LogService'
 
 const isDev = !app.isPackaged
 
@@ -135,6 +136,7 @@ app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
 app.commandLine.appendSwitch('disable-features', 'AutofillServerCommunication')
 
 app.whenReady().then(() => {
+  logService.init(app.getPath('userData'))
   registerHandlers()
   registerUpdaterHandlers()
   createWindow()
@@ -142,6 +144,10 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+app.on('before-quit', () => {
+  logService.endSession()
 })
 
 app.on('window-all-closed', () => {

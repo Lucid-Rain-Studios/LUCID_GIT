@@ -21,12 +21,14 @@ import { LfsPanel } from '@/components/lfs/LfsPanel'
 import { CleanupPanel } from '@/components/cleanup/CleanupPanel'
 import { SettingsPage } from '@/components/settings/SettingsPage'
 import { HistoryPanel } from '@/components/history/HistoryPanel'
+import { TimelinePanel } from '@/components/timeline/TimelinePanel'
 import { UnrealPanel } from '@/components/unreal/UnrealPanel'
 import { HooksManager } from '@/components/hooks/HooksManager'
 import { ToolsPanel } from '@/components/tools/ToolsPanel'
 import { PresencePanel } from '@/components/presence/PresencePanel'
 import { OverviewPanel } from '@/components/overview/OverviewPanel'
 import { DashboardPanel } from '@/components/dashboard/DashboardPanel'
+import { PRDialog } from '@/components/pr/PRDialog'
 import { RepoMapPanel } from '@/components/map/RepoMapPanel'
 import { ContentBrowserPanel } from '@/components/map/ContentBrowserPanel'
 import { ErrorPanel } from '@/components/errors/ErrorPanel'
@@ -38,9 +40,13 @@ import { AssetDiffViewer } from '@/components/diff/AssetDiffViewer'
 import { DependencyBlamePanel } from '@/components/blame/DependencyBlamePanel'
 import { LockHeatmap } from '@/components/heatmap/LockHeatmap'
 import { ForecastPanel } from '@/components/heatmap/ForecastPanel'
+import { LockedFilesPanel } from '@/components/locks/LockedFilesPanel'
 import { useForecastStore } from '@/stores/forecastStore'
+import { AssetViewerPanel } from '@/components/viewer/AssetViewerPanel'
+import { PanelErrorBoundary } from '@/components/ui/PanelErrorBoundary'
+import { BugLogsPanel } from '@/components/logs/BugLogsPanel'
 
-type TabId = 'changes' | 'stash' | 'branches' | 'lfs' | 'cleanup' | 'unreal' | 'hooks' | 'settings' | 'history' | 'tools' | 'presence' | 'overview' | 'map' | 'content' | 'heatmap' | 'forecast' | 'dashboard'
+type TabId = 'timeline' | 'branches' | 'lfs' | 'cleanup' | 'unreal' | 'hooks' | 'settings' | 'tools' | 'presence' | 'overview' | 'map' | 'content' | 'heatmap' | 'forecast' | 'dashboard' | 'locks' | 'logs'
 
 const ASSET_EXTS = new Set([
   'uasset', 'umap', 'upk', 'udk',
@@ -153,7 +159,7 @@ export function AppShell() {
   const [filePanelWidth,   setFilePanelWidth]   = useState(280)
   const [showCloneDialog,  setShowCloneDialog]  = useState(false)
   const [showLoginDialog,  setShowLoginDialog]  = useState(false)
-  const [leftTab, setLeftTab] = useState<TabId>('dashboard')
+  const [leftTab, setLeftTab] = useState<TabId>('timeline')
   const [mergeTarget, setMergeTarget] = useState<string | null>(null)
   const [cmdOpen, setCmdOpen] = useState(false)
 
@@ -228,6 +234,13 @@ export function AppShell() {
   }, [pushNotification])
 
   useEffect(() => { loadAccounts() }, [])
+
+  // ── Restore previous session — auto-open last repo on launch ──────────────
+  useEffect(() => {
+    if (!repoPath && recentRepos.length > 0) {
+      openRepo(recentRepos[0]).catch(() => {})
+    }
+  }, [])
 
   useEffect(() => {
     setSelectedFile(null); setDiffContent(null)
@@ -335,10 +348,12 @@ export function AppShell() {
           onOpenExplorer={() => { if (repoPath) ipc.showInFolder(repoPath) }}
         />
 
-        <main style={{ display: 'flex', flex: 1, overflow: 'hidden', flexDirection: 'column' }}>
+        <main style={{ display: 'flex', flex: 1, overflow: 'hidden', flexDirection: 'column', position: 'relative' }}>
           {/* Settings is always accessible — even without a repo */}
           {leftTab === 'settings' ? (
-            <SettingsPage repoPath={repoPath} />
+            <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
+              <SettingsPage repoPath={repoPath} />
+            </PanelErrorBoundary>
           ) : !repoPath ? (
             /* ── Welcome ── */
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden', background: 'var(--lg-bg-primary)' }}>
@@ -421,69 +436,80 @@ export function AppShell() {
             </div>
           ) : leftTab === 'dashboard' ? (
             /* ── Member dashboard ── */
-            <DashboardPanel repoPath={repoPath} onNavigate={tab => setLeftTab(tab as TabId)} />
+            <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
+              <DashboardPanel repoPath={repoPath} onNavigate={tab => setLeftTab(tab as TabId)} />
+            </PanelErrorBoundary>
           ) : leftTab === 'overview' ? (
             /* ── Admin overview ── */
-            <OverviewPanel repoPath={repoPath} onNavigate={tab => setLeftTab(tab as TabId)} onRefresh={handleRefresh} />
-          ) : leftTab === 'history' ? (
-            /* ── History — full width ── */
-            <HistoryPanel repoPath={repoPath} />
+            <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
+              <OverviewPanel repoPath={repoPath} onNavigate={tab => setLeftTab(tab as TabId)} onRefresh={handleRefresh} />
+            </PanelErrorBoundary>
+          ) : leftTab === 'timeline' ? (
+            /* ── Timeline — full width ── */
+            <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
+              <TimelinePanel repoPath={repoPath} />
+            </PanelErrorBoundary>
           ) : leftTab === 'tools' ? (
             /* ── Tools — full width ── */
-            <ToolsPanel repoPath={repoPath} onRefresh={handleRefresh} />
+            <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
+              <ToolsPanel repoPath={repoPath} onRefresh={handleRefresh} />
+            </PanelErrorBoundary>
           ) : leftTab === 'content' ? (
             /* ── Content Browser — full width ── */
-            <ContentBrowserPanel repoPath={repoPath} onNavigate={tab => setLeftTab(tab as TabId)} />
+            <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
+              <ContentBrowserPanel repoPath={repoPath} onNavigate={tab => setLeftTab(tab as TabId)} />
+            </PanelErrorBoundary>
           ) : leftTab === 'map' ? (
             /* ── File Map — full width ── */
-            <RepoMapPanel repoPath={repoPath} />
+            <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
+              <RepoMapPanel repoPath={repoPath} />
+            </PanelErrorBoundary>
           ) : leftTab === 'presence' ? (
             /* ── Team Presence — full width ── */
-            <PresencePanel repoPath={repoPath} />
+            <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
+              <PresencePanel repoPath={repoPath} />
+            </PanelErrorBoundary>
           ) : leftTab === 'heatmap' ? (
             /* ── Lock Heatmap — full width ── */
-            <LockHeatmap repoPath={repoPath} />
+            <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
+              <LockHeatmap repoPath={repoPath} />
+            </PanelErrorBoundary>
           ) : leftTab === 'forecast' ? (
             /* ── Conflict Forecast — full width ── */
-            <ForecastPanel
-              repoPath={repoPath}
-              conflicts={forecastConflicts}
-              enabled={forecastEnabled}
-              lastPolledAt={lastPolledAt}
-              onStart={async () => {
-                const st = await ipc.forecastStart(repoPath)
-                setForecastEnabled(true)
-                setForecastConflicts(st.conflicts)
-              }}
-              onStop={async () => {
-                await ipc.forecastStop(repoPath)
-                setForecastEnabled(false)
-                setForecastConflicts([])
-              }}
-            />
+            <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
+              <ForecastPanel
+                repoPath={repoPath}
+                conflicts={forecastConflicts}
+                enabled={forecastEnabled}
+                lastPolledAt={lastPolledAt}
+                onStart={async () => {
+                  const st = await ipc.forecastStart(repoPath)
+                  setForecastEnabled(true)
+                  setForecastConflicts(st.conflicts)
+                }}
+                onStop={async () => {
+                  await ipc.forecastStop(repoPath)
+                  setForecastEnabled(false)
+                  setForecastConflicts([])
+                }}
+              />
+            </PanelErrorBoundary>
+          ) : leftTab === 'locks' ? (
+            /* ── Locked Files — full width ── */
+            <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
+              <LockedFilesPanel repoPath={repoPath} />
+            </PanelErrorBoundary>
+          ) : leftTab === 'logs' ? (
+            /* ── Bug Logs — full width, no repo required ── */
+            <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
+              <BugLogsPanel />
+            </PanelErrorBoundary>
           ) : (
-            /* ── Split: left panel | diff ── */
+            /* ── Split: left panel | diff (branches, lfs, cleanup, unreal, hooks) ── */
+            <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
             <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-              {/* Left panel */}
               <div ref={filePanelRef} style={{ width: filePanelWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                {leftTab === 'changes' ? (
-                  <>
-                    <FileTree
-                      files={fileStatus}
-                      repoPath={repoPath}
-                      selectedPath={selectedFile?.path ?? null}
-                      locks={locks}
-                      currentUserName={currentUserName}
-                      isLoading={isLoading}
-                      onSelect={handleSelectFile}
-                      onRefresh={handleRefresh}
-                      onBlameDeps={file => setBlameTarget({ filePath: file.path, repoPath: repoPath! })}
-                    />
-                    <CommitBox />
-                  </>
-                ) : leftTab === 'stash' ? (
-                  <StashPanel repoPath={repoPath} onRefresh={handleRefresh} />
-                ) : leftTab === 'branches' ? (
+                {leftTab === 'branches' ? (
                   <BranchPanel onMergePreview={branch => setMergeTarget(branch)} onRefresh={handleRefresh} />
                 ) : leftTab === 'lfs' ? (
                   <LfsPanel repoPath={repoPath} />
@@ -495,56 +521,14 @@ export function AppShell() {
                   <HooksManager repoPath={repoPath} />
                 ) : null}
               </div>
-
               <DragHandle onMouseDown={onFileDragStart} />
-
-              {/* Right: diff or blame */}
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--lg-bg-primary)' }}>
-                {blameTarget ? (
-                  <DependencyBlamePanel
-                    repoPath={blameTarget.repoPath}
-                    filePath={blameTarget.filePath}
-                    onClose={() => setBlameTarget(null)}
-                  />
-                ) : (
-                  <>
-                    {diffLoading && (
-                      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: '#344057', animation: 'pulse 1.5s infinite' }}>
-                          Loading diff…
-                        </span>
-                      </div>
-                    )}
-                    {!diffLoading && diffContent && (
-                      diffContent.isBinary
-                        ? isRecognizedAsset(selectedFile!.path)
-                          ? <AssetDiffViewer file={selectedFile!} repoPath={repoPath!} staged={selectedFile!.staged} />
-                          : <BinaryDiff file={selectedFile!} repoPath={repoPath!} />
-                        : <TextDiff diff={diffContent} />
-                    )}
-                    {!diffLoading && !diffContent && (
-                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-                        <div style={{
-                          width: 44, height: 44, borderRadius: 11,
-                          background: 'rgba(255,255,255,0.025)',
-                          border: '1px solid #1d2535',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        }}>
-                          <svg width="22" height="22" viewBox="0 0 36 36" fill="none">
-                            <rect x="7" y="5" width="22" height="26" rx="3" stroke="#283047" strokeWidth="1.5" />
-                            <path d="M12 12h12M12 17h8M12 22h10" stroke="#283047" strokeWidth="1.5" strokeLinecap="round" />
-                          </svg>
-                        </div>
-                        <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5, color: '#2e3a50', letterSpacing: '-0.01em' }}>
-                          Select a file to view diff
-                        </span>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--lg-bg-primary)' }} />
             </div>
+            </PanelErrorBoundary>
           )}
+
+          {/* Asset viewer overlay — absolute within main */}
+          {repoPath && <AssetViewerPanel />}
         </main>
       </div>
 
@@ -560,6 +544,7 @@ export function AppShell() {
         />
       )}
 
+      <PRDialog />
       <GlobalDialogs />
       <ErrorPanel
         onReauth={() => setShowLoginDialog(true)}

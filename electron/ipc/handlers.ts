@@ -9,8 +9,10 @@ import { spawn } from 'child_process'
 import { presenceService } from '../services/PresenceService'
 import type { PresenceEntry } from '../types'
 import { CHANNELS } from './channels'
+import { withTimeout } from '../util/dugite-exec'
 import { gitService } from '../services/GitService'
 import { authService } from '../services/AuthService'
+import { logService } from '../services/LogService'
 import { lockService } from '../services/LockService'
 import { notificationService } from '../services/NotificationService'
 import { webhookService } from '../services/WebhookService'
@@ -18,6 +20,8 @@ import { unrealService } from '../services/UnrealService'
 import { hookService } from '../services/HookService'
 import { settingsService } from '../services/SettingsService'
 import { teamConfigService } from '../services/TeamConfigService'
+import { gitHubService } from '../services/GitHubService'
+import type { PRCreateArgs, PRListArgs, PRActionArgs } from '../services/GitHubService'
 import type { WebhookConfig, AppSettings, TeamConfig } from '../types'
 
 async function requireAdmin(repoPath: string): Promise<void> {
@@ -228,6 +232,10 @@ export function registerHandlers(): void {
     return authService.logout(userId)
   })
 
+  ipcMain.handle(CHANNELS.AUTH_SET_CURRENT_ACCOUNT, async (_event, userId: string) => {
+    return authService.setCurrentAccount(userId)
+  })
+
   // ── Permissions — Phase 20 ────────────────────────────────────────────────
   ipcMain.handle(CHANNELS.AUTH_FETCH_REPO_PERMISSION, async (_event, repoPath: string) => {
     return permissionService.fetchPermission(repoPath)
@@ -310,9 +318,13 @@ export function registerHandlers(): void {
   })
 
   ipcMain.handle(CHANNELS.CLEANUP_SIZE, async (event, repoPath: string) => {
-    return gitService.cleanupSize(repoPath, (step) => {
-      if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
-    })
+    return withTimeout(
+      gitService.cleanupSize(repoPath, (step) => {
+        if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
+      }),
+      30_000,
+      'cleanupSize'
+    )
   })
 
   ipcMain.handle(CHANNELS.CLEANUP_GC, async (event, repoPath: string, aggressive?: boolean) => {
@@ -373,6 +385,14 @@ export function registerHandlers(): void {
 
   ipcMain.handle(CHANNELS.GIT_GET_CONFIG, (_event, repoPath: string, key: string) =>
     gitService.getGitConfig(repoPath, key)
+  )
+
+  ipcMain.handle(CHANNELS.GIT_GET_GLOBAL_IDENTITY, () =>
+    gitService.getGlobalGitIdentity()
+  )
+
+  ipcMain.handle(CHANNELS.GIT_SET_GLOBAL_IDENTITY, (_event, name: string, email: string) =>
+    gitService.setGlobalGitIdentity(name, email)
   )
 
   // ── Hooks — Phase 12 ──────────────────────────────────────────────────────
@@ -510,6 +530,14 @@ export function registerHandlers(): void {
     gitService.defaultBranch(repoPath)
   )
 
+  ipcMain.handle(CHANNELS.GIT_BLAME, (_event, repoPath: string, filePath: string, rev: string) =>
+    gitService.blame(repoPath, filePath, rev)
+  )
+
+  ipcMain.handle(CHANNELS.GIT_DIFF_COMMIT, (_event, repoPath: string, filePath: string, hash: string) =>
+    gitService.diffCommit(repoPath, filePath, hash)
+  )
+
   // ── Asset diff previews — Phase 17 ───────────────────────────────────────
   ipcMain.handle(CHANNELS.ASSET_DIFF_PREVIEW, (_event, repoPath: string, filePath: string, leftRef: string, rightRef: string, editorBinaryOverride?: string) =>
     assetDiffService.diff({ repoPath, filePath, leftRef, rightRef, editorBinaryOverride })
@@ -596,4 +624,52 @@ export function registerHandlers(): void {
   ipcMain.handle(CHANNELS.DEP_REFRESH_CACHE, (_event, repoPath: string) =>
     dependencyService.refreshCache(repoPath)
   )
+
+  // ── Bug logs ─────────────────────────────────────────────────────────────────
+  ipcMain.handle(CHANNELS.LOG_GET_TEXT, () =>
+    logService.getFormattedText()
+  )
+
+  ipcMain.handle(CHANNELS.LOG_GET_SUGGESTION, () =>
+    logService.getSuggestion()
+  )
+
+  ipcMain.handle(CHANNELS.LOG_SAVE_DIALOG, async (event) => {
+    const win     = BrowserWindow.fromWebContents(event.sender)
+    const dateStr = new Date().toISOString().slice(0, 10)
+    const result  = await dialog.showSaveDialog(win ?? BrowserWindow.getFocusedWindow()!, {
+      title:       'Save Bug Log',
+      defaultPath: `lucid-git-log-${dateStr}.txt`,
+      filters:     [{ name: 'Text Files', extensions: ['txt'] }],
+    })
+    if (result.canceled || !result.filePath) return null
+    logService.saveToFile(result.filePath)
+    logService.info('app', `Log saved to: ${result.filePath}`)
+    return result.filePath
+  })
+
+  // ── GitHub API ─────────────────────────────────────────────────────────────
+  ipcMain.handle(CHANNELS.GITHUB_CREATE_PR, async (_event, args: PRCreateArgs) => {
+    const token = await authService.getCurrentToken()
+    if (!token) throw new Error('Not authenticated with GitHub')
+    return gitHubService.createPR(token, args)
+  })
+
+  ipcMain.handle(CHANNELS.GITHUB_LIST_PRS, async (_event, args: PRListArgs) => {
+    const token = await authService.getCurrentToken()
+    if (!token) throw new Error('Not authenticated with GitHub')
+    return gitHubService.listPRs(token, args)
+  })
+
+  ipcMain.handle(CHANNELS.GITHUB_MERGE_PR, async (_event, args: PRActionArgs) => {
+    const token = await authService.getCurrentToken()
+    if (!token) throw new Error('Not authenticated with GitHub')
+    return gitHubService.mergePR(token, args)
+  })
+
+  ipcMain.handle(CHANNELS.GITHUB_CLOSE_PR, async (_event, args: PRActionArgs) => {
+    const token = await authService.getCurrentToken()
+    if (!token) throw new Error('Not authenticated with GitHub')
+    return gitHubService.closePR(token, args)
+  })
 }

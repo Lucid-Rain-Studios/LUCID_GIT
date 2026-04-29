@@ -21,6 +21,8 @@ interface RepoState {
   isLoading: boolean
   error: string | null
   recentRepos: string[]
+  syncTick: number
+  bumpSyncTick: () => void
 
   openRepo: (path: string) => Promise<void>
   refreshStatus: () => Promise<void>
@@ -41,6 +43,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
   isLoading: false,
   error: null,
   recentRepos: loadRecentRepos(),
+  syncTick: 0,
 
   openRepo: async (path: string) => {
     set({ isLoading: true, error: null })
@@ -125,6 +128,8 @@ export const useRepoStore = create<RepoState>((set, get) => ({
       set({ currentBranch, fileStatus: status ?? [] })
     })
   },
+
+  bumpSyncTick: () => set(s => ({ syncTick: s.syncTick + 1 })),
 
   clearRepo: () => set({ repoPath: null, fileStatus: [], currentBranch: '', branches: [], error: null }),
 

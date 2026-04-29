@@ -1,9 +1,13 @@
-import React, { useCallback, useEffect, useState } from 'react'
-import { ipc, SyncStatus, Lock, BranchActivity, FileStatus } from '@/ipc'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { ipc, SyncStatus, Lock, FileStatus, PullRequest } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useOperationStore } from '@/stores/operationStore'
 import { useLockStore } from '@/stores/lockStore'
+import { usePRStore } from '@/stores/prStore'
+
+const sessionFetchedRepos = new Set<string>()
+const sessionRemoteUrls   = new Map<string, string | null>()
 
 interface DashboardPanelProps {
   repoPath: string
@@ -55,11 +59,6 @@ function parseGitHubSlug(url: string): string | null {
   return m ? m[1] : null
 }
 
-function stripBranchRef(ref: string): string {
-  return ref
-    .replace(/^refs\/heads\//, '')
-    .replace(/^refs\/remotes\/[^/]+\//, '')
-}
 
 function fileStatusLabel(f: FileStatus): { char: string; color: string } {
   if (f.staged) {
@@ -75,23 +74,29 @@ function fileStatusLabel(f: FileStatus): { char: string; color: string } {
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
-  const { currentBranch, fileStatus } = useRepoStore()
+  const { currentBranch, fileStatus, syncTick } = useRepoStore()
   const { accounts, currentAccountId } = useAuthStore()
+  const isAdmin = useAuthStore(s => s.isAdmin(repoPath))
   const opRun = useOperationStore(s => s.run)
-  const { locks } = useLockStore()
+  const { locks, unlockFile } = useLockStore()
+  const openPRDialog = usePRStore(s => s.openDialog)
 
   const [sync,      setSync]      = useState<SyncStatus | null>(null)
-  const [activity,  setActivity]  = useState<BranchActivity[]>([])
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null)
   const [busy,      setBusy]      = useState<string | null>(null)
   const [lastPull,  setLastPull]  = useState<number | null>(null)
   const [lastFetch, setLastFetch] = useState<number | null>(null)
+  const [hasFetched, setHasFetched] = useState(() => sessionFetchedRepos.has(repoPath))
+  const syncTickRef = useRef(syncTick)
 
-  const staged   = fileStatus.filter(f =>  f.staged).length
-  const unstaged = fileStatus.filter(f => !f.staged).length
-  const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login ?? null
-  const repoName = repoPath.replace(/\\/g, '/').split('/').pop() ?? repoPath
-  const ghSlug   = remoteUrl ? parseGitHubSlug(remoteUrl) : null
+  const staged       = React.useMemo(() => fileStatus.filter(f =>  f.staged).length,  [fileStatus])
+  const unstaged     = React.useMemo(() => fileStatus.filter(f => !f.staged).length,  [fileStatus])
+  const currentLogin = React.useMemo(
+    () => accounts.find(a => a.userId === currentAccountId)?.login ?? null,
+    [accounts, currentAccountId]
+  )
+  const repoName = React.useMemo(() => repoPath.replace(/\\/g, '/').split('/').pop() ?? repoPath, [repoPath])
+  const ghSlug   = React.useMemo(() => remoteUrl ? parseGitHubSlug(remoteUrl) : null, [remoteUrl])
 
   const loadSync = useCallback(async () => {
     try { setSync(await ipc.getSyncStatus(repoPath)) } catch { setSync(null) }
@@ -99,42 +104,60 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
 
   const reload = useCallback(() => {
     loadSync()
-    ipc.gitBranchActivity(repoPath).then(setActivity).catch(() => {})
   }, [repoPath, loadSync])
 
   useEffect(() => {
     reload()
-    ipc.getRemoteUrl(repoPath).then(setRemoteUrl).catch(() => {})
+    // Use session cache so remoteUrl isn't re-read from git on every tab switch
+    if (sessionRemoteUrls.has(repoPath)) {
+      setRemoteUrl(sessionRemoteUrls.get(repoPath) ?? null)
+    } else {
+      ipc.getRemoteUrl(repoPath)
+        .then(url => { sessionRemoteUrls.set(repoPath, url); setRemoteUrl(url) })
+        .catch(() => { sessionRemoteUrls.set(repoPath, null) })
+    }
     const storedPull  = localStorage.getItem(LAST_PULL_KEY(repoPath))
     const storedFetch = localStorage.getItem(LAST_FETCH_KEY(repoPath))
     setLastPull(storedPull   ? parseInt(storedPull,  10) : null)
     setLastFetch(storedFetch ? parseInt(storedFetch, 10) : null)
+    setHasFetched(sessionFetchedRepos.has(repoPath))
   }, [repoPath])
 
-  const doSync = async () => {
-    setBusy('sync')
+  // Refresh sync status when a history operation (undo, reset, revert, cherry-pick) changes local HEAD
+  useEffect(() => {
+    if (syncTick === syncTickRef.current) return
+    syncTickRef.current = syncTick
+    loadSync()
+  }, [syncTick, loadSync])
+
+  const doFetch = async () => {
+    setBusy('fetch')
     try {
       await opRun('Fetching…', () => ipc.fetch(repoPath))
       const now = Date.now()
       localStorage.setItem(LAST_FETCH_KEY(repoPath), String(now))
       setLastFetch(now)
+      sessionFetchedRepos.add(repoPath)
+      setHasFetched(true)
+      await loadSync()
+    } finally { setBusy(null) }
+  }
 
-      const fresh = await ipc.getSyncStatus(repoPath)
-      setSync(fresh)
+  const doPull = async () => {
+    setBusy('pull')
+    try {
+      await opRun('Pulling…', () => ipc.pull(repoPath))
+      const now = Date.now()
+      localStorage.setItem(LAST_PULL_KEY(repoPath), String(now))
+      setLastPull(now)
+      await loadSync()
+    } finally { setBusy(null) }
+  }
 
-      if (fresh.behind > 0) {
-        await opRun('Pulling…', () => ipc.pull(repoPath))
-        localStorage.setItem(LAST_PULL_KEY(repoPath), String(now))
-        setLastPull(now)
-      }
-
-      const afterPull = await ipc.getSyncStatus(repoPath)
-      setSync(afterPull)
-
-      if (afterPull.ahead > 0) {
-        await opRun('Pushing…', () => ipc.push(repoPath))
-      }
-
+  const doPush = async () => {
+    setBusy('push')
+    try {
+      await opRun('Pushing…', () => ipc.push(repoPath))
       await loadSync()
     } finally { setBusy(null) }
   }
@@ -182,9 +205,21 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
               {lastPull === null ? "Haven't pulled yet" : `Last pulled ${timeAgo(lastPull)}`}
             </span>
           </div>
-          <SmallBtn label={busy === 'sync' ? 'Syncing…' : 'Sync Now'} color="#f5a832" disabled={!!busy} onClick={doSync} />
+          <SmallBtn label={busy === 'pull' ? 'Pulling…' : 'Pull'} color="#f5a832" disabled={!!busy || !hasFetched} onClick={doPull} />
         </div>
       )}
+
+      {/* ── Suggestions ─────────────────────────────────────────────────── */}
+      <div style={{ marginBottom: 14 }}>
+        <SuggestionsCard
+          lastFetch={lastFetch}
+          lastPull={lastPull}
+          sync={sync}
+          fileStatus={fileStatus}
+          onFetch={doFetch}
+          busy={busy}
+        />
+      </div>
 
       {/* ── Daily Flow Guide ───────────────────────────────────────────── */}
       <DailyFlowStrip
@@ -192,35 +227,26 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
         staged={staged}
         unstaged={unstaged}
         busy={busy}
+        hasFetched={hasFetched}
         ghSlug={ghSlug}
         currentBranch={currentBranch}
-        onSync={doSync}
+        onFetch={doFetch}
+        onPull={doPull}
+        onPush={doPush}
         onGoChanges={() => onNavigate('changes')}
+        onOpenPR={() => remoteUrl && openPRDialog(repoPath, currentBranch, remoteUrl)}
       />
 
       {/* ── Status grid (3 columns) ─────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginTop: 16 }}>
-        <SyncCard sync={sync} busy={busy} onSync={doSync} />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gridAutoRows: '300px', gap: 14, marginTop: 16 }}>
+        <SyncCard sync={sync} busy={busy} hasFetched={hasFetched} onFetch={doFetch} onPull={doPull} onPush={doPush} />
         <ChangesCard files={fileStatus} staged={staged} unstaged={unstaged} onNavigate={onNavigate} />
-        <LocksCard locks={locks} currentLogin={currentLogin} />
+        <LocksCard locks={locks} currentLogin={currentLogin} repoPath={repoPath} unlockFile={unlockFile} isAdmin={isAdmin} />
       </div>
 
-      {/* ── Suggestions ─────────────────────────────────────────────────── */}
-      <div style={{ marginTop: 14 }}>
-        <SuggestionsCard
-          lastFetch={lastFetch}
-          lastPull={lastPull}
-          sync={sync}
-          fileStatus={fileStatus}
-          onSync={doSync}
-          busy={busy}
-        />
-      </div>
+      {/* ── Open Pull Requests ──────────────────────────────────────────── */}
+      {ghSlug && <PRsCard ghSlug={ghSlug} />}
 
-      {/* ── Activity ─────────────────────────────────────────────────────── */}
-      <div style={{ marginTop: 14 }}>
-        <ActivityCard activity={activity} onNavigate={onNavigate} />
-      </div>
     </div>
   )
 }
@@ -229,24 +255,30 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
 
 type StepState = 'done' | 'warn' | 'action' | 'neutral'
 
+interface FlowStepBtn {
+  label: string; color?: string; disabled: boolean; onClick: () => void
+}
+
 interface FlowStepDef {
   n: number
   label: string
   sub: string
   state: StepState
-  btn?: { label: string; color?: string; disabled: boolean; onClick: () => void }
+  btns?: FlowStepBtn[]
 }
 
 function DailyFlowStrip({
-  sync, staged, unstaged, busy, ghSlug, currentBranch,
-  onSync, onGoChanges,
+  sync, staged, unstaged, busy, hasFetched, ghSlug, currentBranch,
+  onFetch, onPull, onPush, onGoChanges, onOpenPR,
 }: {
   sync: SyncStatus | null
   staged: number; unstaged: number
   busy: string | null
+  hasFetched: boolean
   ghSlug: string | null
   currentBranch: string
-  onSync: () => void; onGoChanges: () => void
+  onFetch: () => void; onPull: () => void; onPush: () => void
+  onGoChanges: () => void; onOpenPR: () => void
 }) {
   const behind     = sync?.behind ?? 0
   const ahead      = sync?.ahead  ?? 0
@@ -254,33 +286,41 @@ function DailyFlowStrip({
 
   let syncState: StepState   = 'done'
   let syncSub                = 'In sync with remote'
-  let syncBtnColor: string | undefined = undefined
 
   if (behind > 0 && ahead > 0) {
-    syncState    = 'warn'
-    syncSub      = `${behind} behind · ${ahead} ahead`
-    syncBtnColor = '#f5a832'
+    syncState = 'warn'
+    syncSub   = `${behind} behind · ${ahead} ahead`
   } else if (behind > 0) {
-    syncState    = 'warn'
-    syncSub      = `${behind} commit${behind !== 1 ? 's' : ''} behind remote`
-    syncBtnColor = '#f5a832'
+    syncState = 'warn'
+    syncSub   = `${behind} commit${behind !== 1 ? 's' : ''} behind remote`
   } else if (ahead > 0) {
-    syncState    = 'action'
-    syncSub      = `${ahead} commit${ahead !== 1 ? 's' : ''} ready to push`
-    syncBtnColor = '#2dbd6e'
+    syncState = 'action'
+    syncSub   = `${ahead} commit${ahead !== 1 ? 's' : ''} ready to push`
   }
+
+  const isBusy = !!busy
+
+  const s1Btns: FlowStepBtn[] = [
+    {
+      label:    busy === 'fetch' ? 'Fetching…' : 'Fetch',
+      color:    undefined,
+      disabled: isBusy,
+      onClick:  onFetch,
+    },
+    {
+      label:    busy === 'pull' ? 'Pulling…' : 'Pull',
+      color:    behind > 0 && hasFetched ? '#f5a832' : undefined,
+      disabled: isBusy || !hasFetched,
+      onClick:  onPull,
+    },
+  ]
 
   const steps: FlowStepDef[] = [
     {
       n: 1, label: 'Sync',
       sub: syncSub,
       state: syncState,
-      btn: {
-        label: busy === 'sync' ? 'Syncing…' : 'Sync',
-        color: syncBtnColor,
-        disabled: !!busy,
-        onClick: onSync,
-      },
+      btns: s1Btns,
     },
     {
       n: 2, label: 'Work & Commit',
@@ -288,10 +328,7 @@ function DailyFlowStrip({
         ? `${staged > 0 ? `${staged} staged` : ''}${staged > 0 && unstaged > 0 ? ' · ' : ''}${unstaged > 0 ? `${unstaged} modified` : ''}`
         : 'Working directory clean',
       state: hasChanges ? 'action' : 'done',
-      btn: hasChanges ? {
-        label: 'View Changes',
-        color: '#4a9eff', disabled: false, onClick: onGoChanges,
-      } : undefined,
+      btns: hasChanges ? [{ label: 'View Changes', color: '#4a9eff', disabled: false, onClick: onGoChanges }] : undefined,
     },
     {
       n: 3, label: 'Open PR',
@@ -299,11 +336,7 @@ function DailyFlowStrip({
         ? `Merge ${currentBranch} into ${sync?.remoteBranch ?? 'main'}`
         : 'No GitHub remote detected',
       state: 'neutral',
-      btn: ghSlug ? {
-        label: 'Open PR ↗',
-        color: '#a78bfa', disabled: false,
-        onClick: () => ipc.openExternal(`https://github.com/${ghSlug}/compare/${encodeURIComponent(currentBranch)}?expand=1`),
-      } : undefined,
+      btns: ghSlug ? [{ label: 'Create PR', color: '#a78bfa', disabled: false, onClick: onOpenPR }] : undefined,
     },
   ]
 
@@ -356,14 +389,16 @@ function FlowStep({ step }: { step: FlowStepDef }) {
       <div style={{
         fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5,
         color: highlighted ? `${s.accent}99` : '#283047',
-        marginBottom: step.btn ? 10 : 2, marginLeft: 27, lineHeight: 1.5,
+        marginBottom: step.btns?.length ? 10 : 2, marginLeft: 27, lineHeight: 1.5,
       }}>
         {step.sub}
       </div>
 
-      {step.btn && (
-        <div style={{ marginLeft: 27 }}>
-          <SmallBtn label={step.btn.label} color={step.btn.color} disabled={step.btn.disabled} onClick={step.btn.onClick} />
+      {step.btns && step.btns.length > 0 && (
+        <div style={{ marginLeft: 27, display: 'flex', gap: 6 }}>
+          {step.btns.map((b, i) => (
+            <SmallBtn key={i} label={b.label} color={b.color} disabled={b.disabled} onClick={b.onClick} />
+          ))}
         </div>
       )}
     </div>
@@ -388,12 +423,12 @@ const URGENCY_COLOR: Record<SuggestionUrgency, { dot: string; bg: string; border
   critical: { dot: '#e84545', bg: 'rgba(232,69,69,0.08)',   border: 'rgba(232,69,69,0.28)',   text: '#c05050'  },
 }
 
-function SuggestionsCard({ lastFetch, lastPull, sync, fileStatus, onSync, busy }: {
+function SuggestionsCard({ lastFetch, lastPull, sync, fileStatus, onFetch, busy }: {
   lastFetch: number | null
   lastPull: number | null
   sync: SyncStatus | null
   fileStatus: FileStatus[]
-  onSync: () => void
+  onFetch: () => void
   busy: string | null
 }) {
   const h            = new Date().getHours()
@@ -413,21 +448,21 @@ function SuggestionsCard({ lastFetch, lastPull, sync, fileStatus, onSync, busy }
     suggestions.push({
       urgency: 'high',
       text: "You haven't synced with the remote yet. Fetch now to see if your teammates have pushed new commits.",
-      action: { label: 'Sync Now', onClick: onSync, disabled: !!busy },
+      action: { label: 'Fetch Now', onClick: onFetch, disabled: !!busy },
     })
   } else if (sinceDays! >= 2) {
     const d = Math.floor(sinceDays!)
     suggestions.push({
       urgency: 'critical',
       text: `Last synced ${d} day${d !== 1 ? 's' : ''} ago — you may be significantly out of date with your team. Fetch and pull before continuing work to avoid difficult merge conflicts.`,
-      action: { label: 'Sync Now', onClick: onSync, disabled: !!busy },
+      action: { label: 'Fetch Now', onClick: onFetch, disabled: !!busy },
     })
   } else if (sinceHours! >= 8) {
     const hrs = Math.floor(sinceHours!)
     suggestions.push({
       urgency: 'warn',
       text: `${hrs} hour${hrs !== 1 ? 's' : ''} since last sync — consider fetching to check whether teammates have pushed new commits since then.`,
-      action: { label: 'Sync', onClick: onSync, disabled: !!busy },
+      action: { label: 'Fetch', onClick: onFetch, disabled: !!busy },
     })
   } else if (sinceHours! >= 4) {
     const hrs = Math.floor(sinceHours!)
@@ -467,7 +502,7 @@ function SuggestionsCard({ lastFetch, lastPull, sync, fileStatus, onSync, busy }
 
   return (
     <Card title="Suggestions" icon={<SuggestionsIcon />}>
-      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', flex: 1 }}>
         {suggestions.map((s, i) => {
           const uc = URGENCY_COLOR[s.urgency]
           return (
@@ -493,16 +528,18 @@ function SuggestionsCard({ lastFetch, lastPull, sync, fileStatus, onSync, busy }
 
 // ── Sync Status Card ──────────────────────────────────────────────────────────
 
-function SyncCard({ sync, busy, onSync }: {
-  sync: SyncStatus | null; busy: string | null; onSync: () => void
+function SyncCard({ sync, busy, hasFetched, onFetch, onPull, onPush }: {
+  sync: SyncStatus | null; busy: string | null; hasFetched: boolean
+  onFetch: () => void; onPull: () => void; onPush: () => void
 }) {
-  const behind = sync?.behind ?? 0
-  const ahead  = sync?.ahead  ?? 0
-  const clean  = sync && behind === 0 && ahead === 0
+  const behind      = sync?.behind ?? 0
+  const ahead       = sync?.ahead  ?? 0
+  const clean       = sync && behind === 0 && ahead === 0
+  const pushEnabled = hasFetched && behind === 0 && ahead > 0 && !busy
 
   return (
     <Card title="Sync Status" icon={<SyncIcon />}>
-      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', flex: 1 }}>
         <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#344057', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {sync?.hasUpstream ? `→ ${sync.remoteName}/${sync.remoteBranch}` : 'No upstream configured'}
         </div>
@@ -519,12 +556,31 @@ function SyncCard({ sync, busy, onSync }: {
           </div>
         )}
 
-        <SmallBtn
-          label={busy === 'sync' ? 'Syncing…' : 'Sync'}
-          color={behind > 0 ? '#f5a832' : ahead > 0 ? '#2dbd6e' : undefined}
-          disabled={!!busy}
-          onClick={onSync}
-        />
+        {!hasFetched && ahead > 0 && (
+          <div style={{ fontSize: 10.5, color: '#4a566a', fontFamily: "'IBM Plex Sans', system-ui" }}>
+            Fetch required before push
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 6 }}>
+          <SmallBtn
+            label={busy === 'fetch' ? 'Fetching…' : 'Fetch'}
+            disabled={!!busy}
+            onClick={onFetch}
+          />
+          <SmallBtn
+            label={busy === 'pull' ? 'Pulling…' : 'Pull'}
+            color={behind > 0 && hasFetched ? '#f5a832' : undefined}
+            disabled={!!busy || !hasFetched}
+            onClick={onPull}
+          />
+          <SmallBtn
+            label={busy === 'push' ? 'Pushing…' : 'Push'}
+            color={pushEnabled ? '#2dbd6e' : undefined}
+            disabled={!pushEnabled}
+            onClick={onPush}
+          />
+        </div>
       </div>
     </Card>
   )
@@ -540,7 +596,7 @@ function ChangesCard({ files, staged, unstaged, onNavigate }: {
 
   return (
     <Card title="Current Changes" icon={<ChangesCardIcon />} onAction={() => onNavigate('changes')} actionLabel="View All">
-      <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', flex: 1 }}>
         <div style={{ display: 'flex', gap: 12 }}>
           <StatPill icon="●" value={staged}  label="staged"   color={staged   > 0 ? '#2dbd6e' : '#283047'} />
           <StatPill icon="○" value={unstaged} label="modified" color={unstaged > 0 ? '#f5a832' : '#283047'} />
@@ -586,22 +642,77 @@ function ChangesCard({ files, staged, unstaged, onNavigate }: {
 
 // ── Active Locks Card ─────────────────────────────────────────────────────────
 
-function LocksCard({ locks, currentLogin }: { locks: Lock[]; currentLogin: string | null }) {
+function LocksCard({ locks, currentLogin, repoPath, unlockFile, isAdmin }: {
+  locks: Lock[]
+  currentLogin: string | null
+  repoPath: string
+  unlockFile: (repoPath: string, filePath: string, force?: boolean) => Promise<void>
+  isAdmin: boolean
+}) {
+  const [tab, setTab]           = useState<'mine' | 'team'>('mine')
+  const [unlocking, setUnlocking] = useState<string | null>(null)
+
+  const myLocks   = locks.filter(l => currentLogin && l.owner.login === currentLogin)
+  const teamLocks = locks.filter(l => !currentLogin || l.owner.login !== currentLogin)
+  const shown     = tab === 'mine' ? myLocks : teamLocks
+
+  const doUnlock = async (lock: Lock, force: boolean) => {
+    setUnlocking(lock.path)
+    try { await unlockFile(repoPath, lock.path, force) } catch { /* best-effort */ }
+    finally { setUnlocking(null) }
+  }
+
   return (
     <Card title="Active Locks" icon={<LockCardIcon />}>
-      <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {locks.length === 0 ? (
+      {/* Tabs */}
+      <div style={{ display: 'flex', borderBottom: '1px solid #18202e', paddingLeft: 13, background: 'rgba(0,0,0,0.06)', flexShrink: 0 }}>
+        {(['mine', 'team'] as const).map(t => {
+          const count = t === 'mine' ? myLocks.length : teamLocks.length
+          return (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              style={{
+                height: 30, paddingLeft: 12, paddingRight: 12,
+                background: 'none', border: 'none', cursor: 'pointer',
+                borderBottom: `2px solid ${tab === t ? '#e8622f' : 'transparent'}`,
+                color: tab === t ? '#e8622f' : '#4a566a',
+                fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, fontWeight: 600,
+                letterSpacing: '0.04em', transition: 'color 0.1s',
+              }}
+            >
+              {t === 'mine' ? 'Mine' : 'Team'}
+              {count > 0 && (
+                <span style={{
+                  marginLeft: 5, fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
+                  background: tab === t ? 'rgba(232,98,47,0.2)' : '#1a2030',
+                  color: tab === t ? '#e8622f' : '#4a566a',
+                  borderRadius: 8, padding: '1px 5px',
+                }}>{count}</span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 6, overflowY: 'auto', flex: 1, minHeight: 0 }}>
+        {shown.length === 0 ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ color: '#2dbd6e', fontSize: 12 }}>✓</span>
-            <span style={{ fontSize: 11.5, color: '#344057' }}>No active locks</span>
+            <span style={{ fontSize: 11.5, color: '#344057' }}>
+              {tab === 'mine' ? 'No files locked by you' : 'No team locks'}
+            </span>
           </div>
         ) : (
-          locks.slice(0, 7).map(lock => {
-            const filename = lock.path.replace(/\\/g, '/').split('/').pop() ?? lock.path
-            const isOwn    = currentLogin && lock.owner.login === currentLogin
-            const color    = isOwn ? '#4a9eff' : '#7b8499'
+          shown.map(lock => {
+            const filename  = lock.path.replace(/\\/g, '/').split('/').pop() ?? lock.path
+            const isOwn     = currentLogin && lock.owner.login === currentLogin
+            const color     = isOwn ? '#4a9eff' : '#7b8499'
+            const isBusy    = unlocking === lock.path
+            const canUnlock = isOwn || isAdmin
+            const force     = !isOwn
             return (
-              <div key={lock.id} style={{ display: 'flex', alignItems: 'center', gap: 7, overflow: 'hidden' }}>
+              <div key={lock.id} style={{ display: 'flex', alignItems: 'center', gap: 7, overflow: 'hidden', minHeight: 36, flexShrink: 0 }}>
                 <div style={{
                   width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
                   background: `${authorColor(lock.owner.name)}22`,
@@ -609,9 +720,7 @@ function LocksCard({ locks, currentLogin }: { locks: Lock[]; currentLogin: strin
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontFamily: "'JetBrains Mono', monospace", fontSize: 7, fontWeight: 700,
                   color: authorColor(lock.owner.name),
-                }}>
-                  {initials(lock.owner.name)}
-                </div>
+                }}>{initials(lock.owner.name)}</div>
                 <div style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
                   <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lock.path}>
                     {filename}
@@ -620,90 +729,137 @@ function LocksCard({ locks, currentLogin }: { locks: Lock[]; currentLogin: strin
                     {lock.owner.login} · {timeAgoStr(lock.lockedAt)}
                   </div>
                 </div>
-                {isOwn && (
+                {canUnlock ? (
+                  <button
+                    onClick={() => doUnlock(lock, force)}
+                    disabled={isBusy}
+                    style={{
+                      height: 20, padding: '0 7px', borderRadius: 4, flexShrink: 0,
+                      background: 'transparent',
+                      border: `1px solid ${force ? 'rgba(232,69,69,0.35)' : 'rgba(74,158,255,0.35)'}`,
+                      color: force ? '#e84545' : '#4a9eff',
+                      fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, fontWeight: 600,
+                      cursor: isBusy ? 'default' : 'pointer', opacity: isBusy ? 0.5 : 1,
+                    }}
+                    onMouseEnter={e => { if (!isBusy) e.currentTarget.style.background = force ? 'rgba(232,69,69,0.1)' : 'rgba(74,158,255,0.1)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                  >
+                    {isBusy ? '…' : force ? 'Force' : 'Unlock'}
+                  </button>
+                ) : (
                   <span style={{
                     fontSize: 8, fontWeight: 700, letterSpacing: '0.06em',
-                    background: 'rgba(74,158,255,0.1)', color: '#4a9eff',
-                    border: '1px solid rgba(74,158,255,0.2)', borderRadius: 3,
+                    background: 'rgba(123,132,153,0.1)', color: '#7b8499',
+                    border: '1px solid rgba(123,132,153,0.2)', borderRadius: 3,
                     padding: '1px 5px', flexShrink: 0,
-                  }}>YOU</span>
+                  }}>{lock.owner.login.slice(0, 4).toUpperCase()}</span>
                 )}
               </div>
             )
           })
-        )}
-        {locks.length > 7 && (
-          <span style={{ fontSize: 11, color: '#344057', fontFamily: "'IBM Plex Sans', system-ui" }}>
-            +{locks.length - 7} more locks
-          </span>
         )}
       </div>
     </Card>
   )
 }
 
-// ── Activity Card ─────────────────────────────────────────────────────────────
 
-function ActivityCard({ activity, onNavigate }: { activity: BranchActivity[]; onNavigate: (tab: string) => void }) {
-  const shown = activity.slice(0, 12)
+// ── Open PRs Card ─────────────────────────────────────────────────────────────
+
+function PRsCard({ ghSlug }: { ghSlug: string }) {
+  const [prs, setPrs] = useState<PullRequest[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    const [owner, repo] = ghSlug.split('/')
+    setLoading(true)
+    setError(null)
+    try {
+      setPrs(await ipc.githubListPRs({ owner, repo }))
+    } catch (err: any) {
+      setError(err?.message ?? 'Failed to load pull requests')
+    } finally {
+      setLoading(false)
+    }
+  }, [ghSlug])
+
+  useEffect(() => { load() }, [load])
 
   return (
-    <Card title="Activity" icon={<ActivityIcon />} onAction={() => onNavigate('history')} actionLabel="Full History">
-      <div style={{ padding: '6px 14px 10px' }}>
-        {shown.length === 0 ? (
-          <p style={{ margin: 0, fontSize: 11.5, color: '#344057', padding: '6px 0' }}>No recent activity</p>
-        ) : (
-          <div>
-            {shown.map((a, i) => {
-              const branch = stripBranchRef(a.ref)
-              const color  = authorColor(a.author)
-              return (
-                <div key={i} style={{
-                  display: 'flex', alignItems: 'flex-start', gap: 12,
-                  padding: '10px 0',
-                  borderBottom: i < shown.length - 1 ? '1px solid #141a26' : 'none',
-                }}>
-                  {/* Avatar */}
-                  <div style={{
-                    width: 28, height: 28, borderRadius: '50%', flexShrink: 0, marginTop: 1,
-                    background: `${color}18`, border: `1px solid ${color}44`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontFamily: "'JetBrains Mono', monospace", fontSize: 9, fontWeight: 700, color,
+    <div style={{ marginTop: 14 }}>
+      <Card title="Open Pull Requests" icon={<PRCardIcon />} onAction={load} actionLabel={loading ? '…' : 'Refresh'}>
+        <div style={{ padding: '10px 14px', overflowY: 'auto', maxHeight: 300 }}>
+          {error ? (
+            <div style={{ padding: '4px 0', fontSize: 12, color: '#e84545', fontFamily: "'IBM Plex Sans', system-ui" }}>
+              {error}
+            </div>
+          ) : loading && prs.length === 0 ? (
+            <div style={{ padding: '4px 0', fontSize: 12, color: '#344057', fontFamily: "'IBM Plex Sans', system-ui" }}>
+              Loading…
+            </div>
+          ) : prs.length === 0 ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0' }}>
+              <span style={{ color: '#2dbd6e', fontSize: 12 }}>✓</span>
+              <span style={{ fontSize: 11.5, color: '#344057', fontFamily: "'IBM Plex Sans', system-ui" }}>No open pull requests</span>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {prs.map(pr => (
+                <button
+                  key={pr.number}
+                  onClick={() => ipc.openExternal(pr.htmlUrl)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '8px 10px', borderRadius: 6,
+                    background: 'transparent', border: '1px solid transparent',
+                    cursor: 'pointer', width: '100%', textAlign: 'left',
+                    transition: 'background 0.1s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.borderColor = '#1a2030' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent' }}
+                >
+                  <span style={{
+                    fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 700,
+                    color: '#a27ef0', background: 'rgba(162,126,240,0.12)',
+                    border: '1px solid rgba(162,126,240,0.25)',
+                    borderRadius: 4, padding: '1px 6px', flexShrink: 0, lineHeight: '16px',
+                  }}>#{pr.number}</span>
+                  <span style={{
+                    fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#c8d0e8',
+                    flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>{pr.title}</span>
+                  {pr.draft && (
+                    <span style={{
+                      fontFamily: "'IBM Plex Sans', system-ui", fontSize: 9, fontWeight: 700,
+                      background: 'rgba(90,104,128,0.12)', color: '#5a6880',
+                      border: '1px solid rgba(90,104,128,0.2)', borderRadius: 3, padding: '1px 5px',
+                      letterSpacing: '0.05em', flexShrink: 0,
+                    }}>DRAFT</span>
+                  )}
+                  <span style={{
+                    fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5,
+                    flexShrink: 0, display: 'flex', alignItems: 'center', gap: 3,
                   }}>
-                    {initials(a.author)}
-                  </div>
-
-                  <div style={{ flex: 1 }}>
-                    {/* Commit message — full text, wraps naturally */}
-                    <div style={{
-                      fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5, fontWeight: 500,
-                      color: '#c8d0e8', lineHeight: 1.5,
-                    }}>
-                      {a.message}
-                    </div>
-
-                    {/* Branch + author + time — all on one line, wraps if needed */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5, flexWrap: 'wrap' }}>
-                      <span style={{
-                        fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5,
-                        color, background: `${color}12`, border: `1px solid ${color}30`,
-                        borderRadius: 4, padding: '1px 6px', flexShrink: 0,
-                      }}>{branch}</span>
-                      <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#5a6880' }}>
-                        {a.author}
-                      </span>
-                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#283047' }}>
-                        {timeAgoStr(a.date)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
-    </Card>
+                    <span style={{ color: '#4a9eff' }}>{pr.headBranch}</span>
+                    <span style={{ color: '#283047' }}>→</span>
+                    <span style={{ color: '#344057' }}>{pr.baseBranch}</span>
+                  </span>
+                  <span style={{
+                    fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10.5, color: '#344057',
+                    flexShrink: 0,
+                  }}>{pr.author} · {timeAgoStr(pr.updatedAt)}</span>
+                  <svg width="10" height="10" viewBox="0 0 12 12" fill="none" style={{ color: '#283047', flexShrink: 0 }}>
+                    <path d="M10 2H7M10 2V5M10 2L5 7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M5 3H2v7h7V7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </Card>
+    </div>
   )
 }
 
@@ -832,13 +988,16 @@ function SuggestionsIcon() {
   )
 }
 
-function ActivityIcon() {
+function PRCardIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-      <circle cx="4" cy="4"  r="1.5" stroke="currentColor" strokeWidth="1.2" />
-      <circle cx="4" cy="8"  r="1.5" stroke="currentColor" strokeWidth="1.2" />
-      <circle cx="4" cy="12" r="1.5" stroke="currentColor" strokeWidth="1.2" />
-      <path d="M6.5 4h6M6.5 8h4.5M6.5 12h5.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <circle cx="4" cy="4" r="1.5" stroke="currentColor" strokeWidth="1.3" />
+      <circle cx="4" cy="12" r="1.5" stroke="currentColor" strokeWidth="1.3" />
+      <circle cx="12" cy="12" r="1.5" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M4 5.5v5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <path d="M12 10.5V8a2 2 0 0 0-2-2H7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <path d="M6 5.5L4 3.5 2 5.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }
+

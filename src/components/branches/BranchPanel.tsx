@@ -3,6 +3,7 @@ import { BranchInfo, BranchDiffSummary, ipc } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useOperationStore } from '@/stores/operationStore'
 import { useDialogStore } from '@/stores/dialogStore'
+import { usePRStore } from '@/stores/prStore'
 import { cn } from '@/lib/utils'
 
 interface BranchPanelProps {
@@ -191,11 +192,12 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
     }
   }
 
+  const openPRDialog = usePRStore(s => s.openDialog)
+
   const openPR = (branchName: string) => {
-    if (!remoteUrl) return
-    const slug = parseGitHubSlug(remoteUrl)
-    if (!slug) return
-    ipc.openExternal(`https://github.com/${slug}/compare/${encodeURIComponent(branchName)}?expand=1`)
+    if (!remoteUrl || !repoPath) return
+    if (!parseGitHubSlug(remoteUrl)) return
+    openPRDialog(repoPath, branchName, remoteUrl)
   }
 
   const ghSlug = remoteUrl ? parseGitHubSlug(remoteUrl) : null

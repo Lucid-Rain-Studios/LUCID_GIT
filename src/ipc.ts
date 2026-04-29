@@ -210,6 +210,15 @@ export interface DiffContent {
   language: string
 }
 
+export interface BlameEntry {
+  hash:      string
+  author:    string
+  timestamp: number   // Unix ms
+  summary:   string
+  lineNo:    number
+  line:      string
+}
+
 // ── Asset diff (Phase 17) ─────────────────────────────────────────────────────
 
 export type AssetType = 'texture' | 'audio' | 'video' | 'level' | 'generic-ue' | 'binary'
@@ -420,6 +429,20 @@ export interface BranchDiffSummary {
   totalDeletions: number
 }
 
+// ── GitHub Pull Requests ──────────────────────────────────────────────────────
+
+export interface PullRequest {
+  number: number
+  title: string
+  htmlUrl: string
+  author: string
+  headBranch: string
+  baseBranch: string
+  draft: boolean
+  createdAt: string
+  updatedAt: string
+}
+
 // ── Permissions (Phase 20) ────────────────────────────────────────────────────
 
 export type RepoPermission = 'admin' | 'write' | 'read'
@@ -440,6 +463,7 @@ export interface LucidGitAPI {
   pollDeviceFlow: (deviceCode: string) => Promise<{ token: string; userId: string } | null>
   listAccounts: () => Promise<{ accounts: Account[]; currentAccountId: string | null }>
   logout: (userId: string) => Promise<void>
+  setCurrentAccount: (userId: string) => Promise<void>
 
   // Permissions — Phase 20
   fetchRepoPermission: (repoPath: string) => Promise<RepoPermission>
@@ -543,6 +567,8 @@ export interface LucidGitAPI {
   // Git identity + locking config
   gitGetIdentity: (repoPath: string) => Promise<GitIdentity>
   gitLinkIdentity: (repoPath: string, login: string, name: string) => Promise<void>
+  getGlobalGitIdentity: () => Promise<GitIdentity>
+  setGlobalGitIdentity: (name: string, email: string) => Promise<void>
 
   // App Settings
   settingsGet: () => Promise<AppSettings>
@@ -561,6 +587,8 @@ export interface LucidGitAPI {
   gitFileLog: (repoPath: string, filePath: string, limit?: number) => Promise<CommitEntry[]>
   gitBranchActivity: (repoPath: string) => Promise<BranchActivity[]>
   gitDefaultBranch: (repoPath: string) => Promise<string>
+  gitBlame: (repoPath: string, filePath: string, rev: string) => Promise<BlameEntry[]>
+  gitCommitFileDiff: (repoPath: string, filePath: string, hash: string) => Promise<DiffContent>
 
   // Asset diff previews — Phase 17
   assetDiffPreview: (repoPath: string, filePath: string, leftRef: string, rightRef: string, editorBinaryOverride?: string) => Promise<AssetDiffResult>
@@ -590,6 +618,17 @@ export interface LucidGitAPI {
   depBlameAsset: (repoPath: string, filePath: string) => Promise<DepBlameResult>
   depLookupReferences: (repoPath: string, packageName: string) => Promise<DepRefResult>
   depRefreshCache: (repoPath: string) => Promise<void>
+
+  // GitHub API
+  githubCreatePR: (args: { owner: string; repo: string; head: string; base: string; title: string; body: string; draft: boolean }) => Promise<{ number: number; htmlUrl: string; title: string }>
+  githubListPRs:  (args: { owner: string; repo: string }) => Promise<PullRequest[]>
+  githubMergePR:  (args: { owner: string; repo: string; prNumber: number }) => Promise<void>
+  githubClosePR:  (args: { owner: string; repo: string; prNumber: number }) => Promise<void>
+
+  // Bug logs
+  logGetText: () => Promise<string>
+  logGetSuggestion: () => Promise<string | null>
+  logSaveDialog: () => Promise<string | null>
 
   // Events: main → renderer — each returns an unsubscribe function
   onOperationProgress: (cb: (step: OperationStep) => void) => () => void

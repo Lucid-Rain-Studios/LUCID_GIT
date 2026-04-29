@@ -2,8 +2,9 @@ export const CHANNELS = {
   // Auth
   AUTH_START_DEVICE_FLOW:  'auth:start-device-flow',
   AUTH_POLL_DEVICE_FLOW:   'auth:poll-device-flow',
-  AUTH_LIST_ACCOUNTS:      'auth:list-accounts',
-  AUTH_LOGOUT:             'auth:logout',
+  AUTH_LIST_ACCOUNTS:          'auth:list-accounts',
+  AUTH_LOGOUT:                 'auth:logout',
+  AUTH_SET_CURRENT_ACCOUNT:    'auth:set-current-account',
 
   // Git core
   GIT_IS_REPO:       'git:is-repo',
@@ -102,6 +103,8 @@ export const CHANNELS = {
   // Git identity + locking config
   GIT_GET_IDENTITY:        'git:get-identity',
   GIT_LINK_IDENTITY:       'git:link-identity',
+  GIT_GET_GLOBAL_IDENTITY: 'git:get-global-identity',
+  GIT_SET_GLOBAL_IDENTITY: 'git:set-global-identity',
 
   // Settings
   SETTINGS_GET: 'settings:get',
@@ -121,6 +124,8 @@ export const CHANNELS = {
   GIT_BRANCH_ACTIVITY: 'git:branch-activity',
   GIT_BRANCH_DIFF:     'git:branch-diff',
   GIT_DEFAULT_BRANCH:  'git:default-branch',
+  GIT_BLAME:           'git:blame',
+  GIT_DIFF_COMMIT:     'git:diff-commit',
 
   // Asset diff previews (Phase 17)
   ASSET_DIFF_PREVIEW:      'asset:diff-preview',
@@ -147,6 +152,12 @@ export const CHANNELS = {
   DEP_LOOKUP_REFERENCES: 'dep:lookup-references',
   DEP_REFRESH_CACHE:     'dep:refresh-cache',
 
+  // GitHub API
+  GITHUB_CREATE_PR: 'github:create-pr',
+  GITHUB_LIST_PRS:  'github:list-prs',
+  GITHUB_MERGE_PR:  'github:merge-pr',
+  GITHUB_CLOSE_PR:  'github:close-pr',
+
   // OS dialogs + shell
   DIALOG_OPEN_DIRECTORY: 'dialog:open-directory',
   DIALOG_OPEN_FILE:      'dialog:open-file',
@@ -162,6 +173,11 @@ export const CHANNELS = {
   // Permissions — Phase 20
   AUTH_FETCH_REPO_PERMISSION: 'auth:fetch-repo-permission',
   AUTH_GET_REPO_PERMISSION:   'auth:get-repo-permission',
+
+  // Bug logs
+  LOG_GET_TEXT:      'log:get-text',
+  LOG_GET_SUGGESTION:'log:get-suggestion',
+  LOG_SAVE_DIALOG:   'log:save-dialog',
 
   // Events: main → renderer (one-way via ipcRenderer.on)
   EVT_OPERATION_PROGRESS: 'evt:operation-progress',

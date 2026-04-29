@@ -1,5 +1,6 @@
 import { GitProcess } from 'dugite'
 import { OperationStep } from '../types'
+import { logService } from '../services/LogService'
 
 export type ProgressCallback = (step: OperationStep) => void
 
@@ -89,6 +90,9 @@ export async function execWithProgress(
       if (code === 0 || code === null) {
         resolve({ stdout, stderr })
       } else {
+        const errText = (stderr || stdout).slice(0, 1000)
+        const subCmd  = args.find(a => !a.startsWith('-')) ?? args[0]
+        logService.error(`git.${subCmd}`, `git ${subCmd} failed (exit ${code}):\n${errText}`)
         reject(new Error(`git ${args[0]} failed (exit ${code}):\n${stderr || stdout}`))
       }
     })
@@ -110,12 +114,36 @@ export async function exec(
   })
 
   if (result.exitCode !== 0) {
+    const errText = (result.stderr || result.stdout).slice(0, 1000)
+    const subCmd  = args.find(a => !a.startsWith('-')) ?? args[0]
+    logService.error(`git.${subCmd}`, `git ${subCmd} failed (exit ${result.exitCode}):\n${errText}`)
     throw new Error(
       `git ${args[0]} failed (exit ${result.exitCode}):\n${result.stderr || result.stdout}`
     )
   }
 
   return { stdout: result.stdout, stderr: result.stderr }
+}
+
+// ── withTimeout — races a promise against a deadline ─────────────────────────
+
+export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>
+  const deadline = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms)
+  })
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    deadline,
+  ])
+}
+
+// ── gitAuthArgs — injects token via git http extraheader (avoids credential manager) ──
+
+export function gitAuthArgs(token: string | null): string[] {
+  if (!token) return []
+  const b64 = Buffer.from(`x-access-token:${token}`).toString('base64')
+  return ['-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${b64}`]
 }
 
 // ── execSafe (never throws — returns exitCode instead) ────────────────────────

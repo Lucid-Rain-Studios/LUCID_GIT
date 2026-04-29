@@ -366,8 +366,12 @@ function GenericIcon({ ext }: { ext: string }) {
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export function BinaryDiff({ file, repoPath }: BinaryDiffProps) {
-  const [history, setHistory]     = useState<CommitEntry[] | null>(null)
+  const [history, setHistory]         = useState<CommitEntry[] | null>(null)
   const [histLoading, setHistLoading] = useState(true)
+  const [thumbnail, setThumbnail]     = useState<string | null>(null)
+
+  const isUEAsset = /\.(uasset|umap|upk|udk)$/i.test(file.path)
+  const thumbRef  = file.staged ? 'INDEX' : 'WORKING'
 
   useEffect(() => {
     setHistLoading(true)
@@ -378,9 +382,22 @@ export function BinaryDiff({ file, repoPath }: BinaryDiffProps) {
       .finally(() => setHistLoading(false))
   }, [repoPath, file.path])
 
+  useEffect(() => {
+    if (!isUEAsset) { setThumbnail(null); return }
+    setThumbnail(null)
+    ipc.assetRenderThumbnail(repoPath, file.path, thumbRef)
+      .then(p => setThumbnail(p))
+      .catch(() => {})
+  }, [repoPath, file.path, thumbRef, isUEAsset])
+
   const asset    = classifyAsset(file.path)
   const fileName = file.path.replace(/\\/g, '/').split('/').pop() ?? file.path
   const ext      = file.path.split('.').pop()?.toLowerCase() ?? ''
+
+  // Convert absolute path to file:// URL for Electron renderer
+  const thumbSrc = thumbnail
+    ? `file:///${thumbnail.replace(/\\/g, '/').replace(/^\/+/, '')}`
+    : null
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -391,12 +408,24 @@ export function BinaryDiff({ file, repoPath }: BinaryDiffProps) {
         padding: '24px 32px 18px', gap: 0, flexShrink: 0,
       }}>
         <div style={{
-          width: 64, height: 64, borderRadius: 14,
-          background: `${asset.color}12`, border: `1.5px solid ${asset.color}30`,
+          width: 72, height: 72, borderRadius: 14, overflow: 'hidden',
+          background: thumbSrc ? '#0b0d13' : `${asset.color}12`,
+          border: thumbSrc ? '1px solid rgba(255,255,255,0.07)' : `1.5px solid ${asset.color}30`,
+          backgroundImage: thumbSrc ? 'repeating-conic-gradient(#13161e 0% 25%, transparent 0% 50%)' : 'none',
+          backgroundSize: '8px 8px',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: asset.color, marginBottom: 14,
+          color: asset.color, marginBottom: 14, flexShrink: 0,
+          boxShadow: thumbSrc ? '0 4px 18px rgba(0,0,0,0.5)' : 'none',
         }}>
-          {asset.icon}
+          {thumbSrc ? (
+            <img
+              src={thumbSrc}
+              alt="Asset thumbnail"
+              style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+            />
+          ) : (
+            asset.icon
+          )}
         </div>
 
         <div style={{

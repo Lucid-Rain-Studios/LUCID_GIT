@@ -65,11 +65,12 @@ const DEFS: ErrorDef[] = [
     test: /Authentication failed|could not read Username|Invalid credentials|bad credentials|401 Authorization Required|403 Forbidden/i,
     title: 'Authentication failed',
     description: 'Your GitHub credentials are missing, expired, or revoked.',
-    causes: ['OAuth token expired or revoked', 'Wrong account selected', 'Missing required scopes (repo, write:lfs)'],
+    causes: ['OAuth token expired or revoked', 'Wrong account selected', 'Missing required scopes (repo, write:lfs)', 'Token not authorized for organization SSO'],
     severity: 'error',
     canAutoFix: true,
     fixes: [
       { label: 'Sign in again', action: { type: 'reauth' } },
+      { label: 'Authorize token for org SSO: github.com → Settings → Applications → find this app → Grant', command: 'start https://github.com/settings/connections/applications' },
       { label: 'Verify token scopes', command: 'gh auth status' },
     ],
   },

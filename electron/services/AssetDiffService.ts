@@ -177,6 +177,57 @@ class AssetDiffService {
     }
   }
 
+  /**
+   * Scan a buffer for embedded PNG streams (UE assets embed thumbnails as raw PNG).
+   * Returns all valid PNG buffers found, largest first.
+   */
+  private extractPNGsFromBuffer(buf: Buffer): Buffer[] {
+    const PNG_SIG  = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+    const IEND_TYPE = Buffer.from([0x49, 0x45, 0x4E, 0x44]) // 'IEND'
+    const results: Buffer[] = []
+    let searchFrom = 0
+
+    while (searchFrom < buf.length) {
+      const start = buf.indexOf(PNG_SIG, searchFrom)
+      if (start === -1) break
+
+      let pos = start + 8  // skip 8-byte signature
+      let found = false
+
+      while (pos + 12 <= buf.length) {
+        const dataLen = buf.readUInt32BE(pos)
+        if (dataLen > 64 * 1024 * 1024) break  // sanity: no chunk > 64 MB
+        const chunkEnd = pos + 4 + 4 + dataLen + 4  // len(4) + type(4) + data + crc(4)
+        if (chunkEnd > buf.length) break
+        if (buf.slice(pos + 4, pos + 8).equals(IEND_TYPE)) {
+          results.push(buf.slice(start, chunkEnd))
+          searchFrom = chunkEnd
+          found = true
+          break
+        }
+        pos = chunkEnd
+      }
+
+      if (!found) searchFrom = start + 1
+    }
+
+    // Largest PNG first (highest resolution thumbnail)
+    return results.sort((a, b) => b.length - a.length)
+  }
+
+  /** Extract the best embedded PNG thumbnail from a UE asset binary file. */
+  private async extractUEThumbnail(blobPath: string, outPng: string): Promise<boolean> {
+    try {
+      const buf  = await fs.promises.readFile(blobPath)
+      const pngs = this.extractPNGsFromBuffer(buf)
+      if (pngs.length === 0 || pngs[0].length < 67) return false  // min valid PNG ~67 bytes
+      await fs.promises.writeFile(outPng, pngs[0])
+      return true
+    } catch {
+      return false
+    }
+  }
+
   /** Build a PreviewData (PNG thumbnail) for an image blob using sharp. */
   private async renderTexturePreview(
     blobPath: string,
@@ -292,10 +343,9 @@ class AssetDiffService {
       }
     }
 
-    // ── UE assets / levels — attempt commandlet, fall back to metadata ─────────
+    // ── UE assets / levels — extract embedded thumbnails, then try commandlet ───
     if (assetType === 'generic-ue' || assetType === 'level') {
-      const project = req.repoPath  // simplified: assume uproject in root
-      // Try to find engine binary from the project's EngineAssociation
+      const project = req.repoPath
       let editorBin: string | null = null
       try {
         const entries = fs.readdirSync(req.repoPath)
@@ -318,19 +368,43 @@ class AssetDiffService {
         fallbackReason = 'UE commandlet diff not yet available in this build'
       }
 
-      // Metadata delta (always available as fallback)
-      delta = {
-        kind: 'metadata',
-        before: {
-          'File size': formatBytes(leftBlob.sizeBytes),
-          'Type':      assetType === 'level' ? 'Level (.umap)' : 'UE Asset (.uasset)',
-          'Ref':       req.leftRef,
-        },
-        after: {
-          'File size': formatBytes(rightBlob.sizeBytes),
-          'Type':      assetType === 'level' ? 'Level (.umap)' : 'UE Asset (.uasset)',
-          'Ref':       req.rightRef,
-        },
+      // Try to extract embedded PNG thumbnails from each side's binary
+      const leftThumbOut  = path.join(dir, 'left.preview.png')
+      const rightThumbOut = path.join(dir, 'right.preview.png')
+      const [leftHasThumb, rightHasThumb] = await Promise.all([
+        leftBlob.blobPath  ? this.extractUEThumbnail(leftBlob.blobPath,  leftThumbOut)  : Promise.resolve(false),
+        rightBlob.blobPath ? this.extractUEThumbnail(rightBlob.blobPath, rightThumbOut) : Promise.resolve(false),
+      ])
+
+      if (leftHasThumb)  left  = { ...left,  previewPath: leftThumbOut }
+      if (rightHasThumb) right = { ...right, previewPath: rightThumbOut }
+
+      if (leftHasThumb || rightHasThumb) {
+        // Use texture-kind delta so AssetDiffViewer renders image panes
+        delta = {
+          kind:         'texture',
+          sizeDelta:    rightBlob.sizeBytes - leftBlob.sizeBytes,
+          widthBefore:  0, heightBefore: 0,
+          widthAfter:   0, heightAfter:  0,
+          formatBefore: assetType === 'level' ? 'Level (.umap)'    : 'UE Asset (.uasset)',
+          formatAfter:  assetType === 'level' ? 'Level (.umap)'    : 'UE Asset (.uasset)',
+        }
+        if (leftHasThumb && rightHasThumb) fallbackReason = null
+      } else {
+        // No embedded thumbnail — metadata fallback
+        delta = {
+          kind: 'metadata',
+          before: {
+            'File size': formatBytes(leftBlob.sizeBytes),
+            'Type':      assetType === 'level' ? 'Level (.umap)' : 'UE Asset (.uasset)',
+            'Ref':       req.leftRef,
+          },
+          after: {
+            'File size': formatBytes(rightBlob.sizeBytes),
+            'Type':      assetType === 'level' ? 'Level (.umap)' : 'UE Asset (.uasset)',
+            'Ref':       req.rightRef,
+          },
+        }
       }
     }
 
@@ -353,17 +427,25 @@ class AssetDiffService {
     return result
   }
 
-  /** Single-ref thumbnail — used by history panel. */
+  /** Single-ref thumbnail — used by file row, BinaryDiff, and history panel. */
   async renderThumbnail(repoPath: string, filePath: string, ref: string): Promise<string | null> {
     const dir = path.join(CACHE_BASE, hash8(repoPath), `thumb-${hash8(filePath)}-${hash8(ref)}`)
     fs.mkdirSync(dir, { recursive: true })
 
-    const blob = await this.extractBlob(repoPath, filePath, ref, dir, 'left')
-    if (!blob.blobPath || !sharpLib) return null
-
     const outPng = path.join(dir, 'thumb.png')
     if (fs.existsSync(outPng)) return outPng
 
+    const blob = await this.extractBlob(repoPath, filePath, ref, dir, 'left')
+    if (!blob.blobPath) return null
+
+    // UE assets: try to extract the embedded PNG thumbnail first
+    const ext = path.extname(filePath).toLowerCase()
+    if (ext === '.uasset' || ext === '.umap' || ext === '.upk' || ext === '.udk') {
+      if (await this.extractUEThumbnail(blob.blobPath, outPng)) return outPng
+    }
+
+    // Image files: use sharp
+    if (!sharpLib) return null
     const meta = await this.renderTexturePreview(blob.blobPath, outPng)
     return meta ? outPng : null
   }

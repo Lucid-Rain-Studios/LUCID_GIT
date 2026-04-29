@@ -687,15 +687,21 @@ export function RepoMapPanel({ repoPath }: RepoMapPanelProps) {
 
       // Build login → display name map
       const nameMap = new Map<string, string>()
-      for (const entry of Object.values(presResult.entries)) {
+      for (const entry of Object.values(presResult?.entries ?? {})) {
         if (entry.name) nameMap.set(entry.login, entry.name)
       }
       setPresNames(nameMap)
 
-      // Fetch changed files for each commit in parallel
-      const fileChangeSets = await Promise.allSettled(
-        commits.map(c => ipc.commitFiles(repoPath, c.hash))
-      )
+      // Fetch changed files in batches to avoid flooding the IPC channel
+      const BATCH = 4
+      const fileChangeSets: PromiseSettledResult<CommitFileChange[]>[] = []
+      for (let i = 0; i < commits.length; i += BATCH) {
+        if (!mounted.current) return
+        const slice = await Promise.allSettled(
+          commits.slice(i, i + BATCH).map(c => ipc.commitFiles(repoPath, c.hash))
+        )
+        fileChangeSets.push(...slice)
+      }
 
       const freq = new Map<string, number>()
 
@@ -718,7 +724,7 @@ export function RepoMapPanel({ repoPath }: RepoMapPanelProps) {
       for (const l of locksResult) add(l.path, SCORE_LOCKED)
 
       // Boost: presence files
-      for (const entry of Object.values(presResult.entries)) {
+      for (const entry of Object.values(presResult?.entries ?? {})) {
         const cutoff = Date.now() - 30 * 60 * 1000
         if (new Date(entry.lastSeen).getTime() < cutoff) continue
         for (const file of entry.modifiedFiles) add(file, SCORE_PRESENCE)
@@ -742,7 +748,7 @@ export function RepoMapPanel({ repoPath }: RepoMapPanelProps) {
     const m = new Map<string, string[]>()
     if (!presence) return m
     const cutoff = Date.now() - 30 * 60 * 1000
-    for (const entry of Object.values(presence.entries)) {
+    for (const entry of Object.values(presence?.entries ?? {})) {
       if (new Date(entry.lastSeen).getTime() < cutoff) continue
       for (const file of entry.modifiedFiles) {
         const norm = file.replace(/\\/g, '/')

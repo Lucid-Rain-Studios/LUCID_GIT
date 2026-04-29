@@ -1,7 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { ipc, CommitEntry, CommitFileChange, BranchInfo } from '@/ipc'
+import { ipc, CommitEntry, CommitFileChange, BranchInfo, BlameEntry, StashEntry } from '@/ipc'
 import { useOperationStore } from '@/stores/operationStore'
+import { useDialogStore } from '@/stores/dialogStore'
+import { useRepoStore } from '@/stores/repoStore'
 import { computeGraph, GraphNode, LANE_W, ROW_H, DOT_R, LineSegment } from './graphLayout'
+
+function parseGitHubSlug(url: string): string | null {
+  const m = url.match(/github\.com[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?$/)
+  return m ? m[1] : null
+}
 
 interface HistoryPanelProps {
   repoPath: string
@@ -58,76 +65,272 @@ function GraphCell({ node }: { node: GraphNode }) {
   )
 }
 
+// ── Context menu helpers ────────────────────────────────────────────────────────
+
+function CtxItem({ label, onClick, disabled, danger, title }: {
+  label: string; onClick?: () => void; disabled?: boolean; danger?: boolean; title?: string
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      style={{
+        width: '100%', textAlign: 'left', padding: '5px 12px',
+        fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12,
+        background: 'transparent', border: 'none',
+        color: disabled ? '#4e5870' : danger ? '#e84545' : '#dde1f0',
+        cursor: disabled ? 'default' : 'pointer',
+        display: 'flex', alignItems: 'center', gap: 6,
+        opacity: disabled ? 0.6 : 1,
+      }}
+      onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = '#242a3d' }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+    >
+      <span style={{ flex: 1 }}>{label}</span>
+    </button>
+  )
+}
+
+function CtxSep() {
+  return <div style={{ margin: '4px 0', borderTop: '1px solid #252d42' }} />
+}
+
 // ── Commit row ─────────────────────────────────────────────────────────────────
 
-function CommitRow({ node, selected, onClick }: {
+function CommitRow({ node, selected, repoPath, remoteUrl, onRefresh, onClick }: {
   node: GraphNode
   selected: boolean
+  repoPath: string
+  remoteUrl: string | null
+  onRefresh: () => void
   onClick: () => void
 }) {
   const { commit } = node
   const [hover, setHover] = useState(false)
-  const col = authorColor(commit.author)
-  const ini = initials(commit.author)
+  const [ctx, setCtx]     = useState<{ x: number; y: number } | null>(null)
+  const ctxRef  = useRef<HTMLDivElement>(null)
+  const dialog  = useDialogStore()
+  const opRun   = useOperationStore(s => s.run)
+  const bumpSyncTick = useRepoStore(s => s.bumpSyncTick)
+  const col     = authorColor(commit.author)
+  const ini     = initials(commit.author)
   const isMerge = commit.parentHashes.length > 1
+  const ghSlug  = remoteUrl ? parseGitHubSlug(remoteUrl) : null
+  const shortHash = commit.hash.slice(0, 7)
+
+  useEffect(() => {
+    if (!ctx) return
+    const handler = (e: MouseEvent) => {
+      if (ctxRef.current && !ctxRef.current.contains(e.target as Node)) setCtx(null)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [ctx])
+
+  const close = () => setCtx(null)
+
+  const handleResetTo = async () => {
+    close()
+    const mode = await dialog.prompt({
+      title: `Reset to ${shortHash}`,
+      message: 'soft — keep changes staged\nmixed — keep changes unstaged\nhard — discard all changes',
+      placeholder: 'soft / mixed / hard',
+      defaultValue: 'mixed',
+      confirmLabel: 'Reset',
+    })
+    if (!mode) return
+    const m = mode.trim().toLowerCase()
+    if (m !== 'soft' && m !== 'mixed' && m !== 'hard') {
+      await dialog.alert({ title: 'Invalid mode', message: `"${mode}" is not valid. Enter soft, mixed, or hard.` })
+      return
+    }
+    try {
+      await opRun(`Resetting to ${shortHash} (${m})…`, () => ipc.gitResetTo(repoPath, commit.hash, m as 'soft' | 'mixed' | 'hard'))
+      bumpSyncTick()
+      onRefresh()
+    } catch (e) { await dialog.alert({ title: 'Reset failed', message: String(e) }) }
+  }
+
+  const handleCheckout = async () => {
+    close()
+    const ok = await dialog.confirm({
+      title: 'Checkout commit',
+      message: `Checkout ${shortHash}?`,
+      detail: 'This creates a detached HEAD state. Create a branch if you want to keep changes from here.',
+      confirmLabel: 'Checkout',
+    })
+    if (!ok) return
+    try {
+      await opRun('Checking out commit…', () => ipc.checkout(repoPath, commit.hash))
+      bumpSyncTick()
+      onRefresh()
+    } catch (e) { await dialog.alert({ title: 'Checkout failed', message: String(e) }) }
+  }
+
+  const handleRevert = async () => {
+    close()
+    const ok = await dialog.confirm({
+      title: 'Revert commit',
+      message: `Create a new commit that undoes ${shortHash}?`,
+      detail: commit.message,
+      confirmLabel: 'Revert',
+    })
+    if (!ok) return
+    try {
+      await opRun('Reverting commit…', () => ipc.gitRevert(repoPath, commit.hash, false))
+      bumpSyncTick()
+      onRefresh()
+    } catch (e) { await dialog.alert({ title: 'Revert failed', message: String(e) }) }
+  }
+
+  const handleCreateBranch = async () => {
+    close()
+    const name = await dialog.prompt({
+      title: 'Create branch from commit',
+      message: `New branch starting at ${shortHash}`,
+      placeholder: 'branch-name',
+      confirmLabel: 'Create',
+    })
+    if (!name?.trim()) return
+    try {
+      await opRun('Creating branch…', () => ipc.createBranch(repoPath, name.trim(), commit.hash))
+      onRefresh()
+    } catch (e) { await dialog.alert({ title: 'Failed to create branch', message: String(e) }) }
+  }
+
+  const handleCherryPick = async () => {
+    close()
+    const ok = await dialog.confirm({
+      title: 'Cherry-pick commit',
+      message: `Apply changes from ${shortHash} onto the current branch?`,
+      detail: commit.message,
+      confirmLabel: 'Cherry-pick',
+    })
+    if (!ok) return
+    try {
+      await opRun('Cherry-picking…', () => ipc.gitCherryPick(repoPath, commit.hash))
+      bumpSyncTick()
+      onRefresh()
+    } catch (e) { await dialog.alert({ title: 'Cherry-pick failed', message: String(e) }) }
+  }
+
+  const handleUndoCommit = async () => {
+    close()
+    if (commit.parentHashes.length === 0) {
+      await dialog.alert({ title: 'Cannot undo', message: 'This is the initial commit and has no parent to reset to.' })
+      return
+    }
+    const ok = await dialog.confirm({
+      title: 'Undo commit',
+      message: `Undo "${commit.message.slice(0, 60)}"?`,
+      detail: `This will soft-reset HEAD to the parent commit (${commit.parentHashes[0].slice(0, 7)}), keeping all changes staged. Only use this on the topmost commit.`,
+      confirmLabel: 'Undo commit',
+    })
+    if (!ok) return
+    try {
+      await opRun('Undoing commit…', () => ipc.gitResetTo(repoPath, commit.parentHashes[0], 'soft'))
+      bumpSyncTick()
+      onRefresh()
+    } catch (e) { await dialog.alert({ title: 'Undo failed', message: String(e) }) }
+  }
+
+  const handleCopySHA = () => { close(); navigator.clipboard.writeText(commit.hash) }
+
+  const handleViewOnGitHub = () => {
+    close()
+    if (ghSlug) ipc.openExternal(`https://github.com/${ghSlug}/commit/${commit.hash}`)
+  }
 
   return (
-    <div
-      onClick={onClick}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        display: 'flex', alignItems: 'center', height: ROW_H,
-        background: selected ? '#242a3d' : hover ? '#1e2436' : 'transparent',
-        borderLeft: `2px solid ${selected ? '#e8622f' : 'transparent'}`,
-        borderBottom: '1px solid #252d42',
-        cursor: 'pointer', transition: 'background 0.1s',
-      }}
-    >
-      {/* Graph */}
-      <div style={{ width: GRAPH_COL_W, height: ROW_H, flexShrink: 0, overflow: 'hidden' }}>
-        <GraphCell node={node} />
-      </div>
+    <div style={{ position: 'relative' }}>
+      <div
+        onClick={onClick}
+        onContextMenu={e => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY }) }}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        style={{
+          display: 'flex', alignItems: 'center', height: ROW_H,
+          background: selected ? '#242a3d' : hover ? '#1e2436' : 'transparent',
+          borderLeft: `2px solid ${selected ? '#e8622f' : 'transparent'}`,
+          borderBottom: '1px solid #252d42',
+          cursor: 'pointer', transition: 'background 0.1s',
+        }}
+      >
+        {/* Graph */}
+        <div style={{ width: GRAPH_COL_W, height: ROW_H, flexShrink: 0, overflow: 'hidden' }}>
+          <GraphCell node={node} />
+        </div>
 
-      {/* Content */}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', paddingLeft: 6, paddingRight: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-          <span style={{
-            fontFamily: "'IBM Plex Sans', system-ui", fontSize: 13,
-            fontWeight: selected ? 600 : 400, color: '#dde1f0',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
-          }}>{commit.message}</span>
-          {isMerge && (
+        {/* Content */}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', paddingLeft: 6, paddingRight: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
             <span style={{
-              background: 'rgba(162,126,240,0.15)', color: '#a27ef0',
-              border: '1px solid rgba(162,126,240,0.3)',
-              borderRadius: 4, paddingLeft: 5, paddingRight: 5,
-              fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600, flexShrink: 0,
-            }}>MERGE</span>
-          )}
+              fontFamily: "'IBM Plex Sans', system-ui", fontSize: 13,
+              fontWeight: selected ? 600 : 400, color: '#dde1f0',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
+            }}>{commit.message}</span>
+            {isMerge && (
+              <span style={{
+                background: 'rgba(162,126,240,0.15)', color: '#a27ef0',
+                border: '1px solid rgba(162,126,240,0.3)',
+                borderRadius: 4, paddingLeft: 5, paddingRight: 5,
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600, flexShrink: 0,
+              }}>MERGE</span>
+            )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{
+              width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+              background: `linear-gradient(135deg, ${col}88, ${col}44)`,
+              border: `1px solid ${col}55`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: "'JetBrains Mono', monospace", fontSize: 8, fontWeight: 700, color: col,
+            }}>{ini}</span>
+            <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#8b94b0' }}>
+              {commit.author}
+            </span>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#4e5870' }}>
+              {timeAgo(commit.timestamp)}
+            </span>
+          </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{
-            width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
-            background: `linear-gradient(135deg, ${col}88, ${col}44)`,
-            border: `1px solid ${col}55`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontFamily: "'JetBrains Mono', monospace", fontSize: 8, fontWeight: 700, color: col,
-          }}>{ini}</span>
-          <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#8b94b0' }}>
-            {commit.author}
-          </span>
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#4e5870' }}>
-            {timeAgo(commit.timestamp)}
-          </span>
-        </div>
+
+        {/* Hash */}
+        <span style={{
+          flexShrink: 0, paddingRight: 12,
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#4e5870',
+        }}>{shortHash}</span>
       </div>
 
-      {/* Hash */}
-      <span style={{
-        flexShrink: 0, paddingRight: 12,
-        fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#4e5870',
-      }}>{commit.hash.slice(0, 7)}</span>
+      {/* Context menu */}
+      {ctx && (
+        <div
+          ref={ctxRef}
+          style={{
+            position: 'fixed', top: ctx.y, left: ctx.x, zIndex: 50,
+            background: '#1d2235', border: '1px solid #2f3a54',
+            borderRadius: 6, boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
+            padding: '4px 0', minWidth: 230,
+          }}
+        >
+          <CtxItem label="Undo commit (soft reset)"      onClick={handleUndoCommit} />
+          <CtxItem label="Reset to commit…"            onClick={handleResetTo}    danger />
+          <CtxItem label="Checkout commit"             onClick={handleCheckout} />
+          <CtxSep />
+          <CtxItem label="Revert changes in commit"    onClick={handleRevert} />
+          <CtxItem label="Create branch from commit…"  onClick={handleCreateBranch} />
+          <CtxItem label="Cherry-pick commit…"         onClick={handleCherryPick} />
+          <CtxSep />
+          <CtxItem label="Copy SHA"                    onClick={handleCopySHA} />
+          <CtxItem
+            label="View on GitHub"
+            onClick={ghSlug ? handleViewOnGitHub : undefined}
+            disabled={!ghSlug}
+            title={ghSlug ? undefined : 'No GitHub remote detected'}
+          />
+        </div>
+      )}
     </div>
   )
 }
@@ -142,16 +345,143 @@ const FILE_STATUS_BG: Record<string, string> = {
   R: 'rgba(77,157,255,0.15)', C: 'rgba(77,157,255,0.15)',
 }
 
+// ── Blame modal ────────────────────────────────────────────────────────────────
+
+function BlameModal({ file, commitHash, repoPath, onClose }: {
+  file: CommitFileChange
+  commitHash: string
+  repoPath: string
+  onClose: () => void
+}) {
+  const [lines,   setLines]   = useState<BlameEntry[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error,   setError]   = useState<string | null>(null)
+
+  useEffect(() => {
+    setLoading(true)
+    setError(null)
+    ipc.gitBlame(repoPath, file.path, commitHash)
+      .then(entries => { setLines(entries); setLoading(false) })
+      .catch(e => { setError(String(e)); setLoading(false) })
+  }, [repoPath, file.path, commitHash])
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 200,
+        background: 'rgba(0,0,0,0.65)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div style={{
+        width: 'min(920px, 92vw)', height: 'min(700px, 88vh)',
+        background: '#161a27', border: '1px solid #2f3a54',
+        borderRadius: 10, boxShadow: '0 24px 64px rgba(0,0,0,0.7)',
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }}>
+        {/* Header */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          height: 44, paddingLeft: 16, paddingRight: 12, flexShrink: 0,
+          borderBottom: '1px solid #252d42', background: '#10131c',
+        }}>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: '#8b94b0' }}>
+            blame: {file.path}
+          </span>
+          <button
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', color: '#4e5870', fontSize: 20, cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}
+            onMouseEnter={e => (e.currentTarget.style.color = '#dde1f0')}
+            onMouseLeave={e => (e.currentTarget.style.color = '#4e5870')}
+          >×</button>
+        </div>
+
+        {/* Content */}
+        <div style={{ flex: 1, overflowY: 'auto', fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>
+          {loading ? (
+            <p style={{ padding: '16px', color: '#4e5870' }}>Loading blame…</p>
+          ) : error ? (
+            <p style={{ padding: '16px', color: '#e84545' }}>{error}</p>
+          ) : lines.length === 0 ? (
+            <p style={{ padding: '16px', color: '#4e5870' }}>No blame data available</p>
+          ) : lines.map((entry, i) => {
+            const prev = lines[i - 1]
+            const sameBlock = !!prev && prev.hash === entry.hash
+            const col = authorColor(entry.author)
+            const shortHash = entry.hash.slice(0, 7)
+            return (
+              <div key={i} style={{
+                display: 'flex', minHeight: 22,
+                borderBottom: '1px solid #0d0f1560',
+                background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.012)',
+              }}>
+                {/* Blame annotation */}
+                <div style={{
+                  width: 210, flexShrink: 0, paddingLeft: 10, paddingRight: 8,
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  borderRight: `2px solid ${sameBlock ? '#1e2436' : col + '55'}`,
+                  background: sameBlock ? 'transparent' : col + '0c',
+                  opacity: sameBlock ? 0.35 : 1,
+                }}>
+                  <span style={{ color: col, fontSize: 10, flexShrink: 0 }}>{sameBlock ? '' : shortHash}</span>
+                  {!sameBlock && <>
+                    <span style={{ color: '#8b94b0', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                      {entry.author}
+                    </span>
+                    <span style={{ color: '#4e5870', fontSize: 9, flexShrink: 0 }}>
+                      {new Date(entry.timestamp).toLocaleDateString()}
+                    </span>
+                  </>}
+                </div>
+                {/* Line number */}
+                <div style={{ width: 42, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 8, color: '#3a4260', fontSize: 11, borderRight: '1px solid #1e2436' }}>
+                  {entry.lineNo}
+                </div>
+                {/* Line content */}
+                <div style={{ flex: 1, paddingLeft: 10, paddingRight: 10, color: '#dde1f0', display: 'flex', alignItems: 'center', whiteSpace: 'pre', overflow: 'hidden' }}>
+                  {entry.line}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Commit detail ─────────────────────────────────────────────────────────────
 
-function CommitDetail({ commit, files, filesLoading }: {
+function CommitDetail({ commit, files, filesLoading, repoPath, remoteUrl }: {
   commit: CommitEntry
   files: CommitFileChange[]
   filesLoading: boolean
+  repoPath: string
+  remoteUrl: string | null
 }) {
   const fullDate = new Date(commit.timestamp).toLocaleString()
   const col = authorColor(commit.author)
   const ini = initials(commit.author)
+  const ghSlug = remoteUrl ? parseGitHubSlug(remoteUrl) : null
+
+  const [ctxMenu, setCtxMenu] = useState<{ file: CommitFileChange; x: number; y: number } | null>(null)
+  const [blameTarget, setBlameTarget] = useState<CommitFileChange | null>(null)
+  const ctxRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!ctxMenu) return
+    const handler = (e: MouseEvent) => {
+      if (ctxRef.current && !ctxRef.current.contains(e.target as Node)) setCtxMenu(null)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [ctxMenu])
+
+  const absPath = (f: CommitFileChange) =>
+    repoPath.replace(/\\/g, '/').replace(/\/$/, '') + '/' + f.path
+
+  const closeCtx = () => setCtxMenu(null)
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -223,11 +553,12 @@ function CommitDetail({ commit, files, filesLoading }: {
             return (
               <div
                 key={i}
+                onContextMenu={e => { e.preventDefault(); setCtxMenu({ file: f, x: e.clientX, y: e.clientY }) }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10,
                   height: 36, paddingLeft: 16, paddingRight: 16,
                   borderBottom: '1px solid #252d42',
-                  transition: 'background 0.1s',
+                  transition: 'background 0.1s', cursor: 'default',
                 }}
                 onMouseEnter={e => (e.currentTarget.style.background = '#1e2436')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
@@ -246,6 +577,191 @@ function CommitDetail({ commit, files, filesLoading }: {
             )
           })
         )}
+      </div>
+
+      {/* File context menu */}
+      {ctxMenu && (
+        <div
+          ref={ctxRef}
+          style={{
+            position: 'fixed', top: ctxMenu.y, left: ctxMenu.x, zIndex: 100,
+            background: '#1d2235', border: '1px solid #2f3a54',
+            borderRadius: 6, boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
+            padding: '4px 0', minWidth: 230,
+          }}
+        >
+          <CtxItem label="Blame" onClick={() => { setBlameTarget(ctxMenu.file); closeCtx() }} />
+          <CtxSep />
+          <CtxItem label="Show in Explorer"           onClick={() => { ipc.showInFolder(absPath(ctxMenu.file)); closeCtx() }} />
+          <CtxItem label="Open in Visual Studio Code" onClick={() => { ipc.openExternal('vscode://file/' + absPath(ctxMenu.file)); closeCtx() }} />
+          <CtxItem label="Open with default program"  onClick={() => { ipc.openPath(absPath(ctxMenu.file)); closeCtx() }} />
+          <CtxSep />
+          <CtxItem label="Copy file path"          onClick={() => { navigator.clipboard.writeText(absPath(ctxMenu.file)); closeCtx() }} />
+          <CtxItem label="Copy relative file path" onClick={() => { navigator.clipboard.writeText(ctxMenu.file.path); closeCtx() }} />
+          <CtxSep />
+          <CtxItem
+            label="View on GitHub"
+            onClick={ghSlug ? () => { ipc.openExternal(`https://github.com/${ghSlug}/blob/${commit.hash}/${ctxMenu.file.path}`); closeCtx() } : undefined}
+            disabled={!ghSlug}
+            title={ghSlug ? undefined : 'No GitHub remote detected'}
+          />
+        </div>
+      )}
+
+      {/* Blame modal */}
+      {blameTarget && (
+        <BlameModal
+          file={blameTarget}
+          commitHash={commit.hash}
+          repoPath={repoPath}
+          onClose={() => setBlameTarget(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── Stash panel ───────────────────────────────────────────────────────────────
+
+const stashBtnStyle: React.CSSProperties = {
+  fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, fontWeight: 500,
+  height: 24, paddingLeft: 8, paddingRight: 8, borderRadius: 4,
+  border: '1px solid', cursor: 'pointer', transition: 'background 0.12s',
+}
+
+function StashPanel({ repoPath }: { repoPath: string }) {
+  const [stashes, setStashes] = useState<StashEntry[]>([])
+  const [loading, setLoading] = useState(false)
+  const opRun        = useOperationStore(s => s.run)
+  const dialog       = useDialogStore()
+  const bumpSyncTick = useRepoStore(s => s.bumpSyncTick)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try { setStashes(await ipc.stashList(repoPath)) }
+    catch { setStashes([]) }
+    finally { setLoading(false) }
+  }, [repoPath])
+
+  useEffect(() => { load() }, [load])
+
+  const handlePop = async (s: StashEntry) => {
+    const ok = await dialog.confirm({
+      title: 'Pop stash',
+      message: `Apply and drop stash@{${s.index}}?`,
+      detail: s.message,
+      confirmLabel: 'Pop',
+    })
+    if (!ok) return
+    try {
+      await opRun('Popping stash…', () => ipc.stashPop(repoPath, s.ref))
+      bumpSyncTick()
+      load()
+    } catch (e) { await dialog.alert({ title: 'Pop failed', message: String(e) }) }
+  }
+
+  const handleApply = async (s: StashEntry) => {
+    const ok = await dialog.confirm({
+      title: 'Apply stash',
+      message: `Apply stash@{${s.index}} (stash is kept)?`,
+      detail: s.message,
+      confirmLabel: 'Apply',
+    })
+    if (!ok) return
+    try {
+      await opRun('Applying stash…', () => ipc.stashApply(repoPath, s.ref))
+      bumpSyncTick()
+      load()
+    } catch (e) { await dialog.alert({ title: 'Apply failed', message: String(e) }) }
+  }
+
+  const handleDrop = async (s: StashEntry) => {
+    const ok = await dialog.confirm({
+      title: 'Drop stash',
+      message: `Permanently delete stash@{${s.index}}?`,
+      detail: s.message,
+      confirmLabel: 'Drop',
+    })
+    if (!ok) return
+    try {
+      await opRun('Dropping stash…', () => ipc.stashDrop(repoPath, s.ref))
+      load()
+    } catch (e) { await dialog.alert({ title: 'Drop failed', message: String(e) }) }
+  }
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        height: 38, paddingLeft: 14, paddingRight: 8,
+        borderBottom: '1px solid #252d42', background: '#161a27', flexShrink: 0,
+      }}>
+        <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, fontWeight: 600, color: '#8b94b0', letterSpacing: '0.04em' }}>
+          {stashes.length > 0 ? `${stashes.length} STASH${stashes.length !== 1 ? 'ES' : ''}` : 'STASHES'}
+        </span>
+        <button
+          onClick={load}
+          disabled={loading}
+          style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: loading ? '#4e5870' : '#8b94b0', background: 'none', border: 'none', cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.5 : 1 }}
+          onMouseEnter={e => { if (!loading) e.currentTarget.style.color = '#e8622f' }}
+          onMouseLeave={e => { if (!loading) e.currentTarget.style.color = '#8b94b0' }}
+        >{loading ? '…' : '↺'}</button>
+      </div>
+
+      {/* List */}
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {loading && stashes.length === 0 ? (
+          <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#4e5870', padding: '16px 12px' }}>Loading…</p>
+        ) : stashes.length === 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '40px 16px' }}>
+            <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+              <rect x="4" y="8" width="20" height="14" rx="2" stroke="#2f3a54" strokeWidth="1.5" />
+              <rect x="7" y="5" width="14" height="5" rx="1.5" stroke="#2f3a54" strokeWidth="1.5" />
+            </svg>
+            <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 13, color: '#4e5870' }}>No stashes</span>
+          </div>
+        ) : stashes.map(s => (
+          <div
+            key={s.ref}
+            style={{ padding: '10px 12px 10px 14px', borderBottom: '1px solid #252d42', transition: 'background 0.1s' }}
+            onMouseEnter={e => (e.currentTarget.style.background = '#1e2436')}
+            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#dde1f0', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {s.message}
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#4d9dff' }}>{s.ref}</span>
+                  <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#4e5870' }}>on {s.branch}</span>
+                  <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#4e5870' }}>{s.date}</span>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 4, flexShrink: 0, marginTop: 1 }}>
+                <button
+                  onClick={() => handlePop(s)} title="Apply + drop"
+                  style={{ ...stashBtnStyle, color: '#2ec573', borderColor: 'rgba(46,197,115,0.3)', background: 'rgba(46,197,115,0.08)' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(46,197,115,0.18)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'rgba(46,197,115,0.08)')}
+                >Pop</button>
+                <button
+                  onClick={() => handleApply(s)} title="Apply (keep stash)"
+                  style={{ ...stashBtnStyle, color: '#4d9dff', borderColor: 'rgba(77,157,255,0.3)', background: 'rgba(77,157,255,0.08)' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(77,157,255,0.18)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'rgba(77,157,255,0.08)')}
+                >Apply</button>
+                <button
+                  onClick={() => handleDrop(s)} title="Delete stash"
+                  style={{ ...stashBtnStyle, color: '#e84545', borderColor: 'rgba(232,69,69,0.3)', background: 'rgba(232,69,69,0.08)' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(232,69,69,0.18)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'rgba(232,69,69,0.08)')}
+                >Drop</button>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -333,10 +849,12 @@ const MORE_INCREMENT = 300
 export function HistoryPanel({ repoPath }: HistoryPanelProps) {
   const opRun = useOperationStore(s => s.run)
 
+  const [activeTab,    setActiveTab]    = useState<'commits' | 'stashes'>('commits')
   const [nodes,        setNodes]        = useState<GraphNode[]>([])
   const [totalLoaded,  setTotalLoaded]  = useState(0)
   const [loading,      setLoading]      = useState(false)
   const [limitRef]                      = useState({ current: INITIAL_LIMIT })
+  const [remoteUrl,    setRemoteUrl]    = useState<string | null>(null)
 
   const [selected,     setSelected]     = useState<CommitEntry | null>(null)
   const [files,        setFiles]        = useState<CommitFileChange[]>([])
@@ -409,6 +927,7 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
     limitRef.current = INITIAL_LIMIT
     setSelected(null)
     setFiles([])
+    ipc.getRemoteUrl(repoPath).then(setRemoteUrl).catch(() => {})
     // Load branches + default branch
     Promise.all([
       ipc.branchList(repoPath),
@@ -454,8 +973,31 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
   return (
     <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
-      {/* Left: commit list */}
+      {/* Left: commit list / stash list */}
       <div style={{ width: listWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Tab bar */}
+        <div style={{ display: 'flex', alignItems: 'stretch', height: 34, borderBottom: '1px solid #252d42', background: '#0d0f15', flexShrink: 0 }}>
+          {(['commits', 'stashes'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              style={{
+                flex: 1, background: 'none', cursor: 'pointer',
+                border: 'none', borderBottom: `2px solid ${activeTab === tab ? '#e8622f' : 'transparent'}`,
+                color: activeTab === tab ? '#dde1f0' : '#4e5870',
+                fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, fontWeight: 500,
+                textTransform: 'capitalize', transition: 'color 0.1s',
+              }}
+              onMouseEnter={e => { if (activeTab !== tab) e.currentTarget.style.color = '#8b94b0' }}
+              onMouseLeave={e => { if (activeTab !== tab) e.currentTarget.style.color = '#4e5870' }}
+            >{tab}</button>
+          ))}
+        </div>
+
+        {activeTab === 'stashes' ? (
+          <StashPanel repoPath={repoPath} />
+        ) : (<>
+
         {/* Header */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -548,6 +1090,9 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
               key={node.commit.hash}
               node={node}
               selected={selected?.hash === node.commit.hash}
+              repoPath={repoPath}
+              remoteUrl={remoteUrl}
+              onRefresh={() => loadHistory(limitRef.current)}
               onClick={() => handleSelect(node.commit)}
             />
           ))}
@@ -569,6 +1114,7 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
             </div>
           )}
         </div>
+        </>)}
       </div>
 
       {/* Drag handle */}
@@ -577,7 +1123,7 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
       {/* Right: commit detail */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {selected ? (
-          <CommitDetail commit={selected} files={files} filesLoading={filesLoading} />
+          <CommitDetail commit={selected} files={files} filesLoading={filesLoading} repoPath={repoPath} remoteUrl={remoteUrl} />
         ) : (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
             <svg width="32" height="32" viewBox="0 0 32 32" fill="none">

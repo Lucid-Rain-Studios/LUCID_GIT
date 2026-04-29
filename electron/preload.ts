@@ -21,6 +21,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.AUTH_LIST_ACCOUNTS),
   logout: (userId: string) =>
     ipcRenderer.invoke(CHANNELS.AUTH_LOGOUT, userId),
+  setCurrentAccount: (userId: string) =>
+    ipcRenderer.invoke(CHANNELS.AUTH_SET_CURRENT_ACCOUNT, userId),
 
   // ── Permissions — Phase 20 ────────────────────────────────────────────────
   fetchRepoPermission: (repoPath: string) =>
@@ -201,6 +203,10 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GIT_GET_IDENTITY, repoPath),
   gitLinkIdentity: (repoPath: string, login: string, name: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_LINK_IDENTITY, repoPath, login, name),
+  getGlobalGitIdentity: () =>
+    ipcRenderer.invoke(CHANNELS.GIT_GET_GLOBAL_IDENTITY),
+  setGlobalGitIdentity: (name: string, email: string) =>
+    ipcRenderer.invoke(CHANNELS.GIT_SET_GLOBAL_IDENTITY, name, email),
 
   // ── App Settings ──────────────────────────────────────────────────────────
   settingsGet: () =>
@@ -237,6 +243,10 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GIT_BRANCH_ACTIVITY, repoPath),
   gitDefaultBranch: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_DEFAULT_BRANCH, repoPath),
+  gitBlame: (repoPath: string, filePath: string, rev: string) =>
+    ipcRenderer.invoke(CHANNELS.GIT_BLAME, repoPath, filePath, rev),
+  gitCommitFileDiff: (repoPath: string, filePath: string, hash: string) =>
+    ipcRenderer.invoke(CHANNELS.GIT_DIFF_COMMIT, repoPath, filePath, hash),
 
   // ── Asset diff previews — Phase 17 ───────────────────────────────────────
   assetDiffPreview: (repoPath: string, filePath: string, leftRef: string, rightRef: string, editorBinaryOverride?: string) =>
@@ -288,6 +298,24 @@ const api = {
     ipcRenderer.invoke(CHANNELS.DEP_LOOKUP_REFERENCES, repoPath, packageName),
   depRefreshCache: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.DEP_REFRESH_CACHE, repoPath),
+
+  // ── GitHub API ────────────────────────────────────────────────────────────
+  githubCreatePR: (args: { owner: string; repo: string; head: string; base: string; title: string; body: string; draft: boolean }) =>
+    ipcRenderer.invoke(CHANNELS.GITHUB_CREATE_PR, args),
+  githubListPRs: (args: { owner: string; repo: string }) =>
+    ipcRenderer.invoke(CHANNELS.GITHUB_LIST_PRS, args),
+  githubMergePR: (args: { owner: string; repo: string; prNumber: number }) =>
+    ipcRenderer.invoke(CHANNELS.GITHUB_MERGE_PR, args),
+  githubClosePR: (args: { owner: string; repo: string; prNumber: number }) =>
+    ipcRenderer.invoke(CHANNELS.GITHUB_CLOSE_PR, args),
+
+  // ── Bug logs ──────────────────────────────────────────────────────────────
+  logGetText: () =>
+    ipcRenderer.invoke(CHANNELS.LOG_GET_TEXT),
+  logGetSuggestion: () =>
+    ipcRenderer.invoke(CHANNELS.LOG_GET_SUGGESTION),
+  logSaveDialog: () =>
+    ipcRenderer.invoke(CHANNELS.LOG_SAVE_DIALOG),
 
   // ── Events: main → renderer ───────────────────────────────────────────────
   onOperationProgress: (cb: (step: unknown) => void) => {

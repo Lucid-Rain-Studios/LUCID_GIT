@@ -4,6 +4,7 @@ import { useLockStore } from '@/stores/lockStore'
 import { useForecastStore } from '@/stores/forecastStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useDialogStore } from '@/stores/dialogStore'
+import { useAssetViewerStore } from '@/stores/assetViewerStore'
 
 interface FileRowProps {
   file: FileStatus
@@ -54,7 +55,19 @@ export function FileRow({
   file, repoPath, selected, lock, currentUserName, onSelect, onRefresh, onBlameDeps,
 }: FileRowProps) {
   const isUEAsset = /\.(uasset|umap|udk|upk)$/i.test(file.path)
+  const isImgAsset = /\.(png|jpg|jpeg|tga|bmp|tiff|tif|dds|exr|hdr)$/i.test(file.path)
+  const isPreviewable = isUEAsset || isImgAsset
   const forecastConflicts = useForecastStore(s => s.conflicts)
+  const openViewer = useAssetViewerStore(s => s.open)
+  const [thumbnail, setThumbnail] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!isPreviewable) return
+    const ref = file.staged ? 'INDEX' : 'WORKING'
+    ipc.assetRenderThumbnail(repoPath, file.path, ref)
+      .then(p => setThumbnail(p))
+      .catch(() => {})
+  }, [repoPath, file.path, isPreviewable, file.staged])
   const fileConflicts = forecastConflicts.filter(c => c.filePath === file.path || c.filePath.endsWith('/' + file.path))
   const { lockFile, unlockFile, watchFile } = useLockStore()
   const isAdmin = useAuthStore(s => s.isAdmin(repoPath))
@@ -109,7 +122,12 @@ export function FileRow({
       danger: true,
     })
     if (!ok) return
-    try { await ipc.discard(repoPath, [file.path], isUntracked); onRefresh() } catch (e) { await dialog.alert({ title: 'Error', message: String(e) }) }
+    try {
+      await ipc.discard(repoPath, [file.path], isUntracked)
+      onRefresh()
+      // Mirror Unreal Engine behaviour: release the lock when changes are discarded
+      if (isLockedByMe) unlockFile(repoPath, file.path).catch(() => {})
+    } catch (e) { await dialog.alert({ title: 'Error', message: String(e) }) }
   }
   const doIgnoreFile   = async () => { close(); try { await ipc.addToGitignore(repoPath, file.path); onRefresh() } catch (e) { await dialog.alert({ title: 'Error', message: String(e) }) } }
   const doIgnoreFolder = async () => { close(); if (!dir) return; try { await ipc.addToGitignore(repoPath, dir + '/'); onRefresh() } catch (e) { await dialog.alert({ title: 'Error', message: String(e) }) } }
@@ -159,6 +177,29 @@ export function FileRow({
           background: statusBg, color: statusColor,
           fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 700,
         }}>{effectiveStatus}</span>
+
+        {/* Asset thumbnail — clickable to open viewer */}
+        {isPreviewable && thumbnail && (
+          <button
+            onClick={e => { e.stopPropagation(); openViewer(repoPath, file.path) }}
+            title="Preview file"
+            style={{
+              width: 24, height: 24, borderRadius: 4, overflow: 'hidden', flexShrink: 0,
+              border: '1px solid rgba(255,255,255,0.07)',
+              backgroundImage: 'repeating-conic-gradient(#1a2030 0% 25%, transparent 0% 50%)',
+              backgroundSize: '6px 6px',
+              padding: 0, cursor: 'pointer', transition: 'border-color 0.1s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(232,98,47,0.5)' }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)' }}
+          >
+            <img
+              src={`file:///${thumbnail.replace(/\\/g, '/').replace(/^\/+/, '')}`}
+              alt=""
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            />
+          </button>
+        )}
 
         {/* Name + dir */}
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -251,8 +292,11 @@ export function FileRow({
             />
             <CtxItem label="Notify me when unlocked"  onClick={doWatch} />
           </>}
-          {isUEAsset && onBlameDeps && <>
+          {isPreviewable && <>
             <CtxSep />
+            <CtxItem label="Preview file" onClick={() => { close(); openViewer(repoPath, file.path) }} />
+          </>}
+          {isUEAsset && onBlameDeps && <>
             <CtxItem label="Blame with dependencies" onClick={() => { close(); onBlameDeps(file) }} />
           </>}
         </div>

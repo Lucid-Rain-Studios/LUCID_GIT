@@ -3,6 +3,8 @@ import { FileStatus, Lock, ipc } from '@/ipc'
 import { useOperationStore } from '@/stores/operationStore'
 import { FileRow } from './FileRow'
 import { useDialogStore } from '@/stores/dialogStore'
+import { useLockStore } from '@/stores/lockStore'
+import { useAuthStore } from '@/stores/authStore'
 
 // ── Content Browser tree types ────────────────────────────────────────────────
 
@@ -188,6 +190,9 @@ export function FileTree({
   const [treeMode, setTreeMode] = useState(false)
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
   const opRun = useOperationStore(s => s.run)
+  const unlockFile = useLockStore(s => s.unlockFile)
+  const { accounts, currentAccountId } = useAuthStore()
+  const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login ?? null
 
   const lockFor = (file: FileStatus): Lock | null =>
     locks.find(l => l.path.replace(/\\/g, '/') === file.path.replace(/\\/g, '/')) ?? null
@@ -242,7 +247,19 @@ export function FileTree({
           onClick={async () => {
             const ok = await dialog.confirm({ title: 'Discard all changes', message: 'This will discard all working-tree changes. This cannot be undone.', confirmLabel: 'Discard All', danger: true })
             if (!ok) return
-            run('Discarding changes…', () => ipc.discardAll(repoPath))
+            // Capture files locked by us before discarding — mirrors Unreal Engine behaviour
+            const myLockedFiles = currentLogin
+              ? unstaged.filter(f => locks.some(
+                  l => l.path.replace(/\\/g, '/') === f.path.replace(/\\/g, '/') &&
+                       l.owner.login === currentLogin
+                ))
+              : []
+            run('Discarding changes…', async () => {
+              await ipc.discardAll(repoPath)
+              for (const file of myLockedFiles) {
+                await unlockFile(repoPath, file.path).catch(() => {})
+              }
+            })
           }}
         />
         <ActionBtn

@@ -34,7 +34,8 @@
       "Bash(npx @electron/rebuild -f -w better-sqlite3)",
       "Bash(git lfs *)",
       "Bash(git config *)",
-      "Bash(npx electron-builder *)"
+      "Bash(npx electron-builder *)",
+      "Bash(xargs grep *)"
     ]
   }
 }

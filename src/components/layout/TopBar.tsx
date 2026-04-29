@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import lucidGitIcon from '@/lib/icons/lucid_git.svg'
-import { ipc, SyncStatus, UpdateInfo, PresenceEntry } from '@/ipc'
+import { ipc, SyncStatus, UpdateInfo, PresenceEntry, GitIdentity } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useOperationStore } from '@/stores/operationStore'
@@ -25,7 +25,8 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
   const [sync, setSync]       = useState<SyncStatus | null>(null)
   const [syncOp, setSyncOp]   = useState<'idle' | 'fetching' | 'pulling' | 'pushing'>('idle')
   const [syncErr, setSyncErr] = useState<string | null>(null)
-  const [menuOpen, setMenuOpen] = useState(false)
+  const [updatingFromMain, setUpdatingFromMain] = useState(false)
+  const [defaultBranch, setDefaultBranch] = useState<string>('main')
   const [repoMenuOpen, setRepoMenuOpen] = useState(false)
   const [branchMenuOpen, setBranchMenuOpen] = useState(false)
   const [branchConfirm, setBranchConfirm] = useState<string | null>(null)
@@ -63,26 +64,15 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
   }, [repoPath, currentBranch])
 
   useEffect(() => {
+    if (!repoPath) return
+    ipc.gitDefaultBranch(repoPath).then(b => setDefaultBranch(b)).catch(() => {})
+  }, [repoPath])
+
+  useEffect(() => {
     const unsubAvail = ipc.onUpdateAvailable((info: UpdateInfo) => { setUpdateInfo(info); setUpdateDismissed(false) })
     const unsubReady = ipc.onUpdateReady(() => { setUpdateReady(true); setDownloading(false) })
     return () => { unsubAvail(); unsubReady() }
   }, [])
-
-  const doFetch = async () => {
-    if (!repoPath || syncOp !== 'idle') return
-    setSyncOp('fetching'); setSyncErr(null)
-    try { await opRun('Fetching…', () => ipc.fetch(repoPath)); await loadSync() }
-    catch (e) { const s = String(e); setSyncErr(s); pushErr(s) }
-    finally { setSyncOp('idle') }
-  }
-
-  const doPull = async () => {
-    if (!repoPath || syncOp !== 'idle') return
-    setSyncOp('pulling'); setSyncErr(null)
-    try { await opRun('Pulling…', () => ipc.pull(repoPath)); await loadSync(); await refreshStatus(); onSynced?.() }
-    catch (e) { const s = String(e); setSyncErr(s); pushErr(s) }
-    finally { setSyncOp('idle') }
-  }
 
   const doPush = async () => {
     if (!repoPath || syncOp !== 'idle') return
@@ -92,25 +82,44 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
     finally { setSyncOp('idle') }
   }
 
-  const isIdle = syncOp === 'idle'
+  const doUpdateFromMain = async () => {
+    if (!repoPath || updatingFromMain || syncOp !== 'idle') return
+    setUpdatingFromMain(true)
+    try {
+      await opRun(`Updating from ${defaultBranch}…`, async () => {
+        await ipc.fetch(repoPath)
+        await ipc.updateFromMain(repoPath)
+      })
+      await loadSync()
+      await refreshStatus()
+    } catch (e) {
+      const s = String(e); pushErr(s)
+    } finally {
+      setUpdatingFromMain(false)
+    }
+  }
+
+  const isIdle    = syncOp === 'idle'
   const hasBehind = (sync?.behind ?? 0) > 0
   const hasAhead  = (sync?.ahead  ?? 0) > 0
 
-  type PrimaryAction = { label: string; action: (() => void) | null; color: string; colorDim: string; count: number; icon: React.ReactNode }
-
-  const primary: PrimaryAction = !isIdle
-    ? { label: syncOp === 'fetching' ? 'Fetching…' : syncOp === 'pulling' ? 'Pulling…' : 'Pushing…',
-        action: null, color: '#7b8499', colorDim: 'rgba(123,132,153,0.08)', count: 0, icon: null }
-    : hasBehind
-      ? { label: 'Pull', action: doPull, color: '#f5a832', colorDim: 'rgba(245,168,50,0.12)', count: sync!.behind, icon: <ArrowDown /> }
-      : hasAhead
-        ? { label: 'Push', action: doPush, color: '#2dbd6e', colorDim: 'rgba(45,189,110,0.12)', count: sync!.ahead, icon: <ArrowUp /> }
-        : { label: 'Fetch', action: doFetch, color: '#7b8499', colorDim: 'transparent', count: 0, icon: <FetchIcon /> }
-
-  const hasPending = primary.count > 0 && !syncErr
-  const borderColor = syncErr ? '#e84040' : hasPending ? primary.color : 'var(--lg-border)'
-  const bgColor     = syncErr ? 'rgba(232,64,64,0.1)' : hasPending ? primary.colorDim : 'transparent'
-  const labelColor  = syncErr ? '#e84040' : hasPending ? primary.color : '#7b8499'
+  const doFetchAndPull = async () => {
+    if (!repoPath || syncOp !== 'idle') return
+    setSyncOp('fetching'); setSyncErr(null)
+    try {
+      await opRun('Fetching…', () => ipc.fetch(repoPath))
+      await loadSync()
+      const updated = await ipc.getSyncStatus(repoPath).catch(() => null)
+      if (updated && updated.behind > 0) {
+        setSyncOp('pulling')
+        await opRun('Pulling…', () => ipc.pull(repoPath))
+        await loadSync()
+        await refreshStatus()
+        onSynced?.()
+      }
+    } catch (e) { const s = String(e); setSyncErr(s); pushErr(s) }
+    finally { setSyncOp('idle') }
+  }
 
   const repoName = repoPath
     ? (repoPath.replace(/\\/g, '/').split('/').pop() ?? repoPath)
@@ -452,100 +461,43 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
             </>
           )}
 
-          {/* Smart sync split button */}
+          {/* Fetch & Pull button */}
           {repoPath && (
-            <div style={{ position: 'relative', display: 'flex' }}>
-              {/* Primary action */}
-              <button
-                onClick={() => { if (isIdle && primary.action) primary.action() }}
-                disabled={!isIdle}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  height: 28, paddingLeft: 10, paddingRight: 10,
-                  borderRadius: '5px 0 0 5px', border: `1px solid ${borderColor}`, borderRight: 'none',
-                  background: bgColor, color: labelColor,
-                  fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5, fontWeight: 500,
-                  cursor: isIdle && primary.action ? 'pointer' : 'not-allowed',
-                  opacity: !isIdle ? 0.6 : 1,
-                  boxShadow: hasPending ? `0 0 12px ${primary.color}25` : 'none',
-                  animation: hasPending && isIdle ? 'glow-pulse 2.5s ease-in-out infinite' : 'none',
-                }}
-              >
-                {syncErr ? <WarnIcon /> : primary.icon}
-                <span>{syncErr ? 'Sync error' : primary.label}</span>
-                {primary.count > 0 && !syncErr && (
-                  <span style={{
-                    background: `${primary.color}28`, color: primary.color,
-                    fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, fontWeight: 700,
-                    borderRadius: 9, paddingLeft: 5, paddingRight: 5, lineHeight: '17px',
-                    border: `1px solid ${primary.color}40`,
-                  }}>{primary.count}</span>
-                )}
-              </button>
+            <SyncBtn
+              label={syncOp === 'fetching' ? 'Fetching…' : syncOp === 'pulling' ? 'Pulling…' : 'Fetch & Pull'}
+              icon={syncErr ? <WarnIcon /> : <FetchPullIcon />}
+              count={hasBehind && isIdle ? (sync?.behind ?? 0) : 0}
+              countColor="#f5a832"
+              active={hasBehind}
+              error={!!syncErr}
+              disabled={!isIdle}
+              onClick={doFetchAndPull}
+            />
+          )}
 
-              {/* Chevron dropdown */}
-              <button
-                onClick={() => isIdle && setMenuOpen(o => !o)}
-                style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  width: 22, height: 28, borderRadius: '0 5px 5px 0',
-                  border: `1px solid ${borderColor}`,
-                  borderLeft: `1px solid ${primary.count > 0 ? `${primary.color}40` : '#1d2535'}`,
-                  background: menuOpen ? 'rgba(255,255,255,0.06)' : bgColor, color: labelColor,
-                  cursor: isIdle ? 'pointer' : 'not-allowed',
-                }}
-              >
-                <svg width="9" height="9" viewBox="0 0 10 10" fill="none">
-                  <path d={menuOpen ? 'M2.5 6.5L5 3.5L7.5 6.5' : 'M2.5 3.5L5 6.5L7.5 3.5'}
-                    stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
+          {/* Push button */}
+          {repoPath && (
+            <SyncBtn
+              label={syncOp === 'pushing' ? 'Pushing…' : 'Push'}
+              icon={<ArrowUp />}
+              count={hasAhead && isIdle ? (sync?.ahead ?? 0) : 0}
+              countColor="#2dbd6e"
+              active={hasAhead}
+              error={false}
+              disabled={!isIdle}
+              onClick={doPush}
+            />
+          )}
 
-              {/* Dropdown menu */}
-              {menuOpen && (
-                <>
-                  <div onClick={() => setMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 90 }} />
-                  <div style={{
-                    position: 'absolute', top: 34, right: 0, zIndex: 100,
-                    background: 'var(--lg-bg-elevated)', border: '1px solid var(--lg-border)',
-                    borderRadius: 7, boxShadow: '0 8px 28px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.35)',
-                    minWidth: 152, overflow: 'hidden',
-                    animation: 'slide-down 0.14s ease both',
-                  }}>
-                    {[
-                      { label: 'Fetch', action: doFetch, color: '#7b8499', count: 0, icon: <FetchIcon /> },
-                      { label: 'Pull',  action: doPull,  color: '#f5a832', count: sync?.behind ?? 0, icon: <ArrowDown /> },
-                      { label: 'Push',  action: doPush,  color: '#2dbd6e', count: sync?.ahead  ?? 0, icon: <ArrowUp /> },
-                    ].map((item, i, arr) => (
-                      <button key={item.label}
-                        onClick={() => { item.action(); setMenuOpen(false) }}
-                        style={{
-                          display: 'flex', alignItems: 'center', gap: 8,
-                          width: '100%', height: 34, paddingLeft: 12, paddingRight: 12,
-                          background: 'transparent', border: 'none',
-                          borderBottom: i < arr.length - 1 ? '1px solid var(--lg-border)' : 'none',
-                          color: item.count > 0 ? item.color : '#7b8499',
-                          fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5, cursor: 'pointer',
-                        }}
-                        onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
-                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                      >
-                        {item.icon}
-                        <span style={{ flex: 1, textAlign: 'left' }}>{item.label}</span>
-                        {item.count > 0 && (
-                          <span style={{
-                            background: `${item.color}22`, color: item.color,
-                            border: `1px solid ${item.color}40`,
-                            fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 700,
-                            borderRadius: 9, paddingLeft: 5, paddingRight: 5,
-                          }}>{item.count}</span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
+          {/* Update from main button */}
+          {repoPath && (
+            <UpdateFromMainBtn
+              defaultBranch={defaultBranch}
+              currentBranch={currentBranch ?? ''}
+              busy={updatingFromMain}
+              disabled={syncOp !== 'idle'}
+              onClick={doUpdateFromMain}
+            />
           )}
 
           {repoPath && <div style={{ width: 1, height: 18, background: 'var(--lg-border)', flexShrink: 0, marginLeft: 2, marginRight: 2 }} />}
@@ -555,24 +507,10 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
 
           {/* Account */}
           {currentAccount ? (
-            <button
-              style={{
-                display: 'flex', alignItems: 'center', gap: 7,
-                height: 32, paddingLeft: 6, paddingRight: 10,
-                borderRadius: 6, border: '1px solid transparent',
-                background: 'transparent', cursor: 'pointer',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.borderColor = '#1d2535' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent' }}
-            >
-              <AccountAvatar login={currentAccount.login} avatarUrl={currentAccount.avatarUrl} size={24} />
-              <span style={{
-                fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5, color: '#7b8499',
-                fontWeight: 500, letterSpacing: '-0.01em',
-              }}>
-                {currentAccount.login}
-              </span>
-            </button>
+            <AccountMenu
+              account={currentAccount}
+              onSignOut={() => useAuthStore.getState().logout(currentAccount.userId)}
+            />
           ) : (
             <button onClick={onAddAccount} style={{
               height: 28, paddingLeft: 12, paddingRight: 12,
@@ -1019,7 +957,257 @@ function RepoMenuItemWithRemove({
   )
 }
 
+// ── Update-from-main button ────────────────────────────────────────────────────
+
+function UpdateFromMainBtn({
+  defaultBranch, currentBranch, busy, disabled, onClick,
+}: {
+  defaultBranch: string; currentBranch: string; busy: boolean; disabled: boolean; onClick: () => void
+}) {
+  const [hover, setHover] = React.useState(false)
+  const onDefault = currentBranch === defaultBranch
+  const isDisabled = onDefault || busy || disabled
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        onClick={onClick}
+        disabled={isDisabled}
+        onMouseEnter={() => !isDisabled && setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        title={onDefault ? `Already on ${defaultBranch}` : `Fetch and merge ${defaultBranch} into this branch`}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          height: 28, paddingLeft: 10, paddingRight: 10,
+          borderRadius: 5,
+          border: `1px solid ${onDefault ? '#1a2030' : hover ? 'rgba(74,158,255,0.35)' : '#1d2535'}`,
+          background: onDefault
+            ? 'transparent'
+            : hover
+              ? 'rgba(74,158,255,0.1)'
+              : 'rgba(255,255,255,0.03)',
+          color: onDefault ? '#344057' : busy ? '#7b8499' : hover ? '#4a9eff' : '#6b7590',
+          fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5, fontWeight: 500,
+          cursor: isDisabled ? 'not-allowed' : 'pointer',
+          opacity: busy ? 0.6 : 1,
+          transition: 'border-color 0.12s, background 0.12s, color 0.12s',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        <MergeDownIcon color={onDefault ? '#283047' : busy ? '#7b8499' : hover ? '#4a9eff' : '#4a566a'} />
+        <span>
+          {busy
+            ? `Updating…`
+            : onDefault
+              ? `On ${defaultBranch}`
+              : `Update from ${defaultBranch}`}
+        </span>
+      </button>
+    </div>
+  )
+}
+
+function MergeDownIcon({ color = 'currentColor' }: { color?: string }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+      <circle cx="4" cy="3"  r="1.5" stroke={color} strokeWidth="1.3" />
+      <circle cx="4" cy="11" r="1.5" stroke={color} strokeWidth="1.3" />
+      <circle cx="10" cy="3" r="1.5" stroke={color} strokeWidth="1.3" />
+      <path d="M4 4.5v5" stroke={color} strokeWidth="1.3" strokeLinecap="round" />
+      <path d="M10 4.5v2a3 3 0 0 1-3 3H4" stroke={color} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4 8.5L2.5 10l1.5 1.5" stroke={color} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 // ── Small inline components ─────────────────────────────────────────────────────
+
+// ── Sync button (Fetch & Pull / Push) ─────────────────────────────────────────
+
+function SyncBtn({
+  label, icon, count, countColor, active, error, disabled, onClick,
+}: {
+  label: string; icon: React.ReactNode; count: number; countColor: string
+  active: boolean; error: boolean; disabled: boolean; onClick: () => void
+}) {
+  const [hover, setHover] = React.useState(false)
+  const borderColor = error ? '#e84040' : active ? countColor : 'var(--lg-border)'
+  const bgColor     = error ? 'rgba(232,64,64,0.1)' : active ? `${countColor}18` : 'transparent'
+  const textColor   = error ? '#e84040' : active ? countColor : '#7b8499'
+  return (
+    <button
+      onClick={disabled ? undefined : onClick}
+      onMouseEnter={() => !disabled && setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      disabled={disabled}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        height: 28, paddingLeft: 10, paddingRight: 10,
+        borderRadius: 5, border: `1px solid ${hover && !disabled ? borderColor + 'cc' : borderColor}`,
+        background: hover && !disabled ? `${bgColor}` : bgColor,
+        color: textColor,
+        fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5, fontWeight: 500,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled && !active ? 0.5 : 1,
+        boxShadow: active && !disabled ? `0 0 12px ${countColor}25` : 'none',
+        animation: active && !disabled ? 'glow-pulse 2.5s ease-in-out infinite' : 'none',
+        transition: 'border-color 0.12s, background 0.12s',
+      }}
+    >
+      {icon}
+      <span>{label}</span>
+      {count > 0 && (
+        <span style={{
+          background: `${countColor}28`, color: countColor,
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, fontWeight: 700,
+          borderRadius: 9, paddingLeft: 5, paddingRight: 5, lineHeight: '17px',
+          border: `1px solid ${countColor}40`,
+        }}>{count}</span>
+      )}
+    </button>
+  )
+}
+
+// ── Account menu (avatar + dropdown: git config + sign out) ───────────────────
+
+function AccountMenu({ account, onSignOut }: { account: { userId: string; login: string; avatarUrl: string }; onSignOut: () => void }) {
+  const [open, setOpen] = React.useState(false)
+  const [gitName, setGitName]   = React.useState('')
+  const [gitEmail, setGitEmail] = React.useState('')
+  const [saving, setSaving]     = React.useState(false)
+  const [saved, setSaved]       = React.useState(false)
+  const menuRef = React.useRef<HTMLDivElement>(null)
+
+  React.useEffect(() => {
+    if (!open) return
+    ipc.getGlobalGitIdentity().then(id => {
+      setGitName(id.name)
+      setGitEmail(id.email)
+      setSaved(false)
+    }).catch(() => {})
+  }, [open])
+
+  React.useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const handleSave = async () => {
+    if (!gitName.trim() || !gitEmail.trim()) return
+    setSaving(true)
+    try {
+      await ipc.setGlobalGitIdentity(gitName.trim(), gitEmail.trim())
+      setSaved(true)
+    } catch { } finally { setSaving(false) }
+  }
+
+  return (
+    <div ref={menuRef} style={{ position: 'relative' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 7,
+          height: 32, paddingLeft: 6, paddingRight: 10,
+          borderRadius: 6, border: `1px solid ${open ? '#283047' : 'transparent'}`,
+          background: open ? 'rgba(255,255,255,0.05)' : 'transparent', cursor: 'pointer',
+        }}
+        onMouseEnter={e => { if (!open) { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.borderColor = '#1d2535' } }}
+        onMouseLeave={e => { if (!open) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent' } }}
+      >
+        <AccountAvatar login={account.login} avatarUrl={account.avatarUrl} size={24} />
+        <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5, color: '#7b8499', fontWeight: 500, letterSpacing: '-0.01em' }}>
+          {account.login}
+        </span>
+        <svg width="9" height="9" viewBox="0 0 10 10" fill="none" style={{ color: '#344057', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
+          <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 200,
+          background: 'var(--lg-bg-elevated)', border: '1px solid var(--lg-border)',
+          borderRadius: 9, boxShadow: '0 12px 36px rgba(0,0,0,0.6), 0 2px 8px rgba(0,0,0,0.4)',
+          width: 240, overflow: 'hidden',
+          animation: 'slide-down 0.14s ease both',
+        }}>
+          {/* Git config section */}
+          <div style={{ padding: '10px 12px 12px', borderBottom: '1px solid var(--lg-border)' }}>
+            <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, fontWeight: 700, color: '#344057', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>
+              Global Git Config
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <input
+                value={gitName}
+                onChange={e => { setGitName(e.target.value); setSaved(false) }}
+                placeholder="user.name"
+                style={{
+                  height: 28, paddingLeft: 9, paddingRight: 9, borderRadius: 5,
+                  background: 'rgba(255,255,255,0.04)', border: '1px solid #1d2535',
+                  color: '#c8d0e8', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12,
+                  outline: 'none', width: '100%', boxSizing: 'border-box',
+                }}
+                onFocus={e => e.target.style.borderColor = '#4a9eff55'}
+                onBlur={e => e.target.style.borderColor = '#1d2535'}
+              />
+              <input
+                value={gitEmail}
+                onChange={e => { setGitEmail(e.target.value); setSaved(false) }}
+                placeholder="user.email"
+                style={{
+                  height: 28, paddingLeft: 9, paddingRight: 9, borderRadius: 5,
+                  background: 'rgba(255,255,255,0.04)', border: '1px solid #1d2535',
+                  color: '#c8d0e8', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12,
+                  outline: 'none', width: '100%', boxSizing: 'border-box',
+                }}
+                onFocus={e => e.target.style.borderColor = '#4a9eff55'}
+                onBlur={e => e.target.style.borderColor = '#1d2535'}
+              />
+              <button
+                onClick={handleSave}
+                disabled={saving || !gitName.trim() || !gitEmail.trim()}
+                style={{
+                  height: 27, borderRadius: 5, cursor: 'pointer',
+                  background: saved ? 'rgba(45,189,110,0.12)' : 'rgba(74,158,255,0.1)',
+                  border: `1px solid ${saved ? 'rgba(45,189,110,0.35)' : 'rgba(74,158,255,0.3)'}`,
+                  color: saved ? '#2dbd6e' : '#4a9eff',
+                  fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, fontWeight: 600,
+                  opacity: saving || !gitName.trim() || !gitEmail.trim() ? 0.5 : 1,
+                }}
+              >
+                {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save'}
+              </button>
+            </div>
+          </div>
+
+          {/* Sign out */}
+          <button
+            onClick={() => { setOpen(false); onSignOut() }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              width: '100%', height: 38, paddingLeft: 12, paddingRight: 12,
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              color: '#5a6880', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5,
+              textAlign: 'left',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(232,69,69,0.08)'; e.currentTarget.style.color = '#e84545' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#5a6880' }}
+          >
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+              <path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+              <path d="M11 5l3 3-3 3M14 8H7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Sign Out
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
 
 function TopBtn({ onClick, label, accent }: { onClick: () => void; label: string; accent?: boolean }) {
   return (
@@ -1055,6 +1243,16 @@ function FetchIcon() {
     <svg width="12" height="12" viewBox="0 0 13 13" fill="none">
       <path d="M6.5 1v7M4 5.5l2.5 2.5L9 5.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M2 10.5h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function FetchPullIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+      <path d="M7 1v8M4.5 6.5L7 9l2.5-2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M2 11.5h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M11 4.5c0-2.2-1.8-4-4-4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeDasharray="1.5 1.5" />
     </svg>
   )
 }

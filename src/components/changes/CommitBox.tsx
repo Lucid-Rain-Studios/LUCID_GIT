@@ -5,6 +5,8 @@ import { ipc } from '@/ipc'
 import { cn } from '@/lib/utils'
 import { useErrorStore } from '@/stores/errorStore'
 import { useDialogStore } from '@/stores/dialogStore'
+import { useLockStore } from '@/stores/lockStore'
+import { useAuthStore } from '@/stores/authStore'
 
 type HookState = 'idle' | 'running' | 'passed' | 'failed'
 
@@ -12,6 +14,9 @@ export function CommitBox() {
   const { repoPath, fileStatus, refreshStatus } = useRepoStore()
   const opRun = useOperationStore(s => s.run)
   const dialog = useDialogStore()
+  const { locks, unlockFile } = useLockStore()
+  const { accounts, currentAccountId } = useAuthStore()
+  const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login ?? null
 
   const [message, setMessage]         = useState('')
   const [isCommitting, setIsCommitting] = useState(false)
@@ -29,12 +34,26 @@ export function CommitBox() {
     if (!repoPath) return
     setIsCommitting(true)
     setError(null)
+
+    // Capture staged files locked by the current user before the commit clears them
+    const stagedLockedByMe = currentLogin
+      ? fileStatus.filter(f => f.staged && locks.some(
+          l => l.path.replace(/\\/g, '/') === f.path.replace(/\\/g, '/') &&
+               l.owner.login === currentLogin
+        ))
+      : []
+
     try {
       await opRun('Committing…', () => ipc.commit(repoPath, message.trim(), noVerify))
       setMessage('')
       setHookState('idle')
       setHookOutput('')
       refreshStatus()
+
+      // Unlock any files that were staged and locked by us — mirrors Unreal Engine behaviour
+      for (const file of stagedLockedByMe) {
+        unlockFile(repoPath, file.path).catch(() => {})
+      }
     } catch (e) {
       const s = String(e)
       setError(s)

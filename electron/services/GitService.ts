@@ -1,7 +1,8 @@
 import { GitProcess } from 'dugite'
 import fs from 'fs'
 import path from 'path'
-import { exec, execSafe, execWithProgress, ProgressCallback } from '../util/dugite-exec'
+import { exec, execSafe, execWithProgress, gitAuthArgs, ProgressCallback } from '../util/dugite-exec'
+import { authService } from './AuthService'
 import { parseGitLog, GIT_LOG_FORMAT } from '../util/git-log-parse'
 import { FileStatus, BranchInfo, CommitEntry, DiffContent, StashEntry, ContributorInfo, ConflictPreviewFile, SyncStatus, LFSStatus, SizeBreakdown, CleanupResult, BranchActivity, BranchDiffSummary, BranchDiffFile } from '../types'
 
@@ -94,7 +95,8 @@ class GitService {
     args: { url: string; dir: string; depth?: number },
     onProgress?: ProgressCallback
   ): Promise<void> {
-    const cmdArgs = ['clone', '--progress']
+    const token = await authService.getCurrentToken()
+    const cmdArgs = [...gitAuthArgs(token), 'clone', '--progress']
     if (args.depth) cmdArgs.push('--depth', String(args.depth))
     cmdArgs.push(args.url, args.dir)
     await execWithProgress(cmdArgs, process.cwd(), onProgress)
@@ -138,17 +140,20 @@ class GitService {
 
   /** Push current branch to its upstream. Streams progress. */
   async push(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
-    await execWithProgress(['push', '--progress'], repoPath, onProgress)
+    const token = await authService.getCurrentToken()
+    await execWithProgress([...gitAuthArgs(token), 'push', '--progress'], repoPath, onProgress)
   }
 
   /** Pull current branch. Streams progress. */
   async pull(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
-    await execWithProgress(['pull', '--progress'], repoPath, onProgress)
+    const token = await authService.getCurrentToken()
+    await execWithProgress([...gitAuthArgs(token), 'pull', '--progress'], repoPath, onProgress)
   }
 
   /** Fetch all remotes. Streams progress. */
   async fetch(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
-    await execWithProgress(['fetch', '--all', '--progress'], repoPath, onProgress)
+    const token = await authService.getCurrentToken()
+    await execWithProgress([...gitAuthArgs(token), 'fetch', '--all', '--progress'], repoPath, onProgress)
   }
 
   /** List local AND remote-tracking branches with upstream tracking info. */
@@ -213,7 +218,8 @@ class GitService {
 
   /** Delete a remote branch via `git push <remote> --delete <branch>`. */
   async deleteRemoteBranch(repoPath: string, remoteName: string, branch: string): Promise<void> {
-    await exec(['push', remoteName, '--delete', branch], repoPath)
+    const token = await authService.getCurrentToken()
+    await exec([...gitAuthArgs(token), 'push', remoteName, '--delete', branch], repoPath)
   }
 
   /** Create a new branch (and optionally check it out). */
@@ -268,7 +274,8 @@ class GitService {
 
   /** Fetch origin then merge origin/main (or origin/master) into HEAD. */
   async updateFromMain(repoPath: string): Promise<void> {
-    await execSafe(['fetch', 'origin'], repoPath)
+    const token = await authService.getCurrentToken()
+    await execSafe([...gitAuthArgs(token), 'fetch', 'origin'], repoPath)
     for (const branch of ['origin/main', 'origin/master']) {
       const check = await execSafe(['rev-parse', '--verify', branch], repoPath)
       if (check.exitCode === 0) {
@@ -568,57 +575,89 @@ class GitService {
 
   // ── Cleanup ───────────────────────────────────────────────────────────────
 
+  // TTL caches so repeated callers (OverviewPanel refresh, GC before/after) don't re-scan
+  private _sizeCache = new Map<string, { ts: number; result: SizeBreakdown }>()
+  private _lfsCache  = new Map<string, { ts: number; result: LFSStatus }>()
+  private static readonly SIZE_TTL = 2  * 60 * 1000 // 2 minutes
+  private static readonly LFS_TTL  = 5  * 60 * 1000 // 5 minutes
+
+  /** Walk a small directory tree and sum file sizes. Only for LFS/logs — NOT for .git/objects. */
   private async _dirBytes(dirPath: string): Promise<number> {
-    let total = 0
     let entries: fs.Dirent[]
     try {
       entries = await fs.promises.readdir(dirPath, { withFileTypes: true })
     } catch {
       return 0
     }
-    await Promise.all(entries.map(async entry => {
-      const full = path.join(dirPath, entry.name)
-      if (entry.isDirectory()) {
-        total += await this._dirBytes(full)
-      } else if (entry.isFile() || entry.isSymbolicLink()) {
-        try { total += (await fs.promises.stat(full)).size } catch { /* skip */ }
-      }
-    }))
+    let total = 0
+    // Process in batches of 32 to avoid exhausting OS file descriptors
+    for (let i = 0; i < entries.length; i += 32) {
+      const batch = entries.slice(i, i + 32)
+      const sizes = await Promise.all(batch.map(async entry => {
+        const full = path.join(dirPath, entry.name)
+        if (entry.isDirectory()) return this._dirBytes(full)
+        if (entry.isFile() || entry.isSymbolicLink()) {
+          try { return (await fs.promises.stat(full)).size } catch { return 0 }
+        }
+        return 0
+      }))
+      for (const s of sizes) total += s
+    }
     return total
   }
 
+  /**
+   * Measure repository disk usage.
+   * Uses `git count-objects -v` for objects/packs (instant, even on huge repos)
+   * and small directory walks for LFS cache and reflogs.
+   * Results are cached for 2 minutes per repo.
+   */
   async cleanupSize(repoPath: string, onProgress?: ProgressCallback): Promise<SizeBreakdown> {
-    const gitDir     = path.join(repoPath, '.git')
-    const objectsDir = path.join(gitDir, 'objects')
-    const packsDir   = path.join(gitDir, 'objects', 'pack')
-    const lfsDir     = path.join(gitDir, 'lfs')
-    const logsDir    = path.join(gitDir, 'logs')
+    const cached = this._sizeCache.get(repoPath)
+    if (cached && Date.now() - cached.ts < GitService.SIZE_TTL) return cached.result
 
-    onProgress?.({ id: 'size', label: 'Measuring repository', status: 'running', progress: 10, detail: 'Scanning pack files…' })
-    const packsBytes = await this._dirBytes(packsDir)
+    const gitDir  = path.join(repoPath, '.git')
+    const lfsDir  = path.join(gitDir, 'lfs')
+    const logsDir = path.join(gitDir, 'logs')
 
-    onProgress?.({ id: 'size', label: 'Measuring repository', status: 'running', progress: 30, detail: 'Counting loose objects…' })
-    const objectsBytes = await this._dirBytes(objectsDir)
+    onProgress?.({ id: 'size', label: 'Measuring repository', status: 'running', progress: 20, detail: 'Counting objects…' })
 
-    onProgress?.({ id: 'size', label: 'Measuring repository', status: 'running', progress: 55, detail: 'Measuring LFS cache…' })
+    // git count-objects -v is a native git builtin — milliseconds on any size repo
+    let objectsBytes = 0
+    let packsBytes   = 0
+    try {
+      const { stdout } = await exec(['count-objects', '-v'], repoPath)
+      const kib = (key: string): number => {
+        const m = stdout.match(new RegExp(`^${key}:\\s*(\\d+)`, 'm'))
+        return m ? parseInt(m[1], 10) * 1024 : 0
+      }
+      objectsBytes = kib('size') + kib('size-garbage')
+      packsBytes   = kib('size-pack')
+    } catch { /* no objects yet */ }
+
+    onProgress?.({ id: 'size', label: 'Measuring repository', status: 'running', progress: 60, detail: 'Measuring LFS cache…' })
     const lfsCacheBytes = await this._dirBytes(lfsDir)
 
-    onProgress?.({ id: 'size', label: 'Measuring repository', status: 'running', progress: 75, detail: 'Scanning reflog…' })
+    onProgress?.({ id: 'size', label: 'Measuring repository', status: 'running', progress: 85, detail: 'Scanning reflog…' })
     const logsBytes = await this._dirBytes(logsDir)
 
-    onProgress?.({ id: 'size', label: 'Measuring repository', status: 'running', progress: 92, detail: 'Computing total size…' })
-    const totalBytes = await this._dirBytes(gitDir)
+    const totalBytes = objectsBytes + packsBytes + lfsCacheBytes + logsBytes
+    onProgress?.({ id: 'size', label: 'Measuring repository', status: 'done', progress: 100, detail: 'Done' })
 
-    return { totalBytes, objectsBytes, packsBytes, lfsCacheBytes, logsBytes }
+    const result: SizeBreakdown = { totalBytes, objectsBytes, packsBytes, lfsCacheBytes, logsBytes }
+    this._sizeCache.set(repoPath, { ts: Date.now(), result })
+    return result
   }
 
   async cleanupGc(repoPath: string, aggressive = false, onProgress?: ProgressCallback): Promise<CleanupResult> {
     onProgress?.({ id: 'gc', label: 'Git GC', status: 'running', detail: 'Measuring current size…' })
+    this._sizeCache.delete(repoPath)
     const before = await this.cleanupSize(repoPath)
     const args = ['gc']
     if (aggressive) args.push('--aggressive')
     await execWithProgress(args, repoPath, onProgress)
     onProgress?.({ id: 'gc', label: 'Git GC', status: 'running', detail: 'Recalculating size…' })
+    this._sizeCache.delete(repoPath) // GC restructured objects — measure fresh
     const after = await this.cleanupSize(repoPath)
     return {
       beforeBytes: before.totalBytes,
@@ -632,17 +671,22 @@ class GitService {
   }
 
   async cleanupShallow(repoPath: string, depth: number, onProgress?: ProgressCallback): Promise<void> {
-    await execWithProgress(['fetch', '--depth', String(depth), '--progress'], repoPath, onProgress)
+    const token = await authService.getCurrentToken()
+    await execWithProgress([...gitAuthArgs(token), 'fetch', '--depth', String(depth), '--progress'], repoPath, onProgress)
   }
 
   async cleanupUnshallow(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
-    await execWithProgress(['fetch', '--unshallow', '--progress'], repoPath, onProgress)
+    const token = await authService.getCurrentToken()
+    await execWithProgress([...gitAuthArgs(token), 'fetch', '--unshallow', '--progress'], repoPath, onProgress)
   }
 
   // ── LFS ───────────────────────────────────────────────────────────────────
 
-  /** Parse .gitattributes + count LFS objects + suggest untracked binary exts. */
+  /** Parse .gitattributes + count LFS objects + suggest untracked binary exts. Cached 5 min. */
   async lfsStatus(repoPath: string): Promise<LFSStatus> {
+    const cached = this._lfsCache.get(repoPath)
+    if (cached && Date.now() - cached.ts < GitService.LFS_TTL) return cached.result
+
     // Tracked patterns from .gitattributes
     const tracked: string[] = []
     try {
@@ -690,7 +734,14 @@ class GitService {
       }
     }
 
-    return { tracked, untracked: [...untrackedSet].sort(), objects, totalBytes }
+    const result: LFSStatus = { tracked, untracked: [...untrackedSet].sort(), objects, totalBytes }
+    this._lfsCache.set(repoPath, { ts: Date.now(), result })
+    return result
+  }
+
+  /** Invalidate the LFS cache for a repo (call after lfsTrack/Untrack). */
+  invalidateLfsCache(repoPath: string): void {
+    this._lfsCache.delete(repoPath)
   }
 
   /** Run `git lfs track` for each pattern. */
@@ -698,11 +749,13 @@ class GitService {
     for (const p of patterns) {
       await exec(['lfs', 'track', p], repoPath)
     }
+    this.invalidateLfsCache(repoPath)
   }
 
   /** Remove a pattern from LFS tracking (edits .gitattributes). */
   async lfsUntrack(repoPath: string, pattern: string): Promise<void> {
     await exec(['lfs', 'untrack', pattern], repoPath)
+    this.invalidateLfsCache(repoPath)
   }
 
   /** Return binary-extension patterns present in the repo but not yet LFS-tracked. */
@@ -754,7 +807,8 @@ class GitService {
   }
 
   async setUpstream(repoPath: string, branch: string): Promise<void> {
-    await execWithProgress(['push', '--set-upstream', 'origin', branch], repoPath)
+    const token = await authService.getCurrentToken()
+    await execWithProgress([...gitAuthArgs(token), 'push', '--set-upstream', 'origin', branch], repoPath)
   }
 
   async setGitConfig(repoPath: string, key: string, value: string): Promise<void> {
@@ -765,6 +819,23 @@ class GitService {
     const { exitCode, stdout } = await execSafe(['config', '--get', key], repoPath)
     if (exitCode !== 0) return null
     return stdout.trim() || null
+  }
+
+  async getGlobalGitIdentity(): Promise<{ name: string; email: string }> {
+    const home = require('os').homedir()
+    const [nameRes, emailRes] = await Promise.all([
+      execSafe(['config', '--global', 'user.name'],  home),
+      execSafe(['config', '--global', 'user.email'], home),
+    ])
+    return { name: nameRes.stdout.trim(), email: emailRes.stdout.trim() }
+  }
+
+  async setGlobalGitIdentity(name: string, email: string): Promise<void> {
+    const home = require('os').homedir()
+    await Promise.all([
+      exec(['config', '--global', 'user.name', name],  home),
+      exec(['config', '--global', 'user.email', email], home),
+    ])
   }
 
   /** Read the repo-local git identity (user.name + user.email). */
@@ -801,6 +872,73 @@ class GitService {
     if (res.exitCode !== 0) return []
     return res.stdout.split('\n').map(l => l.trim()).filter(Boolean)
   }
+
+  /** Return per-line blame data for a file at a specific revision. */
+  async blame(repoPath: string, filePath: string, rev: string): Promise<BlameEntry[]> {
+    const { exitCode, stdout } = await execSafe(
+      ['blame', '--line-porcelain', rev, '--', filePath],
+      repoPath,
+    )
+    if (exitCode !== 0 || !stdout.trim()) return []
+    return parsePorcelainBlame(stdout)
+  }
+
+  async diffCommit(repoPath: string, filePath: string, hash: string): Promise<DiffContent> {
+    const [newRes, oldRes] = await Promise.all([
+      execSafe(['show', `${hash}:${filePath}`], repoPath),
+      execSafe(['show', `${hash}^:${filePath}`], repoPath),
+    ])
+    const newContent = newRes.exitCode === 0 ? newRes.stdout : ''
+    const oldContent = oldRes.exitCode === 0 ? oldRes.stdout : ''
+    const isBinary = BINARY_EXTS.has(path.extname(filePath).toLowerCase())
+    return { oldContent, newContent, isBinary, language: langFromPath(filePath) }
+  }
+}
+
+export interface BlameEntry {
+  hash: string
+  author: string
+  timestamp: number
+  summary: string
+  lineNo: number
+  line: string
+}
+
+function parsePorcelainBlame(output: string): BlameEntry[] {
+  const lines = output.split('\n')
+  const result: BlameEntry[] = []
+  let i = 0
+
+  while (i < lines.length) {
+    const header = lines[i]
+    if (!header || !/^[0-9a-f]{40} /.test(header)) { i++; continue }
+
+    const parts = header.split(' ')
+    const hash = parts[0]
+    const resultLineNo = parseInt(parts[2], 10)
+
+    const meta: Record<string, string> = {}
+    i++
+    while (i < lines.length && !lines[i].startsWith('\t')) {
+      const ln = lines[i]
+      const sp = ln.indexOf(' ')
+      if (sp > 0) meta[ln.slice(0, sp)] = ln.slice(sp + 1)
+      i++
+    }
+
+    const content = lines[i]?.startsWith('\t') ? lines[i].slice(1) : ''
+    result.push({
+      hash,
+      author: meta['author'] ?? 'Unknown',
+      timestamp: parseInt(meta['author-time'] ?? '0', 10) * 1000,
+      summary: meta['summary'] ?? '',
+      lineNo: isNaN(resultLineNo) ? result.length + 1 : resultLineNo,
+      line: content,
+    })
+    i++
+  }
+
+  return result
 }
 
 export const gitService = new GitService()

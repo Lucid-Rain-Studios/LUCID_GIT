@@ -6,6 +6,21 @@ import { AppShell } from './components/layout/AppShell'
 export function App() {
   useEffect(() => {
     ipc.settingsGet().then(applyAppearanceSettings).catch(() => {})
+
+    // Prevent unhandled promise rejections from silently crashing the renderer
+    const onUnhandled = (e: PromiseRejectionEvent) => {
+      console.error('[Unhandled rejection]', e.reason)
+      e.preventDefault()
+    }
+    const onError = (e: ErrorEvent) => {
+      console.error('[Uncaught error]', e.message)
+    }
+    window.addEventListener('unhandledrejection', onUnhandled)
+    window.addEventListener('error', onError)
+    return () => {
+      window.removeEventListener('unhandledrejection', onUnhandled)
+      window.removeEventListener('error', onError)
+    }
   }, [])
 
   return <AppShell />

@@ -1,5 +1,5 @@
 # Lucid Git — Git Client for Game Developers
-## Claude Code Build Specification — v2.1 (Audited)
+## Claude Code Build Specification — v2.5 (Audited)
 
 ---
 
@@ -104,6 +104,7 @@ lucid-git/
 │   │   ├── ShallowCloneService.ts
 │   │   ├── NotificationService.ts
 │   │   ├── AuthService.ts
+│   │   ├── LogService.ts         # Session log — last 5 sessions, auto-suggestions
 │   │   ├── UnrealService.ts
 │   │   ├── AssetDiffService.ts
 │   │   ├── UEHeadlessService.ts
@@ -169,6 +170,14 @@ lucid-git/
 │   │   │   ├── NotificationBell.tsx
 │   │   │   ├── NotificationFeed.tsx
 │   │   │   └── WatchFileButton.tsx
+│   │   ├── viewer/
+│   │   │   └── AssetViewerPanel.tsx  # right-side asset preview overlay (Section 21)
+│   │   ├── ui/
+│   │   │   ├── Tooltip.tsx           # portal-based global tooltip (Section 22)
+│   │   │   ├── PanelErrorBoundary.tsx # per-panel crash recovery (Section 23)
+│   │   │   └── GlobalDialogs.tsx     # themed modal system (Section 19)
+│   │   ├── logs/
+│   │   │   └── BugLogsPanel.tsx  # Scrollable session log, suggestion box, save-to-txt
 │   │   ├── errors/
 │   │   │   └── ErrorPanel.tsx
 │   │   ├── unreal/
@@ -202,7 +211,9 @@ lucid-git/
 │   │   ├── repoStore.ts
 │   │   ├── operationStore.ts
 │   │   ├── lockStore.ts
-│   │   └── notificationStore.ts
+│   │   ├── notificationStore.ts
+│   │   ├── assetViewerStore.ts       # open/close state for AssetViewerPanel
+│   │   └── dialogStore.ts            # Promise-based custom dialog state
 │   ├── hooks/
 │   │   ├── useRepoStatus.ts
 │   │   ├── useLocks.ts
@@ -231,6 +242,7 @@ export const CHANNELS = {
   AUTH_POLL_DEVICE_FLOW: 'auth:poll-device-flow',
   AUTH_LIST_ACCOUNTS: 'auth:list-accounts',
   AUTH_LOGOUT: 'auth:logout',
+  AUTH_SET_CURRENT_ACCOUNT: 'auth:set-current-account',
 
   // Git core
   GIT_CLONE: 'git:clone',
@@ -296,6 +308,11 @@ export const CHANNELS = {
   FORECAST_POLL_STOP: 'forecast:poll-stop',
   FORECAST_PUBLISH_WIP: 'forecast:publish-wip',  // user-initiated opt-in share
 
+  // Bug logging
+  LOG_GET_TEXT: 'log:get-text',
+  LOG_GET_SUGGESTION: 'log:get-suggestion',
+  LOG_SAVE_DIALOG: 'log:save-dialog',
+
   // Events (main → renderer, one-way)
   EVT_OPERATION_PROGRESS: 'evt:operation-progress',
   EVT_LOCK_CHANGED: 'evt:lock-changed',
@@ -325,13 +342,33 @@ Every service method has a matching IPC handler and a typed renderer wrapper. Cl
 
 **Scopes:** `repo`, `write:lfs`, `read:user`
 
+**Git subprocess authentication:**
+
+The OAuth token stored in keytar is used for both the GitHub REST API (IPC calls) and all git subprocess commands that make HTTPS requests. For subprocess auth, the token is injected via `git -c http.https://github.com/.extraheader=AUTHORIZATION: basic <base64>` rather than relying on the OS credential manager — this works on any machine regardless of credential helper setup.
+
+```typescript
+// electron/util/dugite-exec.ts
+export function gitAuthArgs(token: string | null): string[] {
+  if (!token) return []
+  const b64 = Buffer.from(`x-access-token:${token}`).toString('base64')
+  return ['-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${b64}`]
+}
+```
+
+`AuthService.getCurrentToken()` reads `currentAccountId` from `auth.json` then retrieves the token from keytar. Every network git operation (clone, push, pull, fetch, deleteRemoteBranch, updateFromMain, setUpstream, cleanupShallow, cleanupUnshallow) and every LFS operation (listLocks, lockFile, unlockFile) prepends `gitAuthArgs(await authService.getCurrentToken())` to its args. When no token is available, `gitAuthArgs()` returns `[]` (no-op).
+
 **Providers (v1):** GitHub, GitHub Enterprise. GitLab/Bitbucket deferred to v2.
 
 **UI:**
 - Large monospace code display with countdown to expiry
 - "Copy code" + "Open GitHub" buttons
-- Polling indicator ("Waiting for authorization...")
+- Animated indeterminate progress bar at the top of the dialog, active for the entire polling duration, so users know authorization is still in progress
+- Polling status text alternates: "Waiting for authorization…" ↔ "Checking for authorization…"
+- Pressing × (close) while polling is active shows an inline warning block ("Authentication will be incomplete") with "Cancel authentication" and "Keep waiting" options — the dialog never closes silently mid-poll
 - Account badge in top bar; Settings → Accounts → Add / Sign out
+
+**Account persistence:**
+`AuthService.setCurrentAccount(userId)` reads `auth.json`, updates `currentAccountId` only if the userId exists in the accounts array, then writes back. The frontend `authStore.setCurrentAccount()` calls this via `ipc.setCurrentAccount(userId)` (fire-and-forget) in addition to updating local state, so account selection survives app restarts.
 
 ---
 
@@ -363,6 +400,9 @@ Poll loop runs in main process; diffs previous locks vs current; emits `EVT_LOCK
 - Auto-unlock on merge/commit (optional setting)
 - Warn before checkout if incoming branch has locked files you've modified
 - Live badges update on `EVT_LOCK_CHANGED`
+
+**Team locks grouped by owner:**
+In the Team tab of the Locked Files panel, locks are grouped by owner login with collapsible sections. Each group shows the owner's avatar (initials fallback), display name, lock count badge, and a chevron that rotates when collapsed. Collapsed state is tracked in local React state (`Set<string>`) keyed by owner login. The Mine tab remains a flat list.
 
 **Lock Notifications (in-app):**
 - Teammate locks a file → Electron system notification
@@ -545,6 +585,12 @@ The renderer has a dispatcher that maps each `FixAction` type to actual UI/IPC b
 **Error library (14 codes minimum):**
 - `EAUTH`, `MERGE_CONFLICT`, `LFS_LOCK_CONFLICT`, `PUSH_REJECTED`, `DETACHED_HEAD`, `LARGE_FILE_NO_LFS`, `LFS_QUOTA_EXCEEDED`, `PACK_CORRUPT`, `NO_UPSTREAM`, `STASH_CONFLICT`, `REBASE_ABORT_NEEDED`, `PERMISSION_DENIED`, `NETWORK_TIMEOUT`, `DISK_SPACE`
 
+**`EAUTH` causes and fixes (updated):**
+
+Causes include: token missing / expired / revoked, token scopes insufficient, **token not authorized for organization SSO** (the most common field scenario — the user is authenticated but the org requires SSO authorization of the OAuth token separately).
+
+Fixes include: Sign in again, Verify token scopes, **Authorize token for org SSO** → `github.com → Settings → Applications → find this app → Grant`.
+
 **UI:** Error panel slides up, color-coded, "Fix automatically" when `canAutoFix`, copy-command buttons per step, persistent error history log.
 
 ---
@@ -681,6 +727,9 @@ Lock held for: 2h 14m
 - "Restore to this commit" creates a safety branch first
 - Tag manager
 - Cherry-pick via drag-and-drop on graph
+
+**Undo commit (soft reset):**
+Right-clicking any commit in the History panel exposes "Undo commit (soft reset)" as the first context menu item. The action calls `ipc.gitResetTo(repoPath, commit.parentHashes[0], 'soft')`, which unstages the commit's changes back to the working tree without losing any edits. Root commits (no parent) are guarded — the option is a no-op for those. A confirmation dialog is shown before the reset executes.
 
 ---
 
@@ -1264,22 +1313,24 @@ Every user's default landing panel when the app opens. Replaces the raw Overview
 - Refresh button top-right to manually re-fetch sync status and activity
 
 **Stale-pull warning banner (conditional):**
-Shown when `behind > 0` AND the last recorded pull was more than 2 days ago (or has never happened). Displays commit count, last-pulled time, and a "Sync Now" button. Timestamp persisted to `localStorage` keyed `lucid-git:last-pull:{repoPath}`.
+Shown when `behind > 0` AND the last recorded pull was more than 2 days ago (or has never happened). Displays commit count, last-pulled time, and a "Pull" button. The Pull button is disabled until `hasFetched` (consistent with all other Pull buttons). Timestamp persisted to `localStorage` keyed `lucid-git:last-pull:{repoPath}`.
 
 **Daily Flow Strip:**
 A horizontal 3-step guide spanning the full width. Each step has a numbered/check badge, label, status sub-text, and an optional action button. Steps and their states:
 
-| Step | Label | State logic | Button |
+| Step | Label | State logic | Buttons |
 |---|---|---|---|
-| 1 | Sync | warn if behind; action if ahead; done if clean | "Sync" — chains fetch → pull (if behind) → push (if ahead) in one operation |
+| 1 | Sync | warn if behind; action if ahead; done if clean | **Fetch** (always enabled when not busy) + **Pull** (enabled only after a Fetch has been performed this session; amber when `behind > 0 && hasFetched`) |
 | 2 | Work & Commit | action if staged/modified files exist; done if clean | "View Changes" — navigates to the Changes panel |
-| 3 | Open PR | neutral always | "Open PR ↗" — opens GitHub compare URL in browser; disabled if no GitHub remote detected |
+| 3 | Open PR | neutral always | "Create PR" — opens GitHub compare URL in browser; absent if no GitHub remote detected |
 
-Step sub-text wraps freely; no text is truncated with ellipsis. Sync timestamp is recorded to both `lucid-git:last-fetch:{repoPath}` and `lucid-git:last-pull:{repoPath}` in localStorage on completion.
+Step 1 renders two `SmallBtn` components side-by-side. `hasFetched` is tracked via the module-level `sessionFetchedRepos: Set<string>` and `localStorage` key `lucid-git:last-fetch:{repoPath}`. Pull is disabled (`disabled={isBusy || !hasFetched}`) until at least one Fetch has completed in the current session. `doPull()` calls `ipc.pull()` directly — it does **not** internally fetch first; Fetch is always an explicit user action.
+
+Step sub-text wraps freely; no text is truncated with ellipsis. Fetch timestamp recorded to `lucid-git:last-fetch:{repoPath}`; pull timestamp to `lucid-git:last-pull:{repoPath}`.
 
 **3-column status grid:**
 Three cards displayed side-by-side below the flow strip:
-- *Sync Status* — upstream tracking ref, ahead/behind counters, single "Sync" button (color-coded: amber if behind, green if ahead)
+- *Sync Status* — upstream tracking ref, ahead/behind counters, three buttons: **Fetch** (always active), **Pull** (disabled until `hasFetched`; amber when behind), **Push** (disabled until `hasFetched && behind === 0 && ahead > 0`)
 - *Current Changes* — staged/modified counts, preview of up to 6 changed files with status badges, "View All" link
 - *Active Locks* — per-lock avatar + filename + owner + time held; "YOU" badge for own locks; overflow count
 
@@ -1377,7 +1428,7 @@ The left sidebar is rebuilt around three collapsible navigation groups and a per
 | Group | Items | Visibility |
 |---|---|---|
 | Workspace | Dashboard, Changes, History, Branches | Always visible |
-| Tools | Tools, Team, File Map, Heatmap, Forecast | Always visible |
+| Tools | Tools, Team, Content Browser, File Map, Heatmap, Forecast | Always visible |
 | Admin | LFS, Cleanup, Unreal, Hooks, Overview | Only when `isAdmin(repoPath)` is true and a repo is open |
 
 Each group header is a clickable button with a chevron icon that rotates 90° when collapsed. Collapsed state is persisted to `localStorage` under the key `lucid-git:sidebar-groups` as a JSON object keyed by group key. In icon-only (narrow) sidebar mode, all items are always shown regardless of collapse state.
@@ -1395,6 +1446,69 @@ Four permanent action buttons pinned to the bottom of the sidebar, outside any s
 | Switch Repository | Opens the repository picker | Accent orange on hover |
 
 The Switch Repository button uses a custom `SwitchRepoIcon` (folder-with-arrow SVG) and is the primary affordance for multi-repo workflows.
+
+---
+
+### 21. Asset Viewer Panel
+
+A right-side overlay panel that opens when a user clicks any file thumbnail in the Changes panel or selects "Preview file" from the context menu. Provides thumbnail preview with zoom controls, fullscreen toggle, and a scrollable version history strip — similar in spirit to Anchorpoint's asset viewer.
+
+**State:**
+`useAssetViewerStore` (Zustand) holds `{ repoPath, filePath, isOpen, open(repoPath, filePath), close() }`. Any component can call `open()` to surface the panel for a given file.
+
+**Panel anatomy:**
+
+- Positioned `absolute; top:0; right:0; bottom:0; width:400px` inside `<main>` (which is `position:relative`), so it overlays the current panel without pushing content.
+- **Header:** filename, SHA badge (shown when viewing a historical version), fullscreen toggle (expands to full `<main>` width), close ×.
+- **Preview area:** checkerboard background for transparency, `<img>` scaled via `transform: scale(zoom)`. Supports image formats and UE asset thumbnails. Shows loading spinner while fetching, empty-state SVG for unsupported types.
+- **Zoom controls:** − / + / Fit buttons + percentage readout. "← Current" button returns from a historical ref back to the working tree version.
+- **Version history strip:** horizontal scroll strip at the bottom. Loads up to 20 commits via `ipc.gitFileLog(repoPath, filePath, 20)`. Each card (~68px wide) shows the commit thumbnail via `ipc.assetRenderThumbnail(repoPath, filePath, commit.hash)`, commit hash short form, and author. Clicking a card sets `selectedRef` to that commit hash, loading that historical version in the preview.
+
+**Trigger points:**
+- Clicking the thumbnail button in `FileRow` (Changes panel) for any image or UE asset file.
+- "Preview file" context menu item on previewable files in `FileRow`.
+
+**File type detection:**
+`isImgAsset` covers standard image extensions; `isUEAsset` covers `.uasset`, `.umap`, and related UE formats. `isPreviewable = isUEAsset || isImgAsset`.
+
+---
+
+### 22. Global Tooltip System
+
+A portal-based tooltip component that replaces native `title` attributes across the entire app. Uses `ReactDOM.createPortal` to render into `document.body`, avoiding clipping from any `overflow:hidden` ancestor (such as the collapsed sidebar `<aside>`).
+
+**API:**
+```tsx
+<Tooltip content="Settings" side="right" delay={300}>
+  <NavBtn ... />
+</Tooltip>
+```
+
+- `side?: 'top' | 'right' | 'bottom' | 'left'` — default `'top'`
+- `delay?: number` — show delay in ms, default 500ms
+- Wrapper `<span>` uses `display: 'contents'` so it has no layout impact on the child
+
+**Positioning:**
+On mouse-enter, reads `wrapRef.current.getBoundingClientRect()` and computes `position:fixed` coordinates for the tooltip portal. This ensures correct placement regardless of scroll or nested overflow containers.
+
+**Applied across:**
+- Sidebar nav buttons (collapsed icon-only mode shows tooltip with nav item label, side `'right'`, 300ms delay)
+- All bottom toolbar buttons in the sidebar when collapsed
+- Other interactive icons throughout the app
+
+---
+
+### 23. Panel Error Boundary
+
+A React class component (`PanelErrorBoundary`) wrapping every routed panel in `AppShell`. Catches render-time errors in any panel and shows an in-app recovery UI instead of crashing the entire window.
+
+**Props:** `tabId: string`, `onGoHome: () => void`
+
+**Behavior:**
+- On error: shows an error icon, the error message in monospace, a "Try again" button (clears error state), and a "Return to Dashboard" button (calls `onGoHome` which sets `leftTab` to `'dashboard'`).
+- On tab change (`componentDidUpdate` comparing `tabId`): automatically clears error state so navigating away and back gets a fresh render.
+
+**Coverage:** All panel routes in `AppShell` are individually wrapped, including both sides of the split-panel view. The `<main>` element holds `position:relative` to accommodate the `AssetViewerPanel` overlay; the error boundary sits inside each panel slot, not around `<main>` itself.
 
 ---
 
@@ -1644,6 +1758,262 @@ The built plugin will be placed within the "plugins" folder
 
 ---
 
+---
+
+### 24. Admin Overview Improvements, PR Resolve Dialog, Sync Buttons, Account Menu & Session Restore
+
+A group of UX improvements shipped together. All changes are confined to existing files — no new panels or stores.
+
+---
+
+#### 24.1 Admin Overview Layout
+
+**PR Management moved to the top.**
+`AdminPRsCard` is now rendered immediately below the health-status strip and warnings, before the LFS Health / Repository Size row. Pull requests are the highest-priority admin action and should be the first thing visible.
+
+**Commits and Activity at matching heights.**
+Both `CommitsCard` and `ActivityCard` use a shared `COMMITS_HEIGHT = 340` constant for their scrollable content area (content div, not including the 34px card header). Both cards have `height: COMMITS_HEIGHT + 34` set on the outer card. Content overflows via `overflowY: 'auto'`, so either card scrolls independently once items exceed 340px. Commit fetch limit raised from 10 to 20 to take advantage of the scroll.
+
+---
+
+#### 24.2 PR Resolve Dialog
+
+Each PR row in `AdminPRsCard` now shows a single **Resolve** button (replaces the old Merge + Decline pair). Clicking it opens `ResolveDialog`, a modal (z-index 600, blur backdrop, `slide-down` animation) with the following structure:
+
+**Header:** PR number badge, title, close ×.
+
+**Branch info strip:** `headBranch → baseBranch · by author`.
+
+**Action toggle:** two full-width buttons — `✓ Accept (Merge)` and `✕ Decline (Close)`. Mutually exclusive; toggling between them is instant.
+
+**Accept flow — conflict preview:**
+When Accept is active, the dialog calls `ipc.mergePreview(repoPath, pr.headBranch)` on mount (and on toggle). While loading, shows "Checking for conflicts…". If no conflicts: `✓ No merge conflicts detected`. If conflicts exist, shows a count header and a scrollable list of conflicting files. Each file card offers two buttons:
+- `Accept from {headBranch}` — adopts the incoming change (theirs); defaults on
+- `Accept from {baseBranch}` — keeps the current base (ours)
+
+The contributor name and last-edit date are shown under each option, sourced from `ConflictPreviewFile.theirs` / `.ours`. Per-file choices are stored in local state (`fileChoices: Record<string, 'branch' | 'base'>`); the dialog records the user's intent but the final merge is executed via the GitHub API.
+
+**Decline flow:** Shows a plain warning box explaining the PR will be closed without merging; the branch remains intact.
+
+**Footer:** Cancel (no-op) + Confirm. Confirm label changes contextually: "Merge PR" / "Close PR". On confirm:
+- Accept → `ipc.githubMergePR({ owner, repo, prNumber })`
+- Decline → `ipc.githubClosePR({ owner, repo, prNumber })`
+
+Both calls go through `operationStore.run(…)` for progress tracking. On success, calls `onDone()` (triggers PR list refresh) then `onClose()`.
+
+---
+
+#### 24.3 TopBar Sync Buttons
+
+The previous single smart split-button (Fetch / Pull / Push contextual with a chevron dropdown) is replaced by **two explicit buttons**, always visible when a repo is open:
+
+| Button | Label | Behavior |
+|---|---|---|
+| Fetch & Pull | "Fetch & Pull" / "Fetching…" / "Pulling…" | Always fetches first via `ipc.fetch(repoPath)`. After the fetch resolves, re-reads sync status; if `behind > 0`, automatically executes `ipc.pull(repoPath)`. Calls `refreshStatus()` and `onSynced?.()` after pull. This guarantees the user always fetches before any pull. |
+| Push | "Push" / "Pushing…" | Calls `ipc.push(repoPath)`. |
+
+**State:** Both buttons share the same `syncOp` state (`'idle' | 'fetching' | 'pulling' | 'pushing'`). Both are disabled while any op is in flight.
+
+**Visual treatment:**
+- Fetch & Pull: amber count badge when `behind > 0`; `glow-pulse` animation while pending; `WarnIcon` on sync error.
+- Push: green count badge when `ahead > 0`; `glow-pulse` while pending.
+- Both use the `SyncBtn` helper component which accepts `{ label, icon, count, countColor, active, error, disabled, onClick }`.
+
+**Removed:** chevron dropdown, `doFetch` and `doPull` standalone functions, `menuOpen` state.
+
+**Retained:** `UpdateFromMainBtn` and `doUpdateFromMain` are unchanged.
+
+**New icon:** `FetchPullIcon` — a downward arrow with a dashed arc indicating a two-phase operation.
+
+---
+
+#### 24.4 Account Menu (Global Git Config + Sign Out)
+
+The account avatar in TopBar now opens a dropdown (`AccountMenu` component) instead of being a purely decorative button.
+
+**Trigger:** clicking the avatar + login name button toggles the dropdown. Closes on outside click via `mousedown` listener on `document`.
+
+**Dropdown contents:**
+
+*Global Git Config section* (top, separated by a border):
+- Label: "Global Git Config" (uppercase, dim)
+- Two text inputs: `user.name` and `user.email`, pre-populated from `ipc.getGlobalGitIdentity()` on open
+- "Save" button: calls `ipc.setGlobalGitIdentity(name, email)` which runs `git config --global user.name <name>` and `git config --global user.email <email>` from the user's home directory. Button turns green and shows "✓ Saved" on success. Re-editing either field resets the button to "Save".
+- Inputs are disabled (via styling) when empty; Save button has `opacity: 0.5` when either field is blank.
+
+*Sign Out button* (bottom):
+- Icon: door-with-arrow SVG
+- Calls `useAuthStore.getState().logout(account.userId)` — the existing auth store action that removes the token from keychain and clears the account list.
+- Hover state: red background tint.
+
+**New IPC surface:**
+
+```typescript
+// electron/ipc/channels.ts
+GIT_GET_GLOBAL_IDENTITY: 'git:get-global-identity',
+GIT_SET_GLOBAL_IDENTITY: 'git:set-global-identity',
+
+// electron/services/GitService.ts
+async getGlobalGitIdentity(): Promise<{ name: string; email: string }>
+async setGlobalGitIdentity(name: string, email: string): Promise<void>
+// Both run from os.homedir() — git config --global reads/writes the user's ~/.gitconfig
+
+// src/ipc.ts additions to LucidGitAPI
+getGlobalGitIdentity: () => Promise<GitIdentity>
+setGlobalGitIdentity: (name: string, email: string) => Promise<void>
+```
+
+---
+
+#### 24.5 Session Restore
+
+On app launch, `AppShell` checks whether a repo is already open and whether there are any recent repos. If both conditions hold (no open repo, at least one recent repo), it calls `openRepo(recentRepos[0])` automatically. This silently re-opens the last used repository without any user interaction.
+
+```typescript
+// AppShell.tsx — runs once on mount, after loadAccounts()
+useEffect(() => {
+  if (!repoPath && recentRepos.length > 0) {
+    openRepo(recentRepos[0]).catch(() => {})
+  }
+}, [])
+```
+
+Errors are swallowed silently — if the last repo path no longer exists (deleted, unmounted drive, etc.) the app simply lands on the welcome screen as before. Recent repos are already stored in `localStorage` under `lucid-git:recent-repos` by `repoStore.addRecentRepo`.
+
+---
+
+### 25. Auth Hardening — Device Flow UX + EAUTH SSO + Account Persistence
+
+Three improvements to the auth subsystem shipped together.
+
+#### 25.1 DeviceFlowLogin — Progress Bar & Close Confirmation
+
+Before this change, users with no visual feedback that polling was running would close the dialog manually, abandoning the auth flow silently. Two additions fix this:
+
+**Indeterminate progress bar:**
+A CSS `@keyframes lg-indeterminate` animated bar (sliding fill, width ~40% of container, speed 1.4s) rendered at the very top of the `DeviceFlowLogin` dialog wrapper — as a sibling to the padded content div, not inside it, so it doesn't affect layout. Active from the moment `deviceFlow` is truthy until the dialog closes.
+
+**Close confirmation:**
+Clicking × while `deviceFlow` is active sets `showCloseConfirm: true` instead of closing. This replaces the close button rendering with an amber inline warning block containing:
+- Warning text: "Closing now will cancel authentication."
+- "Cancel authentication" button — calls `clearDeviceFlow(); onClose()`
+- "Keep waiting" button — sets `showCloseConfirm` back to false
+
+When `deviceFlow` is null (no flow in progress), × closes immediately as before.
+
+#### 25.2 EAUTH — GitHub Org SSO as a Known Cause
+
+Added to the `EAUTH` error definition in `src/lib/gitErrors.ts`:
+- **Cause:** `'Token not authorized for organization SSO'`
+- **Fix:** `{ label: 'Authorize token for org SSO: github.com → Settings → Applications → find this app → Grant', command: 'start https://github.com/settings/connections/applications' }`
+
+This is the most common field scenario where re-authenticating alone does not fix the error — the OAuth token needs to be explicitly authorized for the org's SSO policy.
+
+#### 25.3 Account Persistence via `setCurrentAccount`
+
+`authStore.setCurrentAccount(userId)` previously only updated the Zustand store in memory. On app restart the `currentAccountId` would be re-read from `auth.json` which hadn't been updated, causing the selected account to be lost.
+
+Fix: the store action now also calls `ipc.setCurrentAccount(userId)` (fire-and-forget, errors swallowed). The IPC handler calls `AuthService.setCurrentAccount(userId)` which:
+1. Reads `auth.json`
+2. Verifies `userId` exists in the accounts array (guard against stale refs)
+3. Updates `currentAccountId`
+4. Writes `auth.json` back
+
+New IPC channel: `AUTH_SET_CURRENT_ACCOUNT: 'auth:set-current-account'`.
+
+---
+
+### 26. Bug Logging System
+
+A session log that persists the last 5 sessions to disk, surfaced through a "Bug Logs" page in the Tools sidebar group. The primary purpose is to capture error context that can be shared with Claude or read by developers to diagnose field failures without needing a debugger.
+
+#### 26.1 `LogService` (main process singleton)
+
+File: `electron/services/LogService.ts`
+
+**Storage:** `{userData}/lucid-git-logs.json` — a JSON array of up to 5 `LogSession` objects. Older sessions roll off automatically.
+
+**Session model:**
+```typescript
+interface LogEntry {
+  ts: number          // unix ms
+  level: 'INFO' | 'WARN' | 'ERROR'
+  source: string      // e.g. 'git.push', 'AuthService', 'main'
+  message: string
+}
+
+interface LogSession {
+  sessionId: string   // nanoid
+  startedAt: string   // ISO
+  endedAt?: string
+  entries: LogEntry[]
+}
+```
+
+**API:**
+```typescript
+logService.init(userDataPath: string): void
+// Loads past sessions, creates new current session with 'Application started' INFO entry.
+
+logService.info(source: string, message: string): void
+logService.warn(source: string, message: string): void
+logService.error(source: string, message: string): void
+// Appends a timestamped entry; schedules a 2s debounced async flush to disk.
+
+logService.endSession(): void
+// Marks endedAt, flushes synchronously. Called from app 'before-quit'.
+
+logService.getFormattedText(): string
+// Renders all sessions as plain text with ═══ divider headers per session,
+// columns: HH:MM:SS.mmm LEVEL  source  message
+
+logService.getSuggestion(): string | null
+// Pattern-matches current session errors against known patterns:
+// EAUTH, SSH failure, disk full, LFS quota, push rejected (non-fast-forward),
+// merge conflict, pack corruption, admin permission, network timeout, large file (no LFS).
+// Returns a plain-English fix hint, or null if nothing notable.
+
+logService.saveToFile(filePath: string): void
+// Synchronous write of getFormattedText() to a user-chosen path.
+```
+
+**Init:** `logService.init(app.getPath('userData'))` is called at the top of `app.whenReady()`, before IPC handler registration, so the service is ready for all subsequent calls.
+
+**Hooks — where the app writes log entries:**
+- `electron/util/dugite-exec.ts` — `exec()` and `execWithProgress()` log `ERROR` on non-zero exit code, including the git subcommand name and first 1000 chars of stderr
+- `electron/services/AuthService.ts` — logs `INFO` on successful auth (`'Authenticated successfully as {login}'`), `WARN` on profile fetch failure, `INFO` on logout
+- `electron/main.ts` — `app.whenReady()` start logged as `INFO`; `app.on('before-quit')` calls `logService.endSession()`
+
+#### 26.2 IPC Surface
+
+Three new channels (all request-reply):
+- `LOG_GET_TEXT` → `logService.getFormattedText()` — returns the full plain-text log string
+- `LOG_GET_SUGGESTION` → `logService.getSuggestion()` — returns a fix hint string or null
+- `LOG_SAVE_DIALOG` → opens `dialog.showSaveDialog` with default filename `lucid-git-log-{YYYY-MM-DD}.txt`; if the user confirms, calls `logService.saveToFile(path)` and returns the saved path (or null if cancelled)
+
+#### 26.3 `BugLogsPanel` (renderer)
+
+File: `src/components/logs/BugLogsPanel.tsx`
+
+Rendered when `leftTab === 'logs'` in `AppShell`.
+
+**Layout (top to bottom):**
+1. **Header bar** — log icon, "Bug Logs" title, "Last 5 sessions" label, Refresh button (spins while loading)
+2. **Scrollable `<pre>` log area** — monospace font, auto-scrolled to bottom on load so the most recent entries are visible first
+3. **Suggestion box** (conditional) — amber-tinted card with lightbulb icon, "Suggested Fix" label (all-caps), and the suggestion text. Only rendered when `getSuggestion()` returns a non-null value.
+4. **Footer** — "Save log as .txt" button; saved path shown inline after a successful save
+
+**Data loading:** `load()` fires `ipc.logGetText()` and `ipc.logGetSuggestion()` in parallel via `Promise.all`. Refresh button re-invokes `load()`.
+
+#### 26.4 Sidebar Integration
+
+- `'logs'` added to the `TabId` union in both `Sidebar.tsx` and `AppShell.tsx`
+- `{ id: 'logs', label: 'Bug Logs', Icon: LogsIcon }` added to the **Tools** nav group in `Sidebar.tsx`
+- Bug Logs is accessible **without a repo open** — the disabled-when-no-repo guard is lifted for `'logs'` (alongside `'settings'`)
+- `LogsIcon` — a document-with-lines SVG matching the sidebar icon style
+
+---
+
 ## What Claude Code cannot do (manual steps you handle)
 
 1. **Create a GitHub OAuth App** — github.com/settings/developers → register new OAuth app, enable Device Flow, copy Client ID into Lucid Git config.
@@ -1665,7 +2035,9 @@ Everything else — code, config, tests, CI workflows — Claude Code generates.
 
 ---
 
-*Lucid Git Specification v2.3 — Audited.*
+*Lucid Git Specification v2.5 — Audited.*
+*v2.5: Added Auth Hardening (Section 25) — DeviceFlowLogin indeterminate progress bar + close-confirmation guard, EAUTH org-SSO cause/fix, `setCurrentAccount` IPC for persistent account selection across restarts. Added Bug Logging System (Section 26) — `LogService` singleton keeping last 5 sessions in `lucid-git-logs.json`, `BugLogsPanel` under Tools (accessible without a repo), three new IPC channels (`log:get-text`, `log:get-suggestion`, `log:save-dialog`), logging hooks in `dugite-exec.ts` and `AuthService`. Updated Section 17 Dashboard — Fetch and Pull are now two separate buttons throughout (Daily Flow Strip, SyncCard, stale-pull warning); Pull is always disabled until `hasFetched` (set by a Fetch in the current session); `doPull()` no longer internally fetches. New IPC channel: `auth:set-current-account`.*
+*v2.4: Added Asset Viewer Panel (Section 21), Global Tooltip System (Section 22), Panel Error Boundary (Section 23). Updated Section 1 with git subprocess authentication via `gitAuthArgs()` / `http.extraheader` injection — token from keytar now reaches all network git ops (push, pull, fetch, clone, deleteRemoteBranch, updateFromMain, setUpstream, cleanupShallow, cleanupUnshallow) and all LFS ops (listLocks, lockFile, unlockFile) via `AuthService.getCurrentToken()`. Updated Section 2 with owner-grouped collapsible locked-file sections in the Team tab. Updated Section 9 with undo-commit (soft reset to parent) via History panel right-click. Updated Section 20 to add Content Browser to the Tools navigation group. Added new stores: `assetViewerStore` (panel open/close state), `dialogStore` (custom dialog Promises). File Map null crash resolved by null-guarding all `Object.values(presResult.entries)` calls.*
 *v2.3: Added Dashboard Panel (Section 17), Admin Role Preview (Section 18), Custom Dialog System (Section 19), and Navigation & Sidebar Redesign (Section 20). Dashboard is now the default landing panel for all users; Overview moved to the Admin sidebar group. Dashboard includes a personalized greeting, 3-step Daily Flow Strip (Sync/Work & Commit/Open PR), 3-column status grid, time-aware Suggestions card, and Activity feed showing recent commits. Admin Role Preview lets admins simulate Collaborator or Read-only access via a StatusBar dropdown, with a purple TopBar banner and "Switch back to Admin" affordance; `isAdmin()` respects `viewAsRole` override. Custom Dialog System replaces all native OS dialogs (`confirm`/`alert`/`prompt`) with themed in-app modals backed by a Promise-based Zustand store (`dialogStore`) and a global renderer (`GlobalDialogs`); Escape/Enter keyboard handling, danger mode, stacking prevention. Sidebar rebuilt with three collapsible groups (Workspace, Tools, Admin-only) persisted to localStorage, and a fixed bottom toolbar (Settings, View in Explorer, Open Terminal, Switch Repository).*
 *v2.2: Added Role-Based Access Control (Section 16, Phase 20). Two-tier permission model (admin / write) sourced from GitHub API `GET /repos/{owner}/{repo}`. New `PermissionService` with GHE support and fail-open behavior. Admin-only gates on force-unlock, branch deletion, hard reset, LFS migration, cleanup, team config, webhooks, and UE config writes. Defense-in-depth: both UI (dim+disable with lock icon) and main process (IPC handler guard). New IPC channels `auth:fetch-repo-permission` and `auth:get-repo-permission`. Additions to `authStore`, `StatusBar` (permission badge), `TopBar` (warning on fetch failure), and admin-only panel banners.*
 *v2.1: Added three game-dev differentiators — Binary Asset Diff Previews (Section 13, Phase 17), Dependency-Aware Blame (Section 14, Phase 18), Lock Heatmap + Conflict Forecasting (Section 15, Phase 19). New IPC channels for asset/dep/heatmap/forecast services. New SQLite tables `lock_events` and `conflict_events`. Added `sharp`, `d3-force`, `fluent-ffmpeg` (optional) to dependencies. New services: `AssetDiffService`, `UEHeadlessService`, `DependencyService`, `HeatmapService`, `ForecastService`. New components: `AssetDiffViewer`, `DependencyBlamePanel`, `ReferenceViewer`, `LockHeatmap`, `ForecastPanel`.*

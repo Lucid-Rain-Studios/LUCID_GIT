@@ -1,0 +1,2331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lucid Git — UI/UX Redesign Mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ─── DESIGN TOKENS ─────────────────────────────────────────────── */
+:root {
+  /* Surfaces */
+  --bg-base:      #080b12;
+  --bg-raised:    #0e1118;
+  --bg-overlay:   #141821;
+  --bg-elevated:  #1a1f2e;
+  --bg-hover:     #1f2535;
+  --bg-active:    #232a3a;
+
+  /* Accent — amber-orange */
+  --accent:       #e8622f;
+  --accent-dim:   rgba(232,98,47,0.12);
+  --accent-glow:  rgba(232,98,47,0.25);
+  --accent-hover: #f0724a;
+
+  /* Blue — branch/info */
+  --blue:         #4f9eff;
+  --blue-dim:     rgba(79,158,255,0.12);
+
+  /* Status */
+  --green:        #2ec27e;
+  --green-dim:    rgba(46,194,126,0.12);
+  --yellow:       #f5a524;
+  --yellow-dim:   rgba(245,165,36,0.12);
+  --red:          #e84040;
+  --red-dim:      rgba(232,64,64,0.12);
+  --purple:       #9b7aee;
+  --purple-dim:   rgba(155,122,238,0.12);
+
+  /* Text */
+  --text-primary:   #dde3f4;
+  --text-secondary: #6b7591;
+  --text-muted:     #313a52;
+  --text-accent:    #e8622f;
+
+  /* Borders */
+  --border:       #1c2130;
+  --border-mid:   #252d42;
+  --border-focus: rgba(232,98,47,0.5);
+
+  /* Typography */
+  --font-ui:   'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', monospace;
+
+  /* Sizing */
+  --sidebar-w:    220px;
+  --topbar-h:     44px;
+  --statusbar-h:  26px;
+  --radius:       6px;
+  --radius-sm:    4px;
+  --radius-lg:    10px;
+
+  /* Transitions */
+  --t-fast:  80ms cubic-bezier(0.16,1,0.3,1);
+  --t-mid:   150ms cubic-bezier(0.16,1,0.3,1);
+  --t-slow:  250ms cubic-bezier(0.16,1,0.3,1);
+}
+
+/* ─── RESET & BASE ──────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; overflow: hidden; }
+body {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--bg-base);
+  -webkit-font-smoothing: antialiased;
+}
+button { background: none; border: none; cursor: pointer; font: inherit; color: inherit; }
+svg { display: block; flex-shrink: 0; }
+
+/* ─── SCROLLBAR ─────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-mid); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ─── APP SHELL ─────────────────────────────────────────────────── */
+.app {
+  display: grid;
+  grid-template-rows: var(--topbar-h) 1fr var(--statusbar-h);
+  grid-template-columns: var(--sidebar-w) 1fr;
+  grid-template-areas:
+    "topbar topbar"
+    "sidebar content"
+    "statusbar statusbar";
+  width: 100vw;
+  height: 100vh;
+}
+
+/* ─── TOPBAR ────────────────────────────────────────────────────── */
+.topbar {
+  grid-area: topbar;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: drag;
+  position: relative;
+  z-index: 50;
+}
+
+.topbar-drag-region { flex: 1; height: 100%; }
+
+.topbar-wordmark {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  -webkit-app-region: no-drag;
+  text-decoration: none;
+}
+.wordmark-icon {
+  width: 20px;
+  height: 20px;
+  background: var(--accent);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wordmark-text {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+.wordmark-text span { color: var(--accent); }
+
+.topbar-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+.topbar-repo-selector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: background var(--t-fast);
+  min-width: 0;
+}
+.topbar-repo-selector:hover { background: var(--bg-hover); }
+.repo-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-mid);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.repo-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+.repo-chevron { color: var(--text-muted); }
+
+.topbar-branch-selector {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  transition: background var(--t-fast), border-color var(--t-fast);
+  margin-left: 4px;
+}
+.topbar-branch-selector:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-mid);
+}
+.branch-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+}
+.branch-name {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 10px;
+  -webkit-app-region: no-drag;
+}
+
+.topbar-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+  -webkit-app-region: no-drag;
+}
+.topbar-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.topbar-btn.primary {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.topbar-btn.primary:hover { background: var(--accent-hover); }
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 12px;
+  -webkit-app-region: no-drag;
+  margin-left: auto;
+}
+.icon-btn {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+  position: relative;
+}
+.icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.notif-badge {
+  position: absolute;
+  top: 4px; right: 4px;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 1.5px solid var(--bg-raised);
+}
+.avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), #9b5cf0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  cursor: pointer;
+  border: 1.5px solid transparent;
+  transition: border-color var(--t-fast);
+}
+.avatar:hover { border-color: var(--accent); }
+
+/* ─── SIDEBAR ───────────────────────────────────────────────────── */
+.sidebar {
+  grid-area: sidebar;
+  background: var(--bg-raised);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 8px 0;
+}
+
+.sidebar-section {
+  padding: 0 0 4px;
+}
+.sidebar-section + .sidebar-section {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  margin-top: 4px;
+}
+
+.sidebar-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 4px 14px 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 14px;
+  border-radius: 0;
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 400;
+  position: relative;
+  margin: 0 6px;
+  border-radius: var(--radius);
+}
+.nav-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.nav-item.active {
+  background: var(--bg-active);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
+}
+.nav-item .nav-icon {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.nav-item.active .nav-icon { color: var(--accent); }
+
+.nav-badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  padding: 1px 5px;
+  border-radius: 99px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  min-width: 18px;
+  text-align: center;
+}
+.nav-badge.green { background: var(--green-dim); color: var(--green); }
+.nav-badge.orange { background: var(--accent-dim); color: var(--accent); }
+.nav-badge.blue { background: var(--blue-dim); color: var(--blue); }
+
+.sidebar-spacer { flex: 1; }
+
+.sidebar-footer {
+  padding: 8px 10px 4px;
+  border-top: 1px solid var(--border);
+}
+.sidebar-footer-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.sidebar-footer-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* ─── CONTENT AREA ──────────────────────────────────────────────── */
+.content {
+  grid-area: content;
+  background: var(--bg-base);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ─── PANELS (screen views) ─────────────────────────────────────── */
+.panel { display: none; flex: 1; overflow: hidden; }
+.panel.active { display: flex; }
+
+/* ─── STATUS BAR ────────────────────────────────────────────────── */
+.statusbar {
+  grid-area: statusbar;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: var(--bg-raised);
+  border-top: 1px solid var(--border);
+  padding: 0 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  height: 100%;
+  cursor: pointer;
+  transition: color var(--t-fast);
+  color: var(--text-secondary);
+}
+.status-item:hover { color: var(--text-primary); }
+.status-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--green); box-shadow: 0 0 5px var(--green); }
+.status-sep { width: 1px; height: 14px; background: var(--border); }
+
+/* ─── DASHBOARD PANEL ───────────────────────────────────────────── */
+.dashboard {
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 28px 32px;
+  gap: 24px;
+}
+
+.dash-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.dash-greeting {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+.dash-subtext {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 5px;
+}
+
+.dash-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+}
+.dash-grid-wide {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 12px;
+}
+
+.card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.card-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.card-action {
+  font-size: 11.5px;
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 500;
+  transition: opacity var(--t-fast);
+}
+.card-action:hover { opacity: 0.8; }
+
+.stat-value {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  color: var(--text-primary);
+  line-height: 1;
+}
+.stat-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+.stat-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 99px;
+  margin-top: 8px;
+}
+.stat-delta.up { background: var(--green-dim); color: var(--green); }
+.stat-delta.warn { background: var(--yellow-dim); color: var(--yellow); }
+
+.activity-list { display: flex; flex-direction: column; gap: 1px; }
+.activity-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: var(--radius);
+  transition: background var(--t-fast);
+  cursor: pointer;
+}
+.activity-item:hover { background: var(--bg-overlay); }
+.activity-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+}
+.av-orange { background: linear-gradient(135deg, #e8622f, #f5a524); }
+.av-blue { background: linear-gradient(135deg, #4f9eff, #7c3aed); }
+.av-green { background: linear-gradient(135deg, #2ec27e, #059669); }
+.av-purple { background: linear-gradient(135deg, #9b7aee, #e879f9); }
+
+.activity-info { flex: 1; min-width: 0; }
+.activity-who {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.activity-what {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.activity-when {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.activity-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 99px;
+  flex-shrink: 0;
+}
+.tag-commit { background: var(--blue-dim); color: var(--blue); }
+.tag-lock { background: var(--accent-dim); color: var(--accent); }
+.tag-push { background: var(--green-dim); color: var(--green); }
+.tag-branch { background: var(--purple-dim); color: var(--purple); }
+
+.branch-list { display: flex; flex-direction: column; gap: 2px; }
+.branch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--t-fast);
+}
+.branch-row:hover { background: var(--bg-overlay); }
+.branch-row-icon {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.branch-row-name {
+  flex: 1;
+  font-size: 12.5px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--text-primary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.branch-row-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.branch-row.current .branch-row-name { color: var(--green); }
+.branch-row.current .branch-row-icon { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+.sync-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--bg-overlay);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+.sync-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.sync-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.85); }
+}
+.sync-detail {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  flex: 1;
+}
+.sync-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+/* ─── CHANGES PANEL ─────────────────────────────────────────────── */
+.changes-layout {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  height: 100%;
+}
+
+.changes-sidebar {
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-raised);
+  overflow: hidden;
+}
+
+.changes-header {
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.changes-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.filter-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.search-input {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px 9px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: text;
+  transition: border-color var(--t-fast);
+}
+.search-input:hover { border-color: var(--border-mid); }
+.search-input.focused { border-color: var(--border-focus); }
+
+.stage-all-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 9px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-radius: var(--radius);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background var(--t-fast), border-color var(--t-fast);
+  white-space: nowrap;
+}
+.stage-all-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.file-section { flex: 1; overflow-y: auto; }
+.file-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.file-group-count {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  padding: 1px 5px;
+  border-radius: 99px;
+  margin-left: auto;
+}
+.staged-count { background: var(--green-dim); color: var(--green); }
+.unstaged-count { background: var(--yellow-dim); color: var(--yellow); }
+
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 24px;
+  cursor: pointer;
+  transition: background var(--t-fast);
+  position: relative;
+}
+.file-row:hover { background: var(--bg-overlay); }
+.file-row.selected { background: var(--bg-active); }
+.file-row.selected::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--accent);
+}
+
+.file-status {
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+.status-M { background: var(--blue-dim); color: var(--blue); }
+.status-A { background: var(--green-dim); color: var(--green); }
+.status-D { background: var(--red-dim); color: var(--red); }
+.status-R { background: var(--yellow-dim); color: var(--yellow); }
+.status-U { background: var(--purple-dim); color: var(--purple); }
+.status-L { background: var(--accent-dim); color: var(--accent); }
+
+.file-name {
+  flex: 1;
+  font-size: 12.5px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.file-dir {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.file-lock-icon { color: var(--accent); }
+
+.commit-box {
+  border-top: 1px solid var(--border);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.commit-textarea {
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 9px 10px;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  color: var(--text-primary);
+  resize: none;
+  min-height: 70px;
+  line-height: 1.5;
+  transition: border-color var(--t-fast);
+  outline: none;
+  width: 100%;
+}
+.commit-textarea::placeholder { color: var(--text-muted); }
+.commit-textarea:focus { border-color: var(--border-focus); }
+.commit-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.commit-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 12px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: var(--radius);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--t-fast), transform var(--t-fast);
+}
+.commit-btn:hover { background: var(--accent-hover); }
+.commit-btn:active { transform: scale(0.98); }
+.commit-icon-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.commit-icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* ─── DIFF VIEWER ───────────────────────────────────────────────── */
+.diff-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-base);
+}
+.diff-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+.diff-filepath {
+  font-size: 12.5px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diff-stat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+.diff-adds { color: var(--green); }
+.diff-dels { color: var(--red); }
+.diff-view-toggle {
+  display: flex;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.diff-view-btn {
+  padding: 4px 9px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.diff-view-btn.active { background: var(--bg-elevated); color: var(--text-primary); }
+.diff-view-btn:hover:not(.active) { background: var(--bg-hover); color: var(--text-primary); }
+
+.diff-content {
+  flex: 1;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.diff-line {
+  display: flex;
+  min-width: max-content;
+}
+.diff-gutter {
+  width: 40px;
+  padding: 0 8px;
+  text-align: right;
+  color: var(--text-muted);
+  font-size: 11px;
+  user-select: none;
+  flex-shrink: 0;
+  background: var(--bg-raised);
+  border-right: 1px solid var(--border);
+}
+.diff-code {
+  flex: 1;
+  padding: 0 14px;
+  white-space: pre;
+}
+.diff-line.add { background: rgba(46,194,126,0.06); }
+.diff-line.add .diff-code { color: var(--green); }
+.diff-line.add .diff-gutter { background: rgba(46,194,126,0.06); color: rgba(46,194,126,0.5); }
+.diff-line.del { background: rgba(232,64,64,0.06); }
+.diff-line.del .diff-code { color: var(--red); }
+.diff-line.del .diff-gutter { background: rgba(232,64,64,0.06); color: rgba(232,64,64,0.5); }
+.diff-line.hunk { background: var(--blue-dim); }
+.diff-line.hunk .diff-code { color: var(--blue); font-size: 11px; }
+.diff-line.hunk .diff-gutter { background: var(--blue-dim); }
+
+/* ─── HISTORY PANEL ─────────────────────────────────────────────── */
+.history-layout {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  height: 100%;
+}
+
+.history-graph {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+.history-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+.toolbar-pill {
+  display: flex;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.toolbar-pill-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.toolbar-pill-btn.active { background: var(--bg-elevated); color: var(--text-primary); }
+.toolbar-spacer { flex: 1; }
+
+.commit-list { flex: 1; overflow-y: auto; }
+.commit-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  padding: 0;
+  cursor: pointer;
+  transition: background var(--t-fast);
+  position: relative;
+  border-bottom: 1px solid var(--border);
+}
+.commit-row:hover { background: var(--bg-overlay); }
+.commit-row.selected { background: var(--bg-active); }
+
+.commit-graph-col {
+  width: 44px;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  padding-top: 16px;
+  position: relative;
+}
+.commit-graph-col::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1.5px;
+  background: var(--border-mid);
+  transform: translateX(-50%);
+}
+.commit-node {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--blue);
+  background: var(--bg-base);
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+}
+.commit-node.head {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+.commit-node.merge { border-color: var(--purple); }
+
+.commit-info {
+  flex: 1;
+  padding: 10px 12px 10px 0;
+  min-width: 0;
+}
+.commit-msg {
+  font-size: 12.5px;
+  color: var(--text-primary);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
+}
+.commit-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.commit-author {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.commit-hash {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+.commit-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: auto;
+  white-space: nowrap;
+}
+.commit-tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.commit-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1.5px 6px;
+  border-radius: 99px;
+  white-space: nowrap;
+}
+.ct-branch { background: var(--blue-dim); color: var(--blue); border: 1px solid rgba(79,158,255,0.2); }
+.ct-head   { background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(232,98,47,0.2); }
+.ct-tag    { background: var(--yellow-dim); color: var(--yellow); border: 1px solid rgba(245,165,36,0.2); }
+
+.commit-detail {
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-raised);
+}
+.commit-detail-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.commit-detail-msg {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  line-height: 1.4;
+  margin-bottom: 12px;
+}
+.commit-detail-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.meta-label {
+  color: var(--text-muted);
+  width: 60px;
+  flex-shrink: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+.meta-value { color: var(--text-secondary); }
+.meta-value.mono { font-family: var(--font-mono); font-size: 11.5px; color: var(--blue); }
+.meta-avatar {
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 8px; font-weight: 700; color: #fff;
+}
+.commit-files-list { flex: 1; overflow-y: auto; padding: 8px; }
+.detail-file {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--t-fast);
+}
+.detail-file:hover { background: var(--bg-overlay); }
+.detail-file-name {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── BRANCHES PANEL ────────────────────────────────────────────── */
+.branches-layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  height: 100%;
+}
+.branches-list-col {
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-raised);
+  overflow: hidden;
+}
+.branches-header {
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.branches-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.new-branch-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-radius: var(--radius);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--t-fast);
+}
+.new-branch-btn:hover { background: var(--accent); color: #fff; }
+
+.branches-scroll { flex: 1; overflow-y: auto; padding: 6px; }
+.branch-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 6px 8px 2px;
+}
+.branch-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--t-fast);
+}
+.branch-item:hover { background: var(--bg-overlay); }
+.branch-item.current { background: var(--bg-active); }
+.branch-item.selected { background: var(--bg-active); }
+.branch-item-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-muted);
+}
+.branch-item.current .branch-item-dot {
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+}
+.branch-item-name {
+  flex: 1;
+  font-size: 12.5px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.branch-item.current .branch-item-name { color: var(--text-primary); }
+.branch-item-meta {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.branch-item-ahead {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 99px;
+  background: var(--blue-dim);
+  color: var(--blue);
+}
+
+.branch-detail-col {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 24px;
+  gap: 20px;
+  overflow-y: auto;
+}
+.branch-detail-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.branch-detail-subtitle {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+.branch-action-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.branch-action-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 10px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: background var(--t-fast), border-color var(--t-fast), transform var(--t-fast);
+  text-align: center;
+}
+.branch-action-card:hover {
+  background: var(--bg-overlay);
+  border-color: var(--border-mid);
+  transform: translateY(-1px);
+}
+.branch-action-card.danger:hover {
+  border-color: rgba(232,64,64,0.3);
+  background: var(--red-dim);
+}
+.branch-action-icon {
+  width: 32px; height: 32px;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.bai-blue  { background: var(--blue-dim); color: var(--blue); }
+.bai-green { background: var(--green-dim); color: var(--green); }
+.bai-orange{ background: var(--accent-dim); color: var(--accent); }
+.bai-red   { background: var(--red-dim); color: var(--red); }
+.branch-action-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.branch-action-card.danger .branch-action-label { color: var(--red); }
+
+.branch-stats-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.branch-stat-card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+}
+.branch-stat-num {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+.branch-stat-label {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+/* ─── SCREEN SELECTOR (mockup nav) ─────────────────────────────── */
+.mockup-nav {
+  position: fixed;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-mid);
+  border-radius: 99px;
+  padding: 6px 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  z-index: 999;
+}
+.screen-pill {
+  padding: 5px 14px;
+  border-radius: 99px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.screen-pill:hover { background: var(--bg-hover); color: var(--text-primary); }
+.screen-pill.active { background: var(--accent); color: #fff; }
+
+/* ─── EMPTY / PLACEHOLDER ───────────────────────────────────────── */
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text-muted);
+}
+.empty-icon {
+  width: 40px; height: 40px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+.empty-label { font-size: 13px; font-weight: 500; color: var(--text-secondary); }
+.empty-sub { font-size: 12px; color: var(--text-muted); }
+
+/* fade in on panel switch */
+.panel.active { animation: panelIn 180ms cubic-bezier(0.16,1,0.3,1) both; }
+@keyframes panelIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ═══ TOPBAR ═════════════════════════════════════════════════ -->
+  <header class="topbar">
+    <div class="topbar-wordmark">
+      <div class="wordmark-icon">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <path d="M2 10 L6 2 L10 10" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M3.5 7 H8.5" stroke="white" stroke-width="1.4" stroke-linecap="round" opacity="0.7"/>
+        </svg>
+      </div>
+      <span class="wordmark-text">Lucid<span>Git</span></span>
+    </div>
+
+    <div class="topbar-divider"></div>
+
+    <div class="topbar-repo-selector">
+      <div class="repo-icon">
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+          <rect x="1" y="1" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.2" fill="none"/>
+          <path d="M4 3.5V6.5M3 5H5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <span class="repo-name">UnrealProject-Main</span>
+      <svg class="repo-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none">
+        <path d="M4 5l2 2 2-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+
+    <div class="topbar-branch-selector">
+      <div class="branch-dot"></div>
+      <span class="branch-name">main</span>
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style="color:var(--text-muted)">
+        <path d="M3 4l2 2 2-2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+
+    <div class="topbar-drag-region"></div>
+
+    <div class="topbar-actions">
+      <button class="topbar-btn">
+        <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+          <path d="M6.5 1v11M1 6.5h11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        Fetch
+      </button>
+      <button class="topbar-btn">
+        <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+          <path d="M2 7.5l4 4 5-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Pull
+      </button>
+      <button class="topbar-btn primary">
+        <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+          <path d="M6.5 12V2M11 6.5l-4.5-4.5-4.5 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Push
+      </button>
+    </div>
+
+    <div class="topbar-right">
+      <div class="icon-btn">
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+          <circle cx="7.5" cy="7.5" r="5.5" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M7.5 5v3l2 1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
+        <div class="notif-badge"></div>
+      </div>
+      <div class="icon-btn">
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+          <circle cx="7.5" cy="7.5" r="2" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M7.5 1v1.5M7.5 12.5V14M1 7.5h1.5M12.5 7.5H14" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="avatar" title="Ricardo R.">RR</div>
+    </div>
+  </header>
+
+  <!-- ═══ SIDEBAR ════════════════════════════════════════════════ -->
+  <nav class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">Workspace</div>
+      <div class="nav-item" id="nav-dashboard" onclick="showPanel('dashboard')">
+        <div class="nav-icon">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <rect x="1" y="1" width="5" height="5" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+            <rect x="8" y="1" width="5" height="5" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+            <rect x="1" y="8" width="5" height="5" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+            <rect x="8" y="8" width="5" height="5" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+          </svg>
+        </div>
+        Dashboard
+      </div>
+      <div class="nav-item" id="nav-changes" onclick="showPanel('changes')">
+        <div class="nav-icon">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M2 4h10M2 7h7M2 10h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+        </div>
+        Changes
+        <span class="nav-badge orange">7</span>
+      </div>
+      <div class="nav-item" id="nav-history" onclick="showPanel('history')">
+        <div class="nav-icon">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M7 4.5v2.5l1.5 1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+        </div>
+        History
+      </div>
+      <div class="nav-item" id="nav-branches" onclick="showPanel('branches')">
+        <div class="nav-icon">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <circle cx="4" cy="3" r="1.5" stroke="currentColor" stroke-width="1.2"/>
+            <circle cx="4" cy="11" r="1.5" stroke="currentColor" stroke-width="1.2"/>
+            <circle cx="10" cy="7" r="1.5" stroke="currentColor" stroke-width="1.2"/>
+            <path d="M4 4.5v5M4.8 4.2L9.2 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        Branches
+        <span class="nav-badge blue">12</span>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Team</div>
+      <div class="nav-item" id="nav-presence" onclick="">
+        <div class="nav-icon">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <circle cx="5.5" cy="5.5" r="2.5" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M1.5 12.5c0-2 1.8-3.5 4-3.5s4 1.5 4 3.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+            <circle cx="10" cy="5" r="2" stroke="currentColor" stroke-width="1.2" opacity="0.6"/>
+            <path d="M10 8.5c1.5 0 2.5 1 2.5 2.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.6"/>
+          </svg>
+        </div>
+        Presence
+        <span class="nav-badge green">4</span>
+      </div>
+      <div class="nav-item" onclick="">
+        <div class="nav-icon">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M7 1.5L2 4v3c0 3 2.5 5.2 5 5.8 2.5-.6 5-2.8 5-5.8V4L7 1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        Locks
+        <span class="nav-badge orange">3</span>
+      </div>
+      <div class="nav-item" onclick="">
+        <div class="nav-icon">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M2 12V5l5-3.5L12 5v7H9V9H5v3H2Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        Forecast
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Tools</div>
+      <div class="nav-item" onclick="">
+        <div class="nav-icon">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <circle cx="7" cy="7" r="3" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M7 1v2M7 11v2M1 7h2M11 7h2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+        </div>
+        LFS
+      </div>
+      <div class="nav-item" onclick="">
+        <div class="nav-icon">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M3 3h8v2L7 9l-4-4V3Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+            <path d="M7 9v4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+        </div>
+        Hooks
+      </div>
+      <div class="nav-item" onclick="">
+        <div class="nav-icon">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M2 11L5.5 7.5M2 3L5.5 6.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+            <circle cx="9" cy="5" r="2.5" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M9 9v3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+        </div>
+        Cleanup
+      </div>
+    </div>
+
+    <div class="sidebar-spacer"></div>
+
+    <div class="sidebar-footer">
+      <div class="sidebar-footer-item">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.3"/><path d="M7 6.5v3.5M7 4.5v.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        Overview
+      </div>
+      <div class="sidebar-footer-item">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2a5 5 0 110 10A5 5 0 017 2zM4.5 7h5M7 4.5v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+        Settings
+      </div>
+    </div>
+  </nav>
+
+  <!-- ═══ CONTENT ════════════════════════════════════════════════ -->
+  <main class="content">
+
+    <!-- ── DASHBOARD ─────────────────────────────────────────── -->
+    <div class="panel dashboard" id="panel-dashboard">
+      <div class="dash-header">
+        <div>
+          <div class="dash-greeting">Good afternoon, Ricardo.</div>
+          <div class="dash-subtext">UnrealProject-Main · Last sync 3 minutes ago</div>
+        </div>
+        <button class="topbar-btn primary" style="height:34px">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+            <path d="M6.5 1v12M1 6.5l5.5 5.5 5.5-5.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Sync All
+        </button>
+      </div>
+
+      <div class="sync-status-bar">
+        <div class="sync-state">
+          <div class="sync-dot"></div>
+          Up to date with <strong style="color:var(--text-primary);margin-left:4px">origin/main</strong>
+        </div>
+        <div class="sync-detail">No pending changes · 4 team members active</div>
+        <div class="sync-time">15:41:22</div>
+      </div>
+
+      <div class="dash-grid">
+        <div class="card">
+          <div class="card-header"><span class="card-title">Files Changed</span></div>
+          <div><span class="stat-value">7</span>
+          <div class="stat-label">Since last commit</div>
+          <div class="stat-delta up">↑ 2 staged</div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">Open Locks</span></div>
+          <div><span class="stat-value">3</span>
+          <div class="stat-label">Files locked</div>
+          <div class="stat-delta warn">⚠ 1 by others</div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">Active Branches</span></div>
+          <div><span class="stat-value">12</span>
+          <div class="stat-label">Across team</div>
+          <div class="stat-delta up">↑ 3 this week</div></div>
+        </div>
+      </div>
+
+      <div class="dash-grid-wide">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Team Activity</span>
+            <span class="card-action">View all</span>
+          </div>
+          <div class="activity-list">
+            <div class="activity-item">
+              <div class="activity-avatar av-blue">JK</div>
+              <div class="activity-info">
+                <div class="activity-who">James Kim</div>
+                <div class="activity-what">Pushed 3 commits to feature/ai-locomotion</div>
+              </div>
+              <span class="activity-tag tag-push">push</span>
+              <span class="activity-when">2m</span>
+            </div>
+            <div class="activity-item">
+              <div class="activity-avatar av-purple">SR</div>
+              <div class="activity-info">
+                <div class="activity-who">Sofia Reyes</div>
+                <div class="activity-what">Locked Content/Characters/Hero/BP_HeroBase.uasset</div>
+              </div>
+              <span class="activity-tag tag-lock">lock</span>
+              <span class="activity-when">8m</span>
+            </div>
+            <div class="activity-item">
+              <div class="activity-avatar av-green">TW</div>
+              <div class="activity-info">
+                <div class="activity-who">Tom Wright</div>
+                <div class="activity-what">fix: resolve material instance override crash</div>
+              </div>
+              <span class="activity-tag tag-commit">commit</span>
+              <span class="activity-when">22m</span>
+            </div>
+            <div class="activity-item">
+              <div class="activity-avatar av-orange">RR</div>
+              <div class="activity-info">
+                <div class="activity-who">Ricardo R. <span style="color:var(--text-muted);font-weight:400">(you)</span></div>
+                <div class="activity-what">Created branch feature/inventory-refactor</div>
+              </div>
+              <span class="activity-tag tag-branch">branch</span>
+              <span class="activity-when">1h</span>
+            </div>
+            <div class="activity-item">
+              <div class="activity-avatar av-blue">JK</div>
+              <div class="activity-info">
+                <div class="activity-who">James Kim</div>
+                <div class="activity-what">feat: add root motion support to AnimBP</div>
+              </div>
+              <span class="activity-tag tag-commit">commit</span>
+              <span class="activity-when">2h</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Active Branches</span>
+            <span class="card-action">Manage</span>
+          </div>
+          <div class="branch-list">
+            <div class="branch-row current">
+              <div class="branch-row-icon" style="background:var(--green);box-shadow:0 0 6px var(--green)"></div>
+              <span class="branch-row-name">main</span>
+              <span class="branch-row-meta">current</span>
+            </div>
+            <div class="branch-row">
+              <div class="branch-row-icon" style="background:var(--blue)"></div>
+              <span class="branch-row-name">feature/ai-locomotion</span>
+              <span class="branch-row-meta">JK · 3m</span>
+            </div>
+            <div class="branch-row">
+              <div class="branch-row-icon" style="background:var(--accent)"></div>
+              <span class="branch-row-name">feature/inventory-refactor</span>
+              <span class="branch-row-meta">you · 1h</span>
+            </div>
+            <div class="branch-row">
+              <div class="branch-row-icon" style="background:var(--purple)"></div>
+              <span class="branch-row-name">fix/material-crash</span>
+              <span class="branch-row-meta">TW · 22m</span>
+            </div>
+            <div class="branch-row">
+              <div class="branch-row-icon" style="background:var(--text-muted)"></div>
+              <span class="branch-row-name">feature/audio-system</span>
+              <span class="branch-row-meta">SR · 3h</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── CHANGES ────────────────────────────────────────────── -->
+    <div class="panel" id="panel-changes">
+      <div class="changes-layout">
+        <aside class="changes-sidebar">
+          <div class="changes-header">
+            <div class="changes-title">
+              Changes
+              <span style="font-size:10px;font-family:var(--font-mono);background:var(--accent-dim);color:var(--accent);padding:2px 6px;border-radius:99px;font-weight:700">7</span>
+            </div>
+            <div class="filter-row">
+              <div class="search-input">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.3"/><path d="M8 8l2 2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+                Filter files…
+              </div>
+              <button class="stage-all-btn">Stage all</button>
+            </div>
+          </div>
+
+          <div class="file-section">
+            <div class="file-group-header">
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 2" stroke="var(--green)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Staged
+              <span class="file-group-count staged-count">2</span>
+            </div>
+            <div class="file-row selected">
+              <div class="file-status status-M">M</div>
+              <span class="file-name">BP_InventoryComponent.uasset</span>
+              <span class="file-dir">Gameplay/</span>
+            </div>
+            <div class="file-row">
+              <div class="file-status status-A">A</div>
+              <span class="file-name">W_InventorySlot.uasset</span>
+              <span class="file-dir">UI/</span>
+            </div>
+
+            <div class="file-group-header" style="margin-top:8px">
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><circle cx="5" cy="5" r="3.5" stroke="var(--yellow)" stroke-width="1.3"/><path d="M5 3v2.5" stroke="var(--yellow)" stroke-width="1.3" stroke-linecap="round"/><circle cx="5" cy="7" r="0.5" fill="var(--yellow)"/></svg>
+              Unstaged
+              <span class="file-group-count unstaged-count">5</span>
+            </div>
+            <div class="file-row">
+              <div class="file-status status-M">M</div>
+              <span class="file-name">GameMode_Main.uasset</span>
+              <span class="file-dir">Core/</span>
+            </div>
+            <div class="file-row">
+              <div class="file-status status-M">M</div>
+              <span class="file-name">BP_PlayerCharacter.uasset</span>
+              <span class="file-dir">Characters/</span>
+              <svg class="file-lock-icon" width="11" height="11" viewBox="0 0 11 11" fill="none"><rect x="2" y="5" width="7" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M3.5 5V3.5a2 2 0 014 0V5" stroke="currentColor" stroke-width="1.2"/></svg>
+            </div>
+            <div class="file-row">
+              <div class="file-status status-D">D</div>
+              <span class="file-name">OldInventory_deprecated.uasset</span>
+              <span class="file-dir">Gameplay/</span>
+            </div>
+            <div class="file-row">
+              <div class="file-status status-M">M</div>
+              <span class="file-name">HUD_Main.uasset</span>
+              <span class="file-dir">UI/</span>
+            </div>
+            <div class="file-row">
+              <div class="file-status status-R">R</div>
+              <span class="file-name">W_Inventory → W_InventoryPanel</span>
+              <span class="file-dir">UI/</span>
+            </div>
+          </div>
+
+          <div class="commit-box">
+            <textarea class="commit-textarea" placeholder="Describe your changes…&#10;&#10;Tip: first line is the summary"></textarea>
+            <div class="commit-actions">
+              <div class="commit-icon-btn" title="Stash">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 4l5 3 5-3M2 4v6l5 3 5-3V4" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+              </div>
+              <div class="commit-icon-btn" title="Amend">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9 2l3 3-6 6H3v-3l6-6Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+              </div>
+              <button class="commit-btn">
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 6.5h9M7.5 3l3.5 3.5L7.5 10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Commit to main
+              </button>
+            </div>
+          </div>
+        </aside>
+
+        <div class="diff-pane">
+          <div class="diff-header">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style="color:var(--blue)"><path d="M2 2h7l3 3v7H2V2Z" stroke="currentColor" stroke-width="1.2"/><path d="M9 2v3h3" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+            <span class="diff-filepath">Content/Gameplay/BP_InventoryComponent.uasset</span>
+            <div class="diff-stat">
+              <span class="diff-adds">+42</span>
+              <span class="diff-dels">−18</span>
+            </div>
+            <div class="diff-view-toggle">
+              <div class="diff-view-btn active">Unified</div>
+              <div class="diff-view-btn">Split</div>
+            </div>
+          </div>
+          <div class="diff-content">
+            <div class="diff-line hunk"><div class="diff-gutter"></div><div class="diff-code">@@ -24,18 +24,42 @@ class UInventoryComponent : public UActorComponent</div></div>
+            <div class="diff-line"><div class="diff-gutter">24</div><div class="diff-code">  void InitializeComponent() override;</div></div>
+            <div class="diff-line"><div class="diff-gutter">25</div><div class="diff-code">  void BeginPlay() override;</div></div>
+            <div class="diff-line"><div class="diff-gutter">26</div><div class="diff-code"> </div></div>
+            <div class="diff-line del"><div class="diff-gutter">27</div><div class="diff-code">- TArray&lt;FInventorySlot&gt; Items;</div></div>
+            <div class="diff-line del"><div class="diff-gutter">28</div><div class="diff-code">- int32 MaxSlots = 20;</div></div>
+            <div class="diff-line add"><div class="diff-gutter">  </div><div class="diff-code">+ TArray&lt;FInventorySlot&gt; Items;</div></div>
+            <div class="diff-line add"><div class="diff-gutter">  </div><div class="diff-code">+ TArray&lt;FInventorySlot&gt; EquippedItems;</div></div>
+            <div class="diff-line add"><div class="diff-gutter">  </div><div class="diff-code">+ int32 MaxSlots = 40;</div></div>
+            <div class="diff-line add"><div class="diff-gutter">  </div><div class="diff-code">+ int32 MaxEquipSlots = 6;</div></div>
+            <div class="diff-line"><div class="diff-gutter">29</div><div class="diff-code"> </div></div>
+            <div class="diff-line"><div class="diff-gutter">30</div><div class="diff-code">  UFUNCTION(BlueprintCallable)</div></div>
+            <div class="diff-line del"><div class="diff-gutter">31</div><div class="diff-code">- bool AddItem(FInventorySlot Item);</div></div>
+            <div class="diff-line add"><div class="diff-gutter">  </div><div class="diff-code">+ bool AddItem(FInventorySlot Item, bool bEquip = false);</div></div>
+            <div class="diff-line add"><div class="diff-gutter">  </div><div class="diff-code">+ bool EquipItem(int32 SlotIndex);</div></div>
+            <div class="diff-line add"><div class="diff-gutter">  </div><div class="diff-code">+ bool UnequipItem(int32 EquipSlotIndex);</div></div>
+            <div class="diff-line add"><div class="diff-gutter">  </div><div class="diff-code">+ void SwapItems(int32 SlotA, int32 SlotB);</div></div>
+            <div class="diff-line"><div class="diff-gutter">32</div><div class="diff-code"> </div></div>
+            <div class="diff-line"><div class="diff-gutter">33</div><div class="diff-code">  UFUNCTION(BlueprintCallable)</div></div>
+            <div class="diff-line"><div class="diff-gutter">34</div><div class="diff-code">  bool RemoveItem(int32 SlotIndex);</div></div>
+            <div class="diff-line add"><div class="diff-gutter">  </div><div class="diff-code">+ bool RemoveEquippedItem(int32 EquipSlotIndex);</div></div>
+            <div class="diff-line"><div class="diff-gutter">35</div><div class="diff-code"> </div></div>
+            <div class="diff-line"><div class="diff-gutter">36</div><div class="diff-code">  bool HasItem(FName ItemID) const;</div></div>
+            <div class="diff-line del"><div class="diff-gutter">37</div><div class="diff-code">- int32 GetItemCount() const;</div></div>
+            <div class="diff-line add"><div class="diff-gutter">  </div><div class="diff-code">+ int32 GetItemCount(bool bIncludeEquipped = true) const;</div></div>
+            <div class="diff-line add"><div class="diff-gutter">  </div><div class="diff-code">+ int32 GetEquippedItemCount() const;</div></div>
+            <div class="diff-line add"><div class="diff-gutter">  </div><div class="diff-code">+ float GetTotalWeight() const;</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── HISTORY ────────────────────────────────────────────── -->
+    <div class="panel" id="panel-history">
+      <div class="history-layout">
+        <div class="history-graph">
+          <div class="history-toolbar">
+            <div class="toolbar-pill">
+              <div class="toolbar-pill-btn active">All</div>
+              <div class="toolbar-pill-btn">Mine</div>
+              <div class="toolbar-pill-btn">Branch</div>
+            </div>
+            <div class="search-input" style="width:200px;flex:0 0 200px">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.3"/><path d="M8 8l2 2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+              Search commits…
+            </div>
+            <div class="toolbar-spacer"></div>
+            <div class="icon-btn" style="color:var(--text-secondary)">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 4h10M4 7h6M6 10h2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+            </div>
+          </div>
+
+          <div class="commit-list">
+            <div class="commit-row selected">
+              <div class="commit-graph-col"><div class="commit-node head"></div></div>
+              <div class="commit-info">
+                <div class="commit-msg">feat: refactor inventory system with equipment slots</div>
+                <div class="commit-meta-row">
+                  <span class="commit-author">Ricardo R.</span>
+                  <span class="commit-hash">a3f2b19</span>
+                  <span class="commit-time">just now</span>
+                </div>
+                <div class="commit-tags">
+                  <span class="commit-tag ct-head">HEAD</span>
+                  <span class="commit-tag ct-branch">main</span>
+                  <span class="commit-tag ct-branch">origin/main</span>
+                </div>
+              </div>
+            </div>
+            <div class="commit-row">
+              <div class="commit-graph-col"><div class="commit-node"></div></div>
+              <div class="commit-info">
+                <div class="commit-msg">fix: material instance override crash on level load</div>
+                <div class="commit-meta-row">
+                  <span class="commit-author">Tom Wright</span>
+                  <span class="commit-hash">c9e1d04</span>
+                  <span class="commit-time">22m ago</span>
+                </div>
+              </div>
+            </div>
+            <div class="commit-row">
+              <div class="commit-graph-col"><div class="commit-node merge"></div></div>
+              <div class="commit-info">
+                <div class="commit-msg">Merge pull request: Add root motion support to AnimBP</div>
+                <div class="commit-meta-row">
+                  <span class="commit-author">James Kim</span>
+                  <span class="commit-hash">f4a8c22</span>
+                  <span class="commit-time">2h ago</span>
+                </div>
+                <div class="commit-tags">
+                  <span class="commit-tag ct-branch">feature/ai-locomotion</span>
+                </div>
+              </div>
+            </div>
+            <div class="commit-row">
+              <div class="commit-graph-col"><div class="commit-node"></div></div>
+              <div class="commit-info">
+                <div class="commit-msg">feat: implement root motion extraction from animation</div>
+                <div class="commit-meta-row">
+                  <span class="commit-author">James Kim</span>
+                  <span class="commit-hash">8b3f901</span>
+                  <span class="commit-time">3h ago</span>
+                </div>
+              </div>
+            </div>
+            <div class="commit-row">
+              <div class="commit-graph-col"><div class="commit-node"></div></div>
+              <div class="commit-info">
+                <div class="commit-msg">chore: update project settings for UE 5.4</div>
+                <div class="commit-meta-row">
+                  <span class="commit-author">Ricardo R.</span>
+                  <span class="commit-hash">2d7a551</span>
+                  <span class="commit-time">5h ago</span>
+                </div>
+                <div class="commit-tags">
+                  <span class="commit-tag ct-tag">v0.4.2</span>
+                </div>
+              </div>
+            </div>
+            <div class="commit-row">
+              <div class="commit-graph-col"><div class="commit-node"></div></div>
+              <div class="commit-info">
+                <div class="commit-msg">feat: new weapon pickup interaction system</div>
+                <div class="commit-meta-row">
+                  <span class="commit-author">Sofia Reyes</span>
+                  <span class="commit-hash">5c9e3b7</span>
+                  <span class="commit-time">Yesterday</span>
+                </div>
+              </div>
+            </div>
+            <div class="commit-row">
+              <div class="commit-graph-col"><div class="commit-node"></div></div>
+              <div class="commit-info">
+                <div class="commit-msg">fix: hero character hitbox not matching mesh</div>
+                <div class="commit-meta-row">
+                  <span class="commit-author">Tom Wright</span>
+                  <span class="commit-hash">1a4d88e</span>
+                  <span class="commit-time">Yesterday</span>
+                </div>
+              </div>
+            </div>
+            <div class="commit-row">
+              <div class="commit-graph-col"><div class="commit-node"></div></div>
+              <div class="commit-info">
+                <div class="commit-msg">perf: optimize occlusion culling on large levels</div>
+                <div class="commit-meta-row">
+                  <span class="commit-author">Ricardo R.</span>
+                  <span class="commit-hash">9f2a120</span>
+                  <span class="commit-time">2 days ago</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="commit-detail">
+          <div class="commit-detail-header">
+            <div class="commit-detail-msg">feat: refactor inventory system with equipment slots</div>
+            <div class="commit-detail-meta">
+              <div class="meta-row">
+                <span class="meta-label">Author</span>
+                <div class="meta-avatar av-orange" style="width:18px;height:18px;font-size:8px">RR</div>
+                <span class="meta-value">Ricardo Rheeder</span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">Hash</span>
+                <span class="meta-value mono">a3f2b19c</span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">Date</span>
+                <span class="meta-value">Apr 27, 2026 · 15:38</span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">Branch</span>
+                <span class="meta-value mono" style="color:var(--green)">main</span>
+              </div>
+            </div>
+          </div>
+          <div style="padding:10px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+            <span style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">Changed Files</span>
+            <span style="font-size:11px;font-family:var(--font-mono);color:var(--text-muted)">3 files</span>
+          </div>
+          <div class="commit-files-list">
+            <div class="detail-file">
+              <div class="file-status status-M">M</div>
+              <span class="detail-file-name">Content/Gameplay/BP_InventoryComponent.uasset</span>
+              <span style="font-size:11px;color:var(--green);font-family:var(--font-mono);font-weight:600">+42</span>
+              <span style="font-size:11px;color:var(--red);font-family:var(--font-mono);font-weight:600">−18</span>
+            </div>
+            <div class="detail-file">
+              <div class="file-status status-A">A</div>
+              <span class="detail-file-name">Content/UI/Widgets/W_InventorySlot.uasset</span>
+              <span style="font-size:11px;color:var(--green);font-family:var(--font-mono);font-weight:600">+89</span>
+            </div>
+            <div class="detail-file">
+              <div class="file-status status-D">D</div>
+              <span class="detail-file-name">Content/Gameplay/OldInventory_deprecated.uasset</span>
+              <span style="font-size:11px;color:var(--red);font-family:var(--font-mono);font-weight:600">−210</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── BRANCHES ───────────────────────────────────────────── -->
+    <div class="panel" id="panel-branches">
+      <div class="branches-layout">
+        <div class="branches-list-col">
+          <div class="branches-header">
+            <div class="branches-title-row">
+              <span class="panel-title">Branches</span>
+              <button class="new-branch-btn">
+                <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                New
+              </button>
+            </div>
+            <div class="search-input">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.3"/><path d="M8 8l2 2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+              Filter branches…
+            </div>
+          </div>
+          <div class="branches-scroll">
+            <div class="branch-group-label">Local</div>
+            <div class="branch-item current selected">
+              <div class="branch-item-dot"></div>
+              <span class="branch-item-name">main</span>
+              <span class="branch-item-meta">current</span>
+            </div>
+            <div class="branch-item">
+              <div class="branch-item-dot" style="background:var(--accent)"></div>
+              <span class="branch-item-name">feature/inventory-refactor</span>
+              <span class="branch-item-ahead">↑2</span>
+            </div>
+            <div class="branch-item">
+              <div class="branch-item-dot" style="background:var(--text-muted)"></div>
+              <span class="branch-item-name">fix/material-crash</span>
+              <span class="branch-item-meta">2h</span>
+            </div>
+            <div class="branch-item">
+              <div class="branch-item-dot" style="background:var(--text-muted)"></div>
+              <span class="branch-item-name">chore/ue54-upgrade</span>
+              <span class="branch-item-meta">5h</span>
+            </div>
+
+            <div class="branch-group-label" style="margin-top:8px">Remote — origin</div>
+            <div class="branch-item">
+              <div class="branch-item-dot" style="background:var(--green)"></div>
+              <span class="branch-item-name">origin/main</span>
+              <span class="branch-item-meta">synced</span>
+            </div>
+            <div class="branch-item">
+              <div class="branch-item-dot" style="background:var(--blue)"></div>
+              <span class="branch-item-name">origin/feature/ai-locomotion</span>
+              <span class="branch-item-meta">JK · 3m</span>
+            </div>
+            <div class="branch-item">
+              <div class="branch-item-dot" style="background:var(--blue)"></div>
+              <span class="branch-item-name">origin/feature/audio-system</span>
+              <span class="branch-item-meta">SR · 3h</span>
+            </div>
+            <div class="branch-item">
+              <div class="branch-item-dot" style="background:var(--blue)"></div>
+              <span class="branch-item-name">origin/fix/hero-hitbox</span>
+              <span class="branch-item-meta">TW · 1d</span>
+            </div>
+            <div class="branch-item">
+              <div class="branch-item-dot" style="background:var(--blue)"></div>
+              <span class="branch-item-name">origin/release/v0.4</span>
+              <span class="branch-item-meta">3d</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="branch-detail-col">
+          <div>
+            <div class="branch-detail-title">
+              <div class="branch-dot" style="width:10px;height:10px"></div>
+              main
+              <span style="font-size:12px;font-weight:500;color:var(--text-secondary);font-family:var(--font-ui);margin-left:2px">· current</span>
+            </div>
+            <div class="branch-detail-subtitle">Tracking <strong style="color:var(--text-primary)">origin/main</strong> · Up to date · Last commit 3 min ago</div>
+          </div>
+
+          <div class="branch-action-grid">
+            <div class="branch-action-card">
+              <div class="branch-action-icon bai-blue">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 8h12M8 3l5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+              <span class="branch-action-label">Merge</span>
+            </div>
+            <div class="branch-action-card">
+              <div class="branch-action-icon bai-green">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 12V4m0 0l4 4m-4-4L4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 4v8m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+              <span class="branch-action-label">Rebase</span>
+            </div>
+            <div class="branch-action-card">
+              <div class="branch-action-icon bai-orange">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 5h10M7 2l-4 3 4 3M9 11h4M13 8l-4 3 4 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+              <span class="branch-action-label">Cherry Pick</span>
+            </div>
+            <div class="branch-action-card danger">
+              <div class="branch-action-icon bai-red">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+              </div>
+              <span class="branch-action-label">Delete</span>
+            </div>
+          </div>
+
+          <div class="branch-stats-row">
+            <div class="branch-stat-card">
+              <div class="branch-stat-num" style="color:var(--green)">0</div>
+              <div class="branch-stat-label">Commits ahead</div>
+            </div>
+            <div class="branch-stat-card">
+              <div class="branch-stat-num" style="color:var(--blue)">0</div>
+              <div class="branch-stat-label">Commits behind</div>
+            </div>
+            <div class="branch-stat-card">
+              <div class="branch-stat-num">47</div>
+              <div class="branch-stat-label">Total commits</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Recent Commits</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:2px">
+              <div class="activity-item" style="padding:8px 6px">
+                <div class="activity-avatar av-orange">RR</div>
+                <div class="activity-info">
+                  <div class="activity-who" style="font-size:12px">feat: refactor inventory system</div>
+                  <div class="activity-what">a3f2b19 · just now</div>
+                </div>
+              </div>
+              <div class="activity-item" style="padding:8px 6px">
+                <div class="activity-avatar av-green">TW</div>
+                <div class="activity-info">
+                  <div class="activity-who" style="font-size:12px">fix: material instance crash</div>
+                  <div class="activity-what">c9e1d04 · 22m ago</div>
+                </div>
+              </div>
+              <div class="activity-item" style="padding:8px 6px">
+                <div class="activity-avatar av-blue">JK</div>
+                <div class="activity-info">
+                  <div class="activity-who" style="font-size:12px">Merge: root motion support</div>
+                  <div class="activity-what">f4a8c22 · 2h ago</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ═══ STATUS BAR ═════════════════════════════════════════════ -->
+  <footer class="statusbar">
+    <div class="status-item">
+      <div class="status-dot"></div>
+      Connected
+    </div>
+    <div class="status-sep"></div>
+    <div class="status-item">
+      <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 5.5l2 2 5-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      7 changes
+    </div>
+    <div class="status-sep"></div>
+    <div class="status-item">
+      <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><rect x="1.5" y="4" width="8" height="5.5" rx="1" stroke="currentColor" stroke-width="1.1"/><path d="M3.5 4V2.5a2 2 0 014 0V4" stroke="currentColor" stroke-width="1.1"/></svg>
+      3 locks
+    </div>
+    <div class="status-sep"></div>
+    <div class="status-item">
+      <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><circle cx="5.5" cy="5.5" r="4" stroke="currentColor" stroke-width="1.1"/><path d="M5.5 3.5v2l1.5 1" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
+      4 online
+    </div>
+    <div style="flex:1"></div>
+    <div class="status-item" style="font-family:var(--font-mono);font-size:10.5px">
+      UE 5.4 · dugite 1.91 · LFS active
+    </div>
+  </footer>
+
+</div>
+
+<!-- ═══ SCREEN NAV (mockup only) ═══════════════════════════════ -->
+<nav class="mockup-nav">
+  <div class="screen-pill active" onclick="showPanel('dashboard')">Dashboard</div>
+  <div class="screen-pill" onclick="showPanel('changes')">Changes</div>
+  <div class="screen-pill" onclick="showPanel('history')">History</div>
+  <div class="screen-pill" onclick="showPanel('branches')">Branches</div>
+</nav>
+
+<script>
+function showPanel(name) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelectorAll('.screen-pill').forEach(p => p.classList.remove('active'));
+
+  document.getElementById('panel-' + name).classList.add('active');
+  document.getElementById('nav-' + name)?.classList.add('active');
+  document.querySelectorAll('.screen-pill').forEach(p => {
+    if (p.textContent.toLowerCase() === name) p.classList.add('active');
+  });
+}
+
+// file row selection
+document.querySelectorAll('.file-row').forEach(row => {
+  row.addEventListener('click', () => {
+    document.querySelectorAll('.file-row').forEach(r => r.classList.remove('selected'));
+    row.classList.add('selected');
+  });
+});
+
+// commit row selection
+document.querySelectorAll('.commit-row').forEach(row => {
+  row.addEventListener('click', () => {
+    document.querySelectorAll('.commit-row').forEach(r => r.classList.remove('selected'));
+    row.classList.add('selected');
+  });
+});
+
+// branch item selection
+document.querySelectorAll('.branch-item').forEach(item => {
+  item.addEventListener('click', () => {
+    document.querySelectorAll('.branch-item').forEach(b => b.classList.remove('selected'));
+    item.classList.add('selected');
+  });
+});
+
+// diff view toggle
+document.querySelectorAll('.diff-view-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    btn.parentElement.querySelectorAll('.diff-view-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+
+// toolbar pill toggle
+document.querySelectorAll('.toolbar-pill-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    btn.parentElement.querySelectorAll('.toolbar-pill-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+
+showPanel('dashboard');
+</script>
+</body>
+</html>

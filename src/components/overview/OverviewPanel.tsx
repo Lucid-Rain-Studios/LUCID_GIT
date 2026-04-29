@@ -1,10 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  ipc, SyncStatus, LFSStatus, Lock, StashEntry,
-  CommitEntry, BranchActivity, SizeBreakdown,
+  ipc, SyncStatus, LFSStatus,
+  CommitEntry, BranchActivity, SizeBreakdown, PullRequest, ConflictPreviewFile,
 } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
-import { useAuthStore } from '@/stores/authStore'
 import { useOperationStore } from '@/stores/operationStore'
 
 interface OverviewPanelProps {
@@ -46,6 +45,11 @@ function initials(name: string): string {
   const parts = name.trim().split(/\s+/)
   if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
   return name.slice(0, 2).toUpperCase()
+}
+
+function parseGitHubSlug(url: string): string | null {
+  const m = url.match(/github\.com[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?$/)
+  return m ? m[1] : null
 }
 
 // ── Card ──────────────────────────────────────────────────────────────────────
@@ -169,124 +173,6 @@ function Metric({ label, value, color, sub }: { label: string; value: string | n
   )
 }
 
-// ── Divider ───────────────────────────────────────────────────────────────────
-
-function Divider() {
-  return <div style={{ height: 1, background: '#18202e', margin: '2px 0' }} />
-}
-
-// ── Sync card ─────────────────────────────────────────────────────────────────
-
-function SyncCard({ sync, branch, repoPath, onDone }: {
-  sync: SyncStatus | null; branch: string; repoPath: string; onDone: () => void
-}) {
-  const opRun = useOperationStore(s => s.run)
-  const [busy, setBusy] = useState<string | null>(null)
-
-  const act = async (label: string, fn: () => Promise<void>) => {
-    setBusy(label)
-    try { await opRun(label, fn) } finally { setBusy(null); onDone() }
-  }
-
-  const aheadColor  = !sync || sync.ahead  === 0 ? '#344057' : '#e8622f'
-  const behindColor = !sync || sync.behind === 0 ? '#344057' : '#f5a832'
-  const upToDate    = sync && sync.ahead === 0 && sync.behind === 0
-
-  return (
-    <Card title="Sync Status" icon={<SyncIcon />} accentColor="#e8622f">
-      <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {/* Branch + remote */}
-        <div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: '#4a9eff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 2 }}>
-            {branch || '—'}
-          </div>
-          <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#344057' }}>
-            {sync?.hasUpstream ? `tracking ${sync.remoteName}/${sync.remoteBranch}` : 'no upstream configured'}
-          </div>
-        </div>
-
-        {/* Ahead / behind metrics */}
-        <div style={{ display: 'flex', gap: 20 }}>
-          <Metric label="Ahead"  value={`↑${sync?.ahead  ?? '—'}`} color={aheadColor}  sub={sync?.ahead  === 0 ? 'nothing to push' : 'commit(s) to push'} />
-          <Metric label="Behind" value={`↓${sync?.behind ?? '—'}`} color={behindColor} sub={sync?.behind === 0 ? 'up to date'      : 'commit(s) to pull'} />
-        </div>
-
-        {upToDate && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ color: '#2dbd6e', fontSize: 13 }}>✓</span>
-            <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>In sync with remote</span>
-          </div>
-        )}
-
-        {/* Action buttons */}
-        <div style={{ display: 'flex', gap: 6 }}>
-          <Btn label="Fetch" loading={busy === 'Fetching…'} disabled={!!busy && busy !== 'Fetching…'} onClick={() => act('Fetching…', () => ipc.fetch(repoPath))} />
-          <Btn label="Pull"  loading={busy === 'Pulling…'}  disabled={!!busy && busy !== 'Pulling…'}  onClick={() => act('Pulling…',  () => ipc.pull(repoPath))}  color="#4d9dff" />
-          <Btn label="Push"  loading={busy === 'Pushing…'}  disabled={!!busy && busy !== 'Pushing…'}  onClick={() => act('Pushing…',  () => ipc.push(repoPath))}  color="#e8622f" />
-        </div>
-      </div>
-    </Card>
-  )
-}
-
-// ── Working copy card ─────────────────────────────────────────────────────────
-
-function WorkingCopyCard({
-  staged, unstaged, stash, onNavigate,
-}: { staged: number; unstaged: number; stash: StashEntry[]; onNavigate: (t: string) => void }) {
-  const total = staged + unstaged
-  return (
-    <Card
-      title="Working Copy"
-      icon={<ChangesCardIcon />}
-      accentColor="#f5a832"
-      actionLabel="Changes"
-      onAction={() => onNavigate('changes')}
-    >
-      <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ display: 'flex', gap: 20 }}>
-          <Metric label="Staged"   value={staged}   color={staged   > 0 ? '#2dbd6e' : '#344057'} sub={staged   === 0 ? 'nothing staged' : `file${staged   !== 1 ? 's' : ''} ready`} />
-          <Metric label="Modified" value={unstaged}  color={unstaged > 0 ? '#f5a832' : '#344057'} sub={unstaged === 0 ? 'no changes'     : `file${unstaged !== 1 ? 's' : ''} changed`} />
-        </div>
-
-        {total === 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ color: '#2dbd6e', fontSize: 13 }}>✓</span>
-            <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>Working directory clean</span>
-          </div>
-        )}
-
-        {stash.length > 0 && (
-          <>
-            <Divider />
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-              <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, fontWeight: 600, color: '#344057', letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 2 }}>
-                {stash.length} stashed
-              </span>
-              {stash.slice(0, 3).map((s, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                  <span style={{
-                    fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
-                    background: 'rgba(162,126,240,0.12)', color: '#a27ef0',
-                    border: '1px solid rgba(162,126,240,0.25)', borderRadius: 3, padding: '1px 5px', flexShrink: 0,
-                  }}>stash@{`{${s.index}}`}</span>
-                  <span style={{
-                    fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#5a6880',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
-                  }}>{s.message || `WIP on ${s.branch}`}</span>
-                </div>
-              ))}
-              {stash.length > 3 && (
-                <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#344057' }}>+{stash.length - 3} more</span>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-    </Card>
-  )
-}
-
 // ── LFS health card ───────────────────────────────────────────────────────────
 
 function LfsCard({ lfs, onNavigate }: { lfs: LFSStatus | null; onNavigate: (t: string) => void }) {
@@ -307,7 +193,6 @@ function LfsCard({ lfs, onNavigate }: { lfs: LFSStatus | null; onNavigate: (t: s
               <Metric label="Size"    value={fmtBytes(lfs.totalBytes)}   color="#dde1f0"  sub="LFS stored"    />
             </div>
 
-            {/* Tracked patterns */}
             <div>
               <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, fontWeight: 600, color: '#344057', letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 6 }}>
                 {lfs.tracked.length} tracked pattern{lfs.tracked.length !== 1 ? 's' : ''}
@@ -328,7 +213,6 @@ function LfsCard({ lfs, onNavigate }: { lfs: LFSStatus | null; onNavigate: (t: s
               </div>
             </div>
 
-            {/* Untracked warning */}
             {warnCount > 0 && (
               <div style={{
                 background: 'rgba(245,168,50,0.08)', border: '1px solid rgba(245,168,50,0.3)',
@@ -354,120 +238,15 @@ function LfsCard({ lfs, onNavigate }: { lfs: LFSStatus | null; onNavigate: (t: s
   )
 }
 
-// ── Active locks card ─────────────────────────────────────────────────────────
-
-function LocksCard({
-  locks, repoPath, currentLogin, onDone,
-}: { locks: Lock[]; repoPath: string; currentLogin: string | null; onDone: () => void }) {
-  const opRun    = useOperationStore(s => s.run)
-  const [unlocking, setUnlocking] = useState<string | null>(null)
-
-  const handleUnlock = async (path: string, force: boolean) => {
-    setUnlocking(path)
-    try { await opRun('Unlocking…', () => ipc.unlockFile(repoPath, path, force)) }
-    finally { setUnlocking(null); onDone() }
-  }
-
-  const myLocks    = locks.filter(l => l.owner.login === currentLogin)
-  const theirLocks = locks.filter(l => l.owner.login !== currentLogin)
-
-  return (
-    <Card
-      title="Active Locks"
-      icon={<LockCardIcon />}
-      accentColor={locks.length > 0 ? '#e8622f' : '#2dbd6e'}
-    >
-      {locks.length === 0 ? (
-        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-          <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-            <rect x="7" y="12" width="14" height="10" rx="2" stroke="#2ec573" strokeWidth="1.3" />
-            <path d="M10 12V9a4 4 0 0 1 8 0v3" stroke="#2ec573" strokeWidth="1.3" strokeLinecap="round" />
-          </svg>
-          <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>No active locks</span>
-        </div>
-      ) : (
-        <div style={{ overflowY: 'auto', maxHeight: 320 }}>
-          {myLocks.length > 0 && <LockSection label="Your locks" locks={myLocks} isOwn onUnlock={p => handleUnlock(p, false)} unlocking={unlocking} />}
-          {theirLocks.length > 0 && <LockSection label="Team locks" locks={theirLocks} isOwn={false} onUnlock={p => handleUnlock(p, true)} unlocking={unlocking} />}
-        </div>
-      )}
-    </Card>
-  )
-}
-
-function LockSection({ label, locks, isOwn, onUnlock, unlocking }: {
-  label: string; locks: Lock[]; isOwn: boolean; onUnlock: (p: string) => void; unlocking: string | null
-}) {
-  return (
-    <>
-      <div style={{
-        padding: '6px 14px 2px', fontFamily: "'IBM Plex Sans', system-ui",
-        fontSize: 9, fontWeight: 600, color: '#344057', letterSpacing: '0.09em', textTransform: 'uppercase',
-      }}>{label}</div>
-      {locks.map(lock => <LockRow key={lock.id} lock={lock} isOwn={isOwn} onUnlock={() => onUnlock(lock.path)} loading={unlocking === lock.path} />)}
-    </>
-  )
-}
-
-function LockRow({ lock, isOwn, onUnlock, loading }: {
-  lock: Lock; isOwn: boolean; onUnlock: () => void; loading: boolean
-}) {
-  const [hover, setHover] = useState(false)
-  const fileName = lock.path.split('/').pop() ?? lock.path
-  const lockColor = isOwn ? '#2dbd6e' : '#f5a832'
-
-  return (
-    <div
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 10,
-        minHeight: 44, paddingLeft: 14, paddingRight: 14, paddingTop: 8, paddingBottom: 8,
-        borderBottom: '1px solid #18202e',
-        background: hover ? 'rgba(255,255,255,0.03)' : 'transparent', transition: 'background 0.1s',
-      }}
-    >
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0, color: lockColor }}>
-        <rect x="3" y="6" width="8" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
-        <path d="M5 6V4.5a2 2 0 0 1 4 0V6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-        <circle cx="7" cy="9" r="1" fill="currentColor" />
-      </svg>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#e2e6f4', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lock.path}>
-          {fileName}
-        </div>
-        <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#344057', marginTop: 1 }}>
-          {lock.owner.name || lock.owner.login} · {timeAgoStr(lock.lockedAt)}
-        </div>
-        {fileName !== lock.path && (
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: '#344057', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>
-            {lock.path}
-          </div>
-        )}
-      </div>
-      {hover && (
-        <button
-          onClick={onUnlock}
-          disabled={loading}
-          style={{
-            height: 22, paddingLeft: 8, paddingRight: 8, borderRadius: 4, flexShrink: 0,
-            background: `${lockColor}1a`, border: `1px solid ${lockColor}55`,
-            color: lockColor, fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11,
-            cursor: loading ? 'default' : 'pointer',
-          }}
-        >{loading ? '…' : isOwn ? 'Unlock' : 'Force unlock'}</button>
-      )}
-    </div>
-  )
-}
-
 // ── Repository size card ──────────────────────────────────────────────────────
 
-function SizeCard({ size, onNavigate }: { size: SizeBreakdown | null; onNavigate: (t: string) => void }) {
+function SizeCard({ size, sizeLoading, onNavigate }: { size: SizeBreakdown | null; sizeLoading: boolean; onNavigate: (t: string) => void }) {
   if (!size) return (
     <Card title="Repository Size" icon={<SizeCardIcon />} accentColor="#a27ef0">
       <div style={{ padding: 14 }}>
-        <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>Size data unavailable</span>
+        <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>
+          {sizeLoading ? 'Measuring…' : 'Size data unavailable'}
+        </span>
       </div>
     </Card>
   )
@@ -530,6 +309,8 @@ function SizeCard({ size, onNavigate }: { size: SizeBreakdown | null; onNavigate
 
 // ── Branch activity card ──────────────────────────────────────────────────────
 
+const COMMITS_HEIGHT = 340
+
 function ActivityCard({ activity, onNavigate }: { activity: BranchActivity[]; onNavigate: (t: string) => void }) {
   return (
     <Card
@@ -538,13 +319,14 @@ function ActivityCard({ activity, onNavigate }: { activity: BranchActivity[]; on
       accentColor="#4d9dff"
       actionLabel="History"
       onAction={() => onNavigate('history')}
+      style={{ height: COMMITS_HEIGHT + 34 }}
     >
       {activity.length === 0 ? (
         <div style={{ padding: '16px 14px', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>
           No recent branch activity
         </div>
       ) : (
-        <div style={{ overflowY: 'auto', maxHeight: 340 }}>
+        <div style={{ overflowY: 'auto', height: COMMITS_HEIGHT }}>
           {activity.slice(0, 12).map((item, i) => {
             const branch = item.ref.replace(/^refs\/heads\//, '').replace(/^refs\/remotes\/[^/]+\//, '')
             const col = authorColor(item.author)
@@ -595,11 +377,12 @@ function CommitsCard({ commits, onNavigate }: { commits: CommitEntry[]; onNaviga
       accentColor="#a27ef0"
       actionLabel="Full History"
       onAction={() => onNavigate('history')}
+      style={{ height: COMMITS_HEIGHT + 34 }}
     >
       {commits.length === 0 ? (
         <div style={{ padding: '16px 14px', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>No commits yet</div>
       ) : (
-        <div>
+        <div style={{ overflowY: 'auto', height: COMMITS_HEIGHT }}>
           {commits.map(c => {
             const col = authorColor(c.author)
             const ini = initials(c.author)
@@ -654,23 +437,342 @@ function CommitsCard({ commits, onNavigate }: { commits: CommitEntry[]; onNaviga
   )
 }
 
+// ── PR Resolve Dialog ─────────────────────────────────────────────────────────
+
+type ConflictChoice = 'branch' | 'base'
+
+function ResolveDialog({
+  pr, ghSlug, repoPath, onClose, onDone,
+}: {
+  pr: PullRequest
+  ghSlug: string
+  repoPath: string
+  onClose: () => void
+  onDone: () => void
+}) {
+  const opRun = useOperationStore(s => s.run)
+  const [choice, setChoice] = useState<'accept' | 'decline'>('accept')
+  const [conflicts, setConflicts] = useState<ConflictPreviewFile[]>([])
+  const [conflictLoading, setConflictLoading] = useState(false)
+  const [fileChoices, setFileChoices] = useState<Record<string, ConflictChoice>>({})
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (choice !== 'accept') return
+    setConflictLoading(true)
+    ipc.mergePreview(repoPath, pr.headBranch)
+      .then(files => {
+        setConflicts(files)
+        const defaults: Record<string, ConflictChoice> = {}
+        files.forEach(f => { defaults[f.path] = 'branch' })
+        setFileChoices(defaults)
+      })
+      .catch(() => setConflicts([]))
+      .finally(() => setConflictLoading(false))
+  }, [choice, repoPath, pr.headBranch])
+
+  const handleConfirm = async () => {
+    const [owner, repo] = ghSlug.split('/')
+    setBusy(true)
+    try {
+      if (choice === 'accept') {
+        await opRun(`Merging PR #${pr.number}…`, () => ipc.githubMergePR({ owner, repo, prNumber: pr.number }))
+      } else {
+        await opRun(`Closing PR #${pr.number}…`, () => ipc.githubClosePR({ owner, repo, prNumber: pr.number }))
+      }
+      onDone()
+      onClose()
+    } catch { /* surfaced via operationStore */ }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 600,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)',
+    }}>
+      <div style={{
+        background: '#131720', border: '1px solid #1a2030',
+        borderRadius: 12,
+        boxShadow: '0 24px 64px rgba(0,0,0,0.7), 0 4px 16px rgba(0,0,0,0.5)',
+        width: 520, maxHeight: '80vh',
+        display: 'flex', flexDirection: 'column',
+        animation: 'slide-down 0.16s ease both',
+      }}>
+        {/* Header */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '16px 18px 14px', borderBottom: '1px solid #18202e', flexShrink: 0,
+        }}>
+          <span style={{
+            fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 700,
+            color: '#a27ef0', background: 'rgba(162,126,240,0.12)',
+            border: '1px solid rgba(162,126,240,0.25)',
+            borderRadius: 4, padding: '2px 7px', flexShrink: 0,
+          }}>#{pr.number}</span>
+          <span style={{
+            fontFamily: "'IBM Plex Sans', system-ui", fontSize: 13, fontWeight: 600,
+            color: '#c8d0e8', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{pr.title}</span>
+          <button
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', color: '#344057', cursor: 'pointer', fontSize: 16, padding: '0 4px', flexShrink: 0 }}
+            onMouseEnter={e => e.currentTarget.style.color = '#e84545'}
+            onMouseLeave={e => e.currentTarget.style.color = '#344057'}
+          >✕</button>
+        </div>
+
+        {/* Branch info */}
+        <div style={{ padding: '10px 18px', borderBottom: '1px solid #18202e', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: '#4a9eff' }}>{pr.headBranch}</span>
+          <span style={{ color: '#344057', fontSize: 11 }}>→</span>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: '#5a6880' }}>{pr.baseBranch}</span>
+          <span style={{ color: '#283047', marginLeft: 4 }}>·</span>
+          <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#344057' }}>by {pr.author}</span>
+        </div>
+
+        {/* Accept / Decline choice */}
+        <div style={{ padding: '14px 18px', borderBottom: '1px solid #18202e', flexShrink: 0 }}>
+          <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10.5, fontWeight: 700, color: '#344057', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 10 }}>
+            Action
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {(['accept', 'decline'] as const).map(opt => (
+              <button
+                key={opt}
+                onClick={() => setChoice(opt)}
+                style={{
+                  flex: 1, height: 34, borderRadius: 7, cursor: 'pointer',
+                  fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5, fontWeight: 600,
+                  border: choice === opt
+                    ? `1px solid ${opt === 'accept' ? 'rgba(45,189,110,0.5)' : 'rgba(232,69,69,0.5)'}`
+                    : '1px solid #1a2030',
+                  background: choice === opt
+                    ? (opt === 'accept' ? 'rgba(45,189,110,0.12)' : 'rgba(232,69,69,0.12)')
+                    : 'rgba(255,255,255,0.02)',
+                  color: choice === opt
+                    ? (opt === 'accept' ? '#2dbd6e' : '#e84545')
+                    : '#5a6880',
+                }}
+              >
+                {opt === 'accept' ? '✓ Accept (Merge)' : '✕ Decline (Close)'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Conflict preview — only when accepting */}
+        {choice === 'accept' && (
+          <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+            {conflictLoading ? (
+              <div style={{ padding: '16px 18px', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>
+                Checking for conflicts…
+              </div>
+            ) : conflicts.length === 0 ? (
+              <div style={{ padding: '16px 18px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ color: '#2dbd6e', fontSize: 14 }}>✓</span>
+                <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>No merge conflicts detected</span>
+              </div>
+            ) : (
+              <>
+                <div style={{ padding: '10px 18px 4px', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10.5, fontWeight: 700, color: '#f5a832', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                  {conflicts.length} conflict{conflicts.length !== 1 ? 's' : ''} — choose resolution per file
+                </div>
+                {conflicts.map(f => (
+                  <div
+                    key={f.path}
+                    style={{
+                      padding: '10px 18px', borderBottom: '1px solid #18202e',
+                    }}
+                  >
+                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#c8d0e8', marginBottom: 8 }}>{f.path}</div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {(['branch', 'base'] as const).map(side => {
+                        const isSelected = (fileChoices[f.path] ?? 'branch') === side
+                        const contributor = side === 'branch' ? f.theirs : f.ours
+                        const label = side === 'branch' ? `Accept from ${pr.headBranch}` : `Accept from ${pr.baseBranch}`
+                        const col = side === 'branch' ? '#4a9eff' : '#a27ef0'
+                        return (
+                          <button
+                            key={side}
+                            onClick={() => setFileChoices(prev => ({ ...prev, [f.path]: side }))}
+                            style={{
+                              flex: 1, borderRadius: 6, padding: '7px 10px', cursor: 'pointer', textAlign: 'left',
+                              border: isSelected ? `1px solid ${col}55` : '1px solid #1a2030',
+                              background: isSelected ? `${col}10` : 'rgba(255,255,255,0.02)',
+                            }}
+                          >
+                            <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, fontWeight: 600, color: isSelected ? col : '#5a6880', marginBottom: 2 }}>
+                              {label}
+                            </div>
+                            <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#344057' }}>
+                              {contributor.lastContributor.name} · {new Date(contributor.lastEditedAt).toLocaleDateString()}
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        )}
+
+        {choice === 'decline' && (
+          <div style={{ padding: '16px 18px', flex: 1 }}>
+            <div style={{
+              background: 'rgba(232,69,69,0.07)', border: '1px solid rgba(232,69,69,0.2)',
+              borderRadius: 8, padding: '12px 14px',
+              fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#e84545', lineHeight: 1.5,
+            }}>
+              This will close PR #{pr.number} without merging. The branch will remain intact.
+            </div>
+          </div>
+        )}
+
+        {/* Footer */}
+        <div style={{
+          display: 'flex', justifyContent: 'flex-end', gap: 8,
+          padding: '14px 18px', borderTop: '1px solid #18202e', flexShrink: 0,
+        }}>
+          <button
+            onClick={onClose}
+            disabled={busy}
+            style={{
+              height: 32, paddingLeft: 16, paddingRight: 16, borderRadius: 6,
+              background: 'transparent', border: '1px solid #1a2030',
+              color: '#5a6880', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5,
+              cursor: 'pointer',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >Cancel</button>
+          <button
+            onClick={handleConfirm}
+            disabled={busy}
+            style={{
+              height: 32, paddingLeft: 16, paddingRight: 16, borderRadius: 6,
+              background: choice === 'accept' ? 'rgba(45,189,110,0.15)' : 'rgba(232,69,69,0.15)',
+              border: `1px solid ${choice === 'accept' ? 'rgba(45,189,110,0.4)' : 'rgba(232,69,69,0.4)'}`,
+              color: choice === 'accept' ? '#2dbd6e' : '#e84545',
+              fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5, fontWeight: 600,
+              cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.6 : 1,
+            }}
+            onMouseEnter={e => { if (!busy) e.currentTarget.style.opacity = '0.8' }}
+            onMouseLeave={e => { if (!busy) e.currentTarget.style.opacity = '1' }}
+          >{busy ? '…' : choice === 'accept' ? 'Merge PR' : 'Close PR'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Admin PR management card ──────────────────────────────────────────────────
+
+function AdminPRsCard({ prs, ghSlug, repoPath, loading, error, onRefresh }: {
+  prs: PullRequest[]
+  ghSlug: string | null
+  repoPath: string
+  loading: boolean
+  error: string | null
+  onRefresh: () => void
+}) {
+  const [resolving, setResolving] = useState<PullRequest | null>(null)
+
+  return (
+    <>
+      {resolving && ghSlug && (
+        <ResolveDialog
+          pr={resolving}
+          ghSlug={ghSlug}
+          repoPath={repoPath}
+          onClose={() => setResolving(null)}
+          onDone={onRefresh}
+        />
+      )}
+      <Card
+        title="Pull Request Management"
+        icon={<PRCardIcon />}
+        accentColor="#a27ef0"
+        actionLabel={loading ? '…' : 'Refresh'}
+        onAction={onRefresh}
+      >
+        <div style={{ overflowY: 'auto', maxHeight: 360 }}>
+          {!ghSlug ? (
+            <div style={{ padding: '14px 14px', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>
+              No GitHub remote configured
+            </div>
+          ) : error ? (
+            <div style={{ padding: '14px 14px', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#e84545' }}>
+              {error}
+            </div>
+          ) : loading && prs.length === 0 ? (
+            <div style={{ padding: '14px 14px', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>
+              Loading pull requests…
+            </div>
+          ) : prs.length === 0 ? (
+            <div style={{ padding: '14px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ color: '#2dbd6e', fontSize: 14 }}>✓</span>
+              <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>No open pull requests</span>
+            </div>
+          ) : (
+            prs.map(pr => (
+              <div
+                key={pr.number}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '10px 14px', borderBottom: '1px solid #18202e',
+                  transition: 'background 0.1s',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.03)')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              >
+                <span style={{
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 700,
+                  color: '#a27ef0', background: 'rgba(162,126,240,0.12)',
+                  border: '1px solid rgba(162,126,240,0.25)',
+                  borderRadius: 4, padding: '2px 6px', flexShrink: 0,
+                }}>#{pr.number}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, fontWeight: 500,
+                    color: '#c8d0e8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>{pr.title}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, color: '#4a9eff' }}>{pr.headBranch}</span>
+                    <span style={{ fontSize: 9.5, color: '#283047' }}>→</span>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, color: '#344057' }}>{pr.baseBranch}</span>
+                    <span style={{ color: '#283047', fontSize: 9.5 }}>·</span>
+                    <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#344057' }}>{pr.author}</span>
+                    <span style={{ color: '#283047', fontSize: 9.5 }}>·</span>
+                    <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#344057' }}>{timeAgoStr(pr.updatedAt)}</span>
+                    {pr.draft && (
+                      <span style={{
+                        fontFamily: "'IBM Plex Sans', system-ui", fontSize: 9, fontWeight: 600,
+                        background: 'rgba(90,104,128,0.15)', color: '#5a6880',
+                        border: '1px solid rgba(90,104,128,0.25)', borderRadius: 3,
+                        padding: '0 4px', letterSpacing: '0.05em',
+                      }}>DRAFT</span>
+                    )}
+                  </div>
+                </div>
+                <Btn
+                  label="Resolve"
+                  color="#a27ef0"
+                  onClick={() => setResolving(pr)}
+                />
+              </div>
+            ))
+          )}
+        </div>
+      </Card>
+    </>
+  )
+}
+
 // ── Icons ─────────────────────────────────────────────────────────────────────
-
-function SyncIcon() {
-  return <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-    <path d="M13.5 4.5A6 6 0 0 0 2.5 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    <path d="M2.5 11.5A6 6 0 0 0 13.5 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    <path d="M11 2.5l2.5 2-2.5 2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="M5 9.5L2.5 11.5 5 13.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-}
-
-function ChangesCardIcon() {
-  return <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-    <rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.3" />
-    <path d="M5 5.5h6M5 8h4.5M5 10.5h5.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-  </svg>
-}
 
 function LFSCardIcon() {
   return <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -679,14 +781,6 @@ function LFSCardIcon() {
     <path d="M13 4.5V11.5" stroke="currentColor" strokeWidth="1.3" />
     <ellipse cx="8" cy="11.5" rx="5" ry="2" stroke="currentColor" strokeWidth="1.3" />
     <ellipse cx="8" cy="8" rx="5" ry="2" stroke="currentColor" strokeWidth="1.3" />
-  </svg>
-}
-
-function LockCardIcon() {
-  return <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-    <rect x="3" y="7" width="10" height="7" rx="2" stroke="currentColor" strokeWidth="1.3" />
-    <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-    <circle cx="8" cy="10.5" r="1.2" fill="currentColor" />
   </svg>
 }
 
@@ -710,22 +804,35 @@ function CommitCardIcon() {
   </svg>
 }
 
+function PRCardIcon() {
+  return <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+    <circle cx="4" cy="4" r="1.5" stroke="currentColor" strokeWidth="1.3" />
+    <circle cx="4" cy="12" r="1.5" stroke="currentColor" strokeWidth="1.3" />
+    <circle cx="12" cy="12" r="1.5" stroke="currentColor" strokeWidth="1.3" />
+    <path d="M4 5.5v5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    <path d="M12 10.5V8a2 2 0 0 0-2-2H7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    <path d="M6 5.5L4 3.5 2 5.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+}
+
 // ── Main panel ────────────────────────────────────────────────────────────────
 
 export function OverviewPanel({ repoPath, onNavigate, onRefresh }: OverviewPanelProps) {
   const { fileStatus } = useRepoStore()
-  const { accounts, currentAccountId } = useAuthStore()
 
   const [sync,       setSync]       = useState<SyncStatus     | null>(null)
   const [lfs,        setLfs]        = useState<LFSStatus      | null>(null)
   const [size,       setSize]       = useState<SizeBreakdown  | null>(null)
-  const [locks,      setLocks]      = useState<Lock[]>([])
-  const [stash,      setStash]      = useState<StashEntry[]>([])
+  const [locks,      setLocks]      = useState<number>(0)
   const [activity,   setActivity]   = useState<BranchActivity[]>([])
   const [commits,    setCommits]    = useState<CommitEntry[]>([])
   const [branch,     setBranch]     = useState('')
   const [refreshing, setRefreshing] = useState(false)
   const [lastUpdate, setLastUpdate] = useState<number | null>(null)
+  const [prs,        setPrs]        = useState<PullRequest[]>([])
+  const [prsError,   setPrsError]   = useState<string | null>(null)
+  const [ghSlug,     setGhSlug]     = useState<string | null>(null)
+  const [sizeLoading, setSizeLoading] = useState(false)
   const mounted = useRef(true)
 
   useEffect(() => {
@@ -735,75 +842,103 @@ export function OverviewPanel({ repoPath, onNavigate, onRefresh }: OverviewPanel
 
   const loadAll = useCallback(async () => {
     setRefreshing(true)
-    const [branchR, syncR, lfsR, sizeR, locksR, stashR, activityR, commitsR] = await Promise.allSettled([
+    const [branchR, syncR, lfsR, locksR, activityR, commitsR, remoteUrlR] = await Promise.allSettled([
       ipc.currentBranch(repoPath),
       ipc.getSyncStatus(repoPath),
       ipc.lfsStatus(repoPath),
-      ipc.cleanupSize(repoPath),
       ipc.listLocks(repoPath),
-      ipc.stashList(repoPath),
       ipc.gitBranchActivity(repoPath),
-      ipc.log(repoPath, { limit: 10 }),
+      ipc.log(repoPath, { limit: 20 }),
+      ipc.getRemoteUrl(repoPath),
     ])
     if (!mounted.current) return
     if (branchR.status   === 'fulfilled') setBranch(branchR.value)
     if (syncR.status     === 'fulfilled') setSync(syncR.value)
     if (lfsR.status      === 'fulfilled') setLfs(lfsR.value)
-    if (sizeR.status     === 'fulfilled') setSize(sizeR.value)
-    if (locksR.status    === 'fulfilled') setLocks(locksR.value)
-    if (stashR.status    === 'fulfilled') setStash(stashR.value)
+    if (locksR.status    === 'fulfilled') setLocks(locksR.value.length)
     if (activityR.status === 'fulfilled') setActivity(activityR.value)
     if (commitsR.status  === 'fulfilled') setCommits(commitsR.value)
+
     setLastUpdate(Date.now())
     setRefreshing(false)
+
+    if (remoteUrlR.status === 'fulfilled' && remoteUrlR.value) {
+      const slug = parseGitHubSlug(remoteUrlR.value)
+      setGhSlug(slug)
+      if (slug) {
+        const [owner, repo] = slug.split('/')
+        try {
+          const prList = await ipc.githubListPRs({ owner, repo })
+          if (mounted.current) { setPrs(prList); setPrsError(null) }
+        } catch (err: any) {
+          if (mounted.current) setPrsError(err?.message ?? 'Failed to load pull requests')
+        }
+      }
+    }
   }, [repoPath])
+
+  const loadSize = useCallback(async () => {
+    if (!mounted.current) return
+    setSizeLoading(true)
+    try {
+      const s = await ipc.cleanupSize(repoPath)
+      if (mounted.current) setSize(s)
+    } catch { }
+    finally { if (mounted.current) setSizeLoading(false) }
+  }, [repoPath])
+
+  useEffect(() => {
+    const t = setTimeout(loadSize, 800)
+    return () => clearTimeout(t)
+  }, [loadSize])
 
   useEffect(() => { loadAll() }, [loadAll])
 
-  const stagedCount   = fileStatus.filter(f =>  f.staged).length
-  const unstagedCount = fileStatus.filter(f => !f.staged).length
-  const currentLogin  = accounts.find(a => a.userId === currentAccountId)?.login ?? null
+  const stagedCount   = React.useMemo(() => fileStatus.filter(f =>  f.staged).length, [fileStatus])
+  const unstagedCount = React.useMemo(() => fileStatus.filter(f => !f.staged).length, [fileStatus])
 
-  // ── Compute health status chips ──────────────────────────────────────────────
-  const syncDot = !sync ? '#344057'
-    : sync.behind > 0   ? '#f5a832'
-    : sync.ahead  > 0   ? '#e8622f'
-    : '#2dbd6e'
-  const syncLabel = !sync             ? 'No upstream'
-    : sync.behind > 0 && sync.ahead > 0 ? `↑${sync.ahead} ↓${sync.behind}`
-    : sync.behind > 0                   ? `↓${sync.behind} behind`
-    : sync.ahead  > 0                   ? `↑${sync.ahead} to push`
-    : 'In sync'
+  const { syncDot, syncLabel, changesDot, changesLabel, locksDot, locksLabel, lfsWarnDot, lfsLabel, sizeDot, sizeLabel } =
+    React.useMemo(() => {
+      const sd = !sync ? '#344057'
+        : sync.behind > 0 ? '#f5a832'
+        : sync.ahead  > 0 ? '#e8622f'
+        : '#2dbd6e'
+      const sl = !sync             ? 'No upstream'
+        : sync.behind > 0 && sync.ahead > 0 ? `↑${sync.ahead} ↓${sync.behind}`
+        : sync.behind > 0                   ? `↓${sync.behind} behind`
+        : sync.ahead  > 0                   ? `↑${sync.ahead} to push`
+        : 'In sync'
+      const total = stagedCount + unstagedCount
+      return {
+        syncDot: sd, syncLabel: sl,
+        changesDot:   total > 0 ? '#f5a832' : '#2dbd6e',
+        changesLabel: total === 0 ? 'Clean' : `${total} change${total !== 1 ? 's' : ''}`,
+        locksDot:   locks > 0 ? '#e8622f' : '#344057',
+        locksLabel: locks === 0 ? 'No locks' : `${locks} lock${locks !== 1 ? 's' : ''}`,
+        lfsWarnDot: (lfs?.untracked.length ?? 0) > 0 ? '#f5a832' : lfs ? '#2dbd6e' : '#344057',
+        lfsLabel:   !lfs ? 'LFS —' : (lfs.untracked.length > 0 ? `⚠ ${lfs.untracked.length} untracked` : 'LFS OK'),
+        sizeDot:    !size ? '#344057'
+          : size.totalBytes > 5 * 1_073_741_824 ? '#e84545'
+          : size.totalBytes > 2 * 1_073_741_824 ? '#f5a832'
+          : '#344057',
+        sizeLabel: sizeLoading ? 'Measuring…' : size ? fmtBytes(size.totalBytes) : 'Size —',
+      }
+    }, [sync, stagedCount, unstagedCount, locks, lfs, size, sizeLoading])
 
-  const changesDot   = (stagedCount + unstagedCount) > 0 ? '#f5a832' : '#2dbd6e'
-  const changesLabel = stagedCount + unstagedCount === 0 ? 'Clean' : `${stagedCount + unstagedCount} change${stagedCount + unstagedCount !== 1 ? 's' : ''}`
+  const warnings = React.useMemo(() => {
+    const w: { msg: string; color: string }[] = []
+    if (sync && sync.behind > 0)
+      w.push({ msg: `${sync.behind} commit${sync.behind !== 1 ? 's' : ''} behind ${sync.remoteName}/${sync.remoteBranch}`, color: sync.behind > 5 ? '#e84545' : '#f5a832' })
+    if ((lfs?.untracked.length ?? 0) > 0)
+      w.push({ msg: `${lfs!.untracked.length} large file${lfs!.untracked.length !== 1 ? 's' : ''} not tracked in LFS`, color: '#f5a832' })
+    if (size && size.totalBytes > 5 * 1_073_741_824)
+      w.push({ msg: `Repository is ${fmtBytes(size.totalBytes)} — consider cleanup`, color: '#f5a832' })
+    if (sync && !sync.hasUpstream)
+      w.push({ msg: 'Branch has no remote upstream configured', color: '#344057' })
+    return w
+  }, [sync, lfs, size])
 
-  const locksDot   = locks.length > 0 ? '#e8622f' : '#344057'
-  const locksLabel = locks.length === 0 ? 'No locks' : `${locks.length} lock${locks.length !== 1 ? 's' : ''}`
-
-  const lfsWarnDot   = (lfs?.untracked.length ?? 0) > 0 ? '#f5a832' : lfs ? '#2dbd6e' : '#344057'
-  const lfsLabel     = !lfs ? 'LFS —' : (lfs.untracked.length > 0 ? `⚠ ${lfs.untracked.length} untracked` : `LFS OK`)
-
-  const sizeDot   = !size ? '#344057'
-    : size.totalBytes > 5 * 1_073_741_824 ? '#e84545'
-    : size.totalBytes > 2 * 1_073_741_824 ? '#f5a832'
-    : '#344057'
-  const sizeLabel = size ? fmtBytes(size.totalBytes) : 'Size —'
-
-  // ── Warnings ─────────────────────────────────────────────────────────────────
-  const warnings: { msg: string; color: string }[] = []
-  if (sync && sync.behind > 0)
-    warnings.push({ msg: `${sync.behind} commit${sync.behind !== 1 ? 's' : ''} behind ${sync.remoteName}/${sync.remoteBranch}`, color: sync.behind > 5 ? '#e84545' : '#f5a832' })
-  if ((lfs?.untracked.length ?? 0) > 0)
-    warnings.push({ msg: `${lfs!.untracked.length} large file${lfs!.untracked.length !== 1 ? 's' : ''} not tracked in LFS`, color: '#f5a832' })
-  if (size && size.totalBytes > 5 * 1_073_741_824)
-    warnings.push({ msg: `Repository is ${fmtBytes(size.totalBytes)} — consider cleanup`, color: '#f5a832' })
-  if (stash.length > 5)
-    warnings.push({ msg: `${stash.length} stashed changesets accumulating`, color: '#a27ef0' })
-  if (sync && !sync.hasUpstream)
-    warnings.push({ msg: 'Branch has no remote upstream configured', color: '#344057' })
-
-  const repoName = repoPath.split(/[/\\]/).pop() ?? repoPath
+  const repoName = React.useMemo(() => repoPath.split(/[/\\]/).pop() ?? repoPath, [repoPath])
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', background: '#0d0f15' }}>
@@ -880,21 +1015,24 @@ export function OverviewPanel({ repoPath, onNavigate, onRefresh }: OverviewPanel
           </div>
         )}
 
-        {/* ── Row 1: Sync | Working Copy | LFS ─────────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
-          <SyncCard sync={sync} branch={branch} repoPath={repoPath} onDone={loadAll} />
-          <WorkingCopyCard staged={stagedCount} unstaged={unstagedCount} stash={stash} onNavigate={onNavigate} />
+        {/* ── Pull Request Management (top priority) ────────────────────────── */}
+        <AdminPRsCard
+          prs={prs}
+          ghSlug={ghSlug}
+          repoPath={repoPath}
+          loading={refreshing}
+          error={prsError}
+          onRefresh={loadAll}
+        />
+
+        {/* ── Row 1: LFS Health | Repository Size ──────────────────────────── */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <LfsCard lfs={lfs} onNavigate={onNavigate} />
+          <SizeCard size={size} sizeLoading={sizeLoading} onNavigate={onNavigate} />
         </div>
 
-        {/* ── Row 2: Active Locks | Repository Size ────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 14 }}>
-          <LocksCard locks={locks} repoPath={repoPath} currentLogin={currentLogin} onDone={loadAll} />
-          <SizeCard size={size} onNavigate={onNavigate} />
-        </div>
-
-        {/* ── Row 3: Recent Commits | Branch Activity ───────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 14 }}>
+        {/* ── Row 2: Recent Commits | Branch Activity ───────────────────────── */}
+        <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 14, alignItems: 'start' }}>
           <CommitsCard commits={commits} onNavigate={onNavigate} />
           <ActivityCard activity={activity} onNavigate={onNavigate} />
         </div>

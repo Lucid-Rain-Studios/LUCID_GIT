@@ -118,7 +118,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  setCurrentAccount: (userId) => set({ currentAccountId: userId }),
+  setCurrentAccount: (userId) => {
+    set({ currentAccountId: userId })
+    ipc.setCurrentAccount(userId).catch(() => { /* best-effort */ })
+  },
   clearDeviceFlow:   ()       => set({ deviceFlow: null, error: null }),
   clearError:        ()       => set({ error: null }),
   setViewAsRole:     (role)   => set({ viewAsRole: role }),

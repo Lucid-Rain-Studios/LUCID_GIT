@@ -1,5 +1,6 @@
-import { BrowserWindow, Notification } from 'electron'
-import { execSafe, exec } from '../util/dugite-exec'
+import { BrowserWindow } from 'electron'
+import { execSafe, exec, gitAuthArgs } from '../util/dugite-exec'
+import { authService } from './AuthService'
 import { CHANNELS } from '../ipc/channels'
 import type { Lock } from '../types'
 import { notificationService } from './NotificationService'
@@ -16,7 +17,8 @@ class LockService {
   // ── Core LFS commands ───────────────────────────────────────────────────────
 
   async listLocks(repoPath: string): Promise<Lock[]> {
-    const { exitCode, stdout } = await execSafe(['lfs', 'locks', '--json'], repoPath)
+    const token = await authService.getCurrentToken()
+    const { exitCode, stdout } = await execSafe([...gitAuthArgs(token), 'lfs', 'locks', '--json'], repoPath)
     if (exitCode !== 0 || !stdout.trim()) return []
     try {
       const raw = JSON.parse(stdout) as Array<{
@@ -38,7 +40,8 @@ class LockService {
 
   async lockFile(repoPath: string, filePath: string, actorLogin = '', actorName = ''): Promise<Lock> {
     const normalized = filePath.replace(/\\/g, '/')
-    await exec(['lfs', 'lock', normalized], repoPath)
+    const token = await authService.getCurrentToken()
+    await exec([...gitAuthArgs(token), 'lfs', 'lock', normalized], repoPath)
     const locks = await this.listLocks(repoPath)
     const lock  = locks.find(l => l.path === normalized)
     if (!lock) throw new Error(`Lock not found for "${normalized}" after locking`)
@@ -55,7 +58,8 @@ class LockService {
 
   async unlockFile(repoPath: string, filePath: string, force = false, actorLogin = '', actorName = ''): Promise<void> {
     const normalized = filePath.replace(/\\/g, '/')
-    const args = ['lfs', 'unlock', normalized]
+    const token = await authService.getCurrentToken()
+    const args = [...gitAuthArgs(token), 'lfs', 'unlock', normalized]
     if (force) args.push('--force')
     await exec(args, repoPath)
     const now = Date.now()
@@ -108,7 +112,6 @@ class LockService {
         const body  = lock.path
         const n = notificationService.push(repoPath, 'lock', title, body)
         this.emitNotification(n)
-        this.showSystemNotification(title, body)
         webhookService.send(repoPath, 'fileLocked', title, body).catch(() => {})
         const now = Date.now()
         this.lockTimestamps.set(`${repoPath}::${lock.path}`, now)
@@ -143,10 +146,6 @@ class LockService {
         )
         if (watchIdx >= 0) {
           this.watchedFiles.splice(watchIdx, 1)
-          this.showSystemNotification(
-            '🔓 File available — lock it now',
-            `${lock.path} was released by ${lock.owner.name}`
-          )
         }
       }
     }
@@ -171,13 +170,7 @@ class LockService {
     })
   }
 
-  private showSystemNotification(title: string, body: string): void {
-    try {
-      new Notification({ title, body }).show()
-    } catch {
-      // Notification API unavailable on some Linux setups — ignore
-    }
-  }
+
 }
 
 export const lockService = new LockService()

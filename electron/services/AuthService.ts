@@ -3,6 +3,7 @@ import { app } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import type { Account, DeviceFlowStart } from '../types'
+import { logService } from './LogService'
 
 const CLIENT_ID    = 'Ov23licKyg1mhOAj2nRc'
 const KEYTAR_SVC   = 'lucid-git'
@@ -108,7 +109,10 @@ class AuthService {
         'X-GitHub-Api-Version': '2022-11-28',
       },
     })
-    if (!userRes.ok) throw new Error('Failed to fetch GitHub user profile')
+    if (!userRes.ok) {
+      logService.error('auth.deviceFlow', `Failed to fetch GitHub user profile: ${userRes.status} ${userRes.statusText}`)
+      throw new Error('Failed to fetch GitHub user profile')
+    }
 
     const u = await userRes.json() as {
       id: number; login: string; name: string | null; avatar_url: string
@@ -132,6 +136,7 @@ class AuthService {
     if (!data.currentAccountId) data.currentAccountId = userId
     writeData(data)
 
+    logService.info('auth.deviceFlow', `Authenticated successfully as ${u.login} (userId: ${userId})`)
     return { token: d.access_token, userId }
   }
 
@@ -141,6 +146,7 @@ class AuthService {
   }
 
   async logout(userId: string): Promise<void> {
+    logService.info('auth', `Logging out userId: ${userId}`)
     await keytar.deletePassword(KEYTAR_SVC, `github:${userId}`)
     const data = readData()
     data.accounts = data.accounts.filter(a => a.userId !== userId)
@@ -150,8 +156,22 @@ class AuthService {
     writeData(data)
   }
 
+  async setCurrentAccount(userId: string): Promise<void> {
+    const data = readData()
+    if (data.accounts.some(a => a.userId === userId)) {
+      data.currentAccountId = userId
+      writeData(data)
+    }
+  }
+
   async getToken(userId: string): Promise<string | null> {
     return keytar.getPassword(KEYTAR_SVC, `github:${userId}`)
+  }
+
+  async getCurrentToken(): Promise<string | null> {
+    const { currentAccountId } = readData()
+    if (!currentAccountId) return null
+    return this.getToken(currentAccountId)
   }
 }
 

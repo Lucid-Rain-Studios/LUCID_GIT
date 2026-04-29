@@ -218,8 +218,8 @@ export function AssetDiffViewer({ file, repoPath, staged }: AssetDiffViewerProps
             <FallbackBanner reason={result.fallbackReason} ueAvailable={result.ueAvailable} />
           )}
 
-          {/* Texture: side-by-side image panes */}
-          {result.assetType === 'texture' && (
+          {/* Image panes — textures and UE assets with extracted thumbnails */}
+          {result.delta.kind === 'texture' && (
             <>
               <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
                 <ImagePane
@@ -242,28 +242,35 @@ export function AssetDiffViewer({ file, repoPath, staged }: AssetDiffViewerProps
               </div>
 
               {/* Delta strip */}
-              {result.delta.kind === 'texture' && (
-                <div style={{
-                  flexShrink: 0, padding: '8px 16px',
-                  borderTop: '1px solid #1e2840', background: '#0d0f14',
-                  display: 'flex', gap: 24, flexWrap: 'wrap',
-                }}>
+              <div style={{
+                flexShrink: 0, padding: '8px 16px',
+                borderTop: '1px solid #1e2840', background: '#0d0f14',
+                display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'center',
+              }}>
+                {result.delta.widthBefore > 0 && result.delta.widthAfter > 0 && (
                   <DeltaRow
                     label="Dimensions"
                     before={`${result.delta.widthBefore}×${result.delta.heightBefore}`}
                     after={`${result.delta.widthAfter}×${result.delta.heightAfter}`}
                   />
+                )}
+                {result.delta.formatBefore !== result.delta.formatAfter ||
+                  (result.delta.formatBefore !== 'UE Asset (.uasset)' && result.delta.formatBefore !== 'Level (.umap)') ? (
                   <DeltaRow label="Format" before={result.delta.formatBefore} after={result.delta.formatAfter} />
-                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: result.delta.sizeDelta > 0 ? '#f5a623' : result.delta.sizeDelta < 0 ? '#2dbd6e' : '#4e5870' }}>
-                    Size {sizeDeltaLabel(result.delta.sizeDelta)}
-                  </div>
+                ) : (
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#4e5870' }}>
+                    {result.delta.formatBefore}
+                  </span>
+                )}
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: result.delta.sizeDelta > 0 ? '#f5a623' : result.delta.sizeDelta < 0 ? '#2dbd6e' : '#4e5870' }}>
+                  Size {sizeDeltaLabel(result.delta.sizeDelta)}
                 </div>
-              )}
+              </div>
             </>
           )}
 
-          {/* Metadata table for UE assets, audio, video, and other binaries */}
-          {result.assetType !== 'texture' && result.delta.kind === 'metadata' && (
+          {/* Metadata table for UE assets without thumbnails, audio, video, and other binaries */}
+          {result.delta.kind === 'metadata' && (
             <div style={{ overflow: 'auto', padding: '4px 0' }}>
               <MetadataTable delta={result.delta} />
             </div>
