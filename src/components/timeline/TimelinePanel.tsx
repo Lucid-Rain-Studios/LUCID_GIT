@@ -425,19 +425,33 @@ function TLBranchDropdownRow({ branch, checked, locked, bCol, onToggle }: {
         transition: 'opacity 0.12s, background 0.1s',
       }}
     >
-      <span style={{
-        width: 13, height: 13, borderRadius: 3, flexShrink: 0,
-        background: checked ? bCol : 'transparent',
-        border: `1.5px solid ${checked ? bCol : '#2f3a54'}`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        transition: 'all 0.12s',
-      }}>
+      <label
+        onClick={e => e.stopPropagation()}
+        style={{ width: 13, height: 13, position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: locked ? 'default' : 'pointer' }}
+      >
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={locked}
+          onChange={() => onToggle()}
+          style={{
+            appearance: 'none',
+            margin: 0,
+            width: 13,
+            height: 13,
+            borderRadius: 3,
+            border: `1.5px solid ${checked ? bCol : '#2f3a54'}`,
+            background: checked ? bCol : 'transparent',
+            transition: 'all 0.12s',
+            cursor: locked ? 'default' : 'pointer',
+          }}
+        />
         {checked && (
-          <svg width="8" height="6" viewBox="0 0 8 6" fill="none">
+          <svg width="8" height="6" viewBox="0 0 8 6" fill="none" style={{ position: 'absolute', pointerEvents: 'none' }}>
             <path d="M1 3L3 5L7 1" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         )}
-      </span>
+      </label>
       <span style={{ width: 3, height: 14, borderRadius: 2, background: bCol, flexShrink: 0 }} />
       <span style={{
         fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#c8cdd8',
