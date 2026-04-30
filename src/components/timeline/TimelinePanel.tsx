@@ -87,7 +87,7 @@ function linePath(seg: LineSegment, isTop: boolean): string {
   return `M ${x1} ${y1} C ${x1} ${y2} ${x2} ${y1} ${x2} ${y2}`
 }
 
-function GraphCell({ node, graphColW }: { node: GraphNode; graphColW: number }) {
+function GraphCell({ node, graphColW, lineColorLabels }: { node: GraphNode; graphColW: number; lineColorLabels: Map<string, string> }) {
   const isMain  = node.lane === 0
   const isMerge = node.commit.parentHashes.length > 1
   const cx = GRAPH_PAD + node.lane * LANE_W + LANE_W / 2
@@ -100,6 +100,7 @@ function GraphCell({ node, graphColW }: { node: GraphNode; graphColW: number }) 
           stroke={seg.color} fill="none"
           strokeWidth={seg.from === 0 ? 2.2 : 1.6}
           strokeOpacity={seg.from === 0 ? 0.88 : 0.52}
+          title={lineColorLabels.get(seg.color.toLowerCase()) ?? 'Branch lane'}
         />
       ))}
       {node.bottomLines.map((seg, i) => (
@@ -107,6 +108,7 @@ function GraphCell({ node, graphColW }: { node: GraphNode; graphColW: number }) 
           stroke={seg.color} fill="none"
           strokeWidth={seg.from === 0 ? 2.2 : 1.6}
           strokeOpacity={seg.from === 0 ? 0.88 : 0.52}
+          title={lineColorLabels.get(seg.color.toLowerCase()) ?? 'Branch lane'}
         />
       ))}
       {isMain && <circle cx={cx} cy={cy} r={dotR + 5} fill={`${node.color}14`} stroke="none" />}
@@ -169,6 +171,7 @@ function CtxItem({ label, onClick, disabled, danger, title }: {
         background: 'transparent', border: 'none',
         color: disabled ? '#4e5870' : danger ? '#e84545' : '#dde1f0',
         cursor: disabled ? 'default' : 'pointer',
+        whiteSpace: 'nowrap',
         display: 'flex', alignItems: 'center', gap: 6,
         opacity: disabled ? 0.6 : 1,
       }}
@@ -449,7 +452,6 @@ function TLBranchDropdown({ open, onToggleOpen, branches, selectedBranches, defa
     ...branches.filter(b => b.name === defaultBranch),
     ...branches.filter(b => b.name !== defaultBranch),
   ]
-
   return (
     <div style={{ position: 'relative' }}>
       <button
@@ -462,6 +464,7 @@ function TLBranchDropdown({ open, onToggleOpen, branches, selectedBranches, defa
           color: '#4e5870',
           fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10.5, fontWeight: 500,
           cursor: 'pointer', transition: 'all 0.12s', flexShrink: 0,
+          whiteSpace: 'nowrap',
         }}
       >
         <span style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
@@ -505,6 +508,7 @@ function TLBranchDropdown({ open, onToggleOpen, branches, selectedBranches, defa
               <button onClick={onShowAll} style={{
                 fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#e8622f',
                 background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                whiteSpace: 'nowrap',
               }}>Show all</button>
             </div>
             {sorted.map(b => {
@@ -526,7 +530,7 @@ function TLBranchDropdown({ open, onToggleOpen, branches, selectedBranches, defa
 // ── Left commit row ───────────────────────────────────────────────────────────
 
 function LeftCommitRow({ node, selected, repoPath, remoteUrl, onRefresh, onClick,
-  graphColW, branchTips, branchColors, defaultBranch }: {
+  graphColW, branchTips, branchColors, defaultBranch, lineColorLabels }: {
   node: GraphNode; selected: boolean
   repoPath: string; remoteUrl: string | null
   onRefresh: () => void; onClick: () => void
@@ -534,6 +538,7 @@ function LeftCommitRow({ node, selected, repoPath, remoteUrl, onRefresh, onClick
   branchTips: Map<string, BranchInfo[]>
   branchColors: Map<string, string>
   defaultBranch: string
+  lineColorLabels: Map<string, string>
 }) {
   const [hover, setHover] = useState(false)
   const [ctx, setCtx]     = useState<{ x: number; y: number } | null>(null)
@@ -658,6 +663,7 @@ function LeftCommitRow({ node, selected, repoPath, remoteUrl, onRefresh, onClick
         onContextMenu={e => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY }) }}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
+        title={`${commit.author} · ${new Date(commit.timestamp).toLocaleString()}`}
         style={{
           display: 'flex', alignItems: 'center', height: ROW_H,
           borderLeft: `2px solid ${selected ? '#e8622f' : 'transparent'}`,
@@ -667,7 +673,7 @@ function LeftCommitRow({ node, selected, repoPath, remoteUrl, onRefresh, onClick
         }}
       >
         <div style={{ width: graphColW, height: ROW_H, flexShrink: 0, overflow: 'hidden' }}>
-          <GraphCell node={node} graphColW={graphColW} />
+          <GraphCell node={node} graphColW={graphColW} lineColorLabels={lineColorLabels} />
         </div>
         <div style={{ flex: 1, minWidth: 0, paddingLeft: 5, paddingRight: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2, overflow: 'hidden' }}>
@@ -704,10 +710,10 @@ function LeftCommitRow({ node, selected, repoPath, remoteUrl, onRefresh, onClick
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{
-              width: 14, height: 14, borderRadius: '50%', flexShrink: 0,
+              width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
               background: `${col}22`, border: `1px solid ${col}44`,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontFamily: "'JetBrains Mono', monospace", fontSize: 7, fontWeight: 700, color: col,
+              fontFamily: "'JetBrains Mono', monospace", fontSize: 8, fontWeight: 700, color: col,
             }}>{ini}</span>
             <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#4e5870' }}>
               {timeAgo(commit.timestamp)}
@@ -1339,6 +1345,16 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     sorted.forEach((b, i) => map.set(b.name, TL_BRANCH_COLORS[i % TL_BRANCH_COLORS.length]))
     return map
   }, [branches, defaultBranch])
+  const lineColorLabels = React.useMemo(() => {
+    const labels = new Map<string, string>()
+    branches.forEach(b => {
+      const color = (branchColors.get(b.name) ?? '').toLowerCase()
+      if (!color) return
+      const existing = labels.get(color)
+      labels.set(color, existing ? `${existing}, ${b.name}` : b.name)
+    })
+    return labels
+  }, [branches, branchColors])
 
   const graphColW = React.useMemo(() => {
     if (nodes.length === 0) return GRAPH_PAD * 2 + LANE_W
@@ -1429,10 +1445,9 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     setLeftSel({ kind: 'working-tree' })
     ipc.getRemoteUrl(repoPath).then(setRemoteUrl).catch(() => {})
     Promise.all([ipc.branchList(repoPath), ipc.gitDefaultBranch(repoPath)]).then(([bl, def]) => {
-      const locals = bl.filter(b => !b.isRemote)
-      setBranches(locals)
+      setBranches(bl)
       setDefaultBranch(def)
-      fetchBranchTips(locals)
+      fetchBranchTips(bl)
     }).catch(() => {})
     loadHistory(INITIAL_LIMIT, new Set())
   }, [repoPath])
@@ -1530,7 +1545,6 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   }
 
   const selectedCommit = leftSel.kind === 'commit' ? leftSel.commit : null
-
   return (
     <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
@@ -1548,6 +1562,13 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
         }}>
           <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, fontWeight: 700, color: '#2a3040', letterSpacing: '0.1em', textTransform: 'uppercase', flexShrink: 0 }}>
             {totalLoaded > 0 ? `${totalLoaded} Commits` : 'Commits'}
+          </span>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: '#4e5870', display: 'inline-flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
+            <span>Legend:</span>
+            <span style={{ color: '#4d9dff' }}>★ default</span>
+            <span style={{ color: '#e8622f' }}>◉ head</span>
+            <span style={{ color: '#2ec573' }}>• branch</span>
+            <span style={{ color: '#f5a832' }}>⌂ working tree</span>
           </span>
           <div style={{ flex: 1 }} />
           <CollapseBtn isCollapsed={isCollapsed} onClick={toggleCollapse} />
@@ -1596,6 +1617,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
               branchTips={branchTips}
               branchColors={branchColors}
               defaultBranch={defaultBranch}
+              lineColorLabels={lineColorLabels}
             />
           ))}
           {!histLoading && totalLoaded >= limitRef.current && (
@@ -1718,4 +1740,3 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
 }
 
 // ── Branch filter row ─────────────────────────────────────────────────────────
-
