@@ -1366,6 +1366,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   const [stashOpen,   setStashOpen]   = useState(() => {
     try { return localStorage.getItem(STASH_KEY) === '1' } catch { return false }
   })
+  const [syncStatus,  setSyncStatus]  = useState<{ ahead: number; behind: number } | null>(null)
 
   // ── Center column — commit files ───────────────────────────────────────────
   const [commitFiles,   setCommitFiles]   = useState<CommitFileChange[]>([])
@@ -1446,6 +1447,17 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     historyTickRef.current = historyTick
     loadHistoryRef.current(limitRef.current)
   }, [historyTick])
+
+  useEffect(() => {
+    let cancelled = false
+    ipc.getSyncStatus(repoPath)
+      .then(st => { if (!cancelled) setSyncStatus({ ahead: st.ahead, behind: st.behind }) })
+      .catch(() => { if (!cancelled) setSyncStatus(null) })
+    return () => { cancelled = true }
+  }, [repoPath, historyTick])
+
+  const stagedCount = fileStatus.filter(f => f.staged).length
+  const unstagedCount = fileStatus.length - stagedCount
 
   // ── Select left item ───────────────────────────────────────────────────────
   const selectWorkingTree = () => {
@@ -1530,6 +1542,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   }
 
   const selectedCommit = leftSel.kind === 'commit' ? leftSel.commit : null
+  const currentBranch = branches.find(b => b.current)?.name
 
   return (
     <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
@@ -1549,6 +1562,17 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
           <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, fontWeight: 700, color: '#2a3040', letterSpacing: '0.1em', textTransform: 'uppercase', flexShrink: 0 }}>
             {totalLoaded > 0 ? `${totalLoaded} Commits` : 'Commits'}
           </span>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#4e5870' }}>
+            {currentBranch || 'HEAD'}
+          </span>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#f5a832' }}>
+            WT {stagedCount} staged · {unstagedCount} unstaged
+          </span>
+          {syncStatus && (
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#4d9dff' }}>
+              ↑{syncStatus.ahead} ↓{syncStatus.behind}
+            </span>
+          )}
           <div style={{ flex: 1 }} />
           <CollapseBtn isCollapsed={isCollapsed} onClick={toggleCollapse} />
           <TLBranchDropdown
@@ -1718,4 +1742,3 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
 }
 
 // ── Branch filter row ─────────────────────────────────────────────────────────
-
