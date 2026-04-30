@@ -12,6 +12,17 @@ interface ProgressPattern {
   label: string
 }
 
+function detectGitSubcommand(args: string[]): string {
+  const topLevel = new Set(['clone', 'status', 'rev-parse', 'add', 'restore', 'commit', 'push', 'pull', 'fetch', 'branch', 'checkout', 'merge', 'rebase', 'log', 'diff', 'show', 'stash', 'reset', 'clean', 'remote', 'tag', 'lfs'])
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]
+    if (a === '-c') { i++; continue }
+    if (a.startsWith('-')) continue
+    if (topLevel.has(a)) return a
+  }
+  return args[0] ?? 'git'
+}
+
 const PROGRESS_PATTERNS: ProgressPattern[] = [
   { regex: /Enumerating objects:\s+(\d+)/i,              id: 'enumerate',    label: 'Enumerating objects' },
   { regex: /Counting objects:\s+(\d+)/i,                 id: 'count',        label: 'Counting objects' },
@@ -91,7 +102,7 @@ export async function execWithProgress(
         resolve({ stdout, stderr })
       } else {
         const errText = (stderr || stdout).slice(0, 1000)
-        const subCmd  = args.find(a => !a.startsWith('-')) ?? args[0]
+        const subCmd  = detectGitSubcommand(args)
         logService.error(`git.${subCmd}`, `git ${subCmd} failed (exit ${code}):\n${errText}`)
         reject(new Error(`git ${args[0]} failed (exit ${code}):\n${stderr || stdout}`))
       }
@@ -115,7 +126,7 @@ export async function exec(
 
   if (result.exitCode !== 0) {
     const errText = (result.stderr || result.stdout).slice(0, 1000)
-    const subCmd  = args.find(a => !a.startsWith('-')) ?? args[0]
+    const subCmd  = detectGitSubcommand(args)
     logService.error(`git.${subCmd}`, `git ${subCmd} failed (exit ${result.exitCode}):\n${errText}`)
     throw new Error(
       `git ${args[0]} failed (exit ${result.exitCode}):\n${result.stderr || result.stdout}`
@@ -143,7 +154,9 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): 
 export function gitAuthArgs(token: string | null): string[] {
   if (!token) return []
   const b64 = Buffer.from(`x-access-token:${token}`).toString('base64')
-  return ['-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${b64}`]
+  // Apply auth header generically so it works for GitHub.com, GitHub Enterprise,
+  // and any HTTPS remote URL that requires token auth.
+  return ['-c', `http.extraheader=AUTHORIZATION: basic ${b64}`]
 }
 
 // ── execSafe (never throws — returns exitCode instead) ────────────────────────
