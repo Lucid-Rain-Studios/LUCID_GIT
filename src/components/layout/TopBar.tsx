@@ -128,7 +128,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
   const hasBehind = (sync?.behind ?? 0) > 0
   const hasAhead  = (sync?.ahead  ?? 0) > 0
   const ghSlug = remoteUrl ? parseGitHubSlug(remoteUrl) : null
-  const canCreatePR = !!repoPath && !!ghSlug && !!currentBranch && isIdle && (sync?.ahead ?? 0) === 0
+  const canCreatePR = !!repoPath && !!ghSlug && !!currentBranch && isIdle && (sync?.ahead ?? 0) > 0
 
   const doFetch = async () => {
     if (!repoPath || syncOp !== 'idle') return

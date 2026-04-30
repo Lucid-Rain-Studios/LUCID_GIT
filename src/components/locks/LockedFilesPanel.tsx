@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react'
+import React, { useState, useCallback, useRef } from 'react'
 import { ipc, Lock } from '@/ipc'
 import { useLockStore } from '@/stores/lockStore'
 import { useAuthStore } from '@/stores/authStore'
@@ -43,10 +43,9 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
   const [search,    setSearch]    = useState('')
   const [unlocking, setUnlocking] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
-  const [collapsedOwners, setCollapsedOwners] = useState<Set<string>>(new Set())
+  const [expandedOwners, setExpandedOwners] = useState<Set<string>>(new Set())
   const [selectedLockIds, setSelectedLockIds] = useState<Set<string>>(new Set())
   const lastSelectedIndexRef = useRef<number | null>(null)
-  const initializedCollapsedOwnersRef = useRef<Set<string>>(new Set())
 
   const myLocks   = locks.filter(l => currentLogin && l.owner.login === currentLogin)
   const teamLocks = locks.filter(l => !currentLogin || l.owner.login !== currentLogin)
@@ -80,24 +79,8 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
     }
   }
 
-  useEffect(() => {
-    if (tab !== 'team') return
-    setCollapsedOwners(prev => {
-      const next = new Set(prev)
-      let changed = false
-      for (const group of ownerGroups) {
-        if (!initializedCollapsedOwnersRef.current.has(group.login)) {
-          initializedCollapsedOwnersRef.current.add(group.login)
-          next.add(group.login)
-          changed = true
-        }
-      }
-      return changed ? next : prev
-    })
-  }, [tab, ownerGroups])
-
   const toggleOwner = (login: string) => {
-    setCollapsedOwners(prev => {
+    setExpandedOwners(prev => {
       const next = new Set(prev)
       next.has(login) ? next.delete(login) : next.add(login)
       return next
@@ -358,7 +341,7 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
           /* Team tab — grouped by owner */
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {ownerGroups.map(group => {
-              const isCollapsed = collapsedOwners.has(group.login)
+              const isCollapsed = !expandedOwners.has(group.login)
               const color = authorColor(group.name)
               return (
                 <div key={group.login} style={{
