@@ -1,6 +1,14 @@
 import { create } from 'zustand'
 import { ipc, Lock } from '@/ipc'
 
+function parseGitHubSlug(url: string): string | null {
+  const ssh = url.match(/^git@github\.com:(.+?)\/(.+?)(?:\.git)?$/i)
+  if (ssh) return `${ssh[1]}/${ssh[2]}`
+  const https = url.match(/^https?:\/\/github\.com\/(.+?)\/(.+?)(?:\.git)?$/i)
+  if (https) return `${https[1]}/${https[2]}`
+  return null
+}
+
 interface LockState {
   locks: Lock[]
   isLoading: boolean
@@ -23,7 +31,46 @@ export const useLockStore = create<LockState>((set, get) => ({
     set({ isLoading: true, error: null })
     try {
       const locks = await ipc.listLocks(repoPath)
-      set({ locks, isLoading: false })
+
+      // PR "ghost lock" overlay: all files in open PRs are treated as locked by a synthetic user.
+      // This keeps ownership stable until the PR is resolved:
+      // - accepted/merged PRs disappear from list => ghost locks removed => files unlocked
+      // - declined/closed PRs disappear from list => base lock owner becomes visible again
+      let ghostLocks: Lock[] = []
+      try {
+        const remoteUrl = await ipc.getRemoteUrl(repoPath)
+        const slug = remoteUrl ? parseGitHubSlug(remoteUrl) : null
+        if (slug) {
+          const [owner, repo] = slug.split('/')
+          const prs = await ipc.githubListPRs({ owner, repo })
+          const fileLists = await Promise.all(
+            prs.map(async pr => ({ pr, files: await ipc.githubPrFiles({ owner, repo, prNumber: pr.number }) }))
+          )
+          const ghostByPath = new Map<string, Lock>()
+          for (const { pr, files } of fileLists) {
+            for (const p of files) {
+              const normalized = p.replace(/\\/g, '/')
+              if (ghostByPath.has(normalized)) continue
+              ghostByPath.set(normalized, {
+                id: `ghost-pr-${pr.number}-${normalized}`,
+                path: normalized,
+                owner: { name: 'PR Ghost', login: 'ghost' },
+                lockedAt: pr.updatedAt,
+              })
+            }
+          }
+          ghostLocks = [...ghostByPath.values()]
+        }
+      } catch {
+        // Best-effort overlay; if GitHub is unavailable, show authoritative LFS locks only.
+      }
+
+      const ghostPaths = new Set(ghostLocks.map(l => l.path))
+      const mergedLocks = [
+        ...locks.filter(l => !ghostPaths.has(l.path.replace(/\\/g, '/'))),
+        ...ghostLocks,
+      ]
+      set({ locks: mergedLocks, isLoading: false })
     } catch (e) {
       // LFS may not be initialised — treat as empty, don't surface error
       set({ locks: [], isLoading: false })

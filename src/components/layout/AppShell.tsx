@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import lucidGitIcon from '@/lib/icons/lucid_git.svg'
-import { ipc, OperationStep, FileStatus, DiffContent, Lock, AppNotification } from '@/ipc'
+import { ipc, OperationStep, FileStatus, DiffContent, AppNotification } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useOperationStore } from '@/stores/operationStore'
 import { useAuthStore } from '@/stores/authStore'
@@ -171,7 +171,7 @@ export function AppShell() {
   const { repoPath, fileStatus, isLoading, error, openRepo, refreshStatus, silentRefresh, recentRepos, removeRecentRepo } = useRepoStore()
   const { updateStep } = useOperationStore()
   const { loadAccounts, accounts, currentAccountId } = useAuthStore()
-  const { locks, loadLocks, setLocks } = useLockStore()
+  const { locks, loadLocks } = useLockStore()
   const { notifications, push: pushNotification } = useNotificationStore()
   const pushError = useErrorStore(s => s.pushRaw)
   const { conflicts: forecastConflicts, enabled: forecastEnabled, lastPolledAt, setConflicts: setForecastConflicts, setEnabled: setForecastEnabled, setLastPolledAt } = useForecastStore()
@@ -224,9 +224,11 @@ export function AppShell() {
   }, [updateStep])
 
   useEffect(() => {
-    const unsub = ipc.onLockChanged((updated: Lock[]) => setLocks(updated))
+    const unsub = ipc.onLockChanged(() => {
+      if (repoPath) loadLocks(repoPath)
+    })
     return unsub
-  }, [setLocks])
+  }, [repoPath, loadLocks])
 
   useEffect(() => {
     const unsub = ipc.onNotification((n: AppNotification) => pushNotification(n))

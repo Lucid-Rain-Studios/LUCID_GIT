@@ -127,8 +127,8 @@ export function FileRow({
     try {
       await ipc.discard(repoPath, [file.path], isUntracked)
       onRefresh()
-      // Mirror Unreal Engine behaviour: release the lock when changes are discarded
-      if (isLockedByMe) unlockFile(repoPath, file.path).catch(() => {})
+      // Release lock only when discarding a newly created file
+      if (isUntracked && isLockedByMe) unlockFile(repoPath, file.path).catch(() => {})
     } catch (e) { await dialog.alert({ title: 'Error', message: String(e) }) }
   }
   const doIgnoreFile   = async () => { close(); try { await ipc.addToGitignore(repoPath, file.path); onRefresh() } catch (e) { await dialog.alert({ title: 'Error', message: String(e) }) } }

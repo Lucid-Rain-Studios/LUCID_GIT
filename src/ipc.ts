@@ -623,6 +623,7 @@ export interface LucidGitAPI {
   // GitHub API
   githubCreatePR: (args: { owner: string; repo: string; head: string; base: string; title: string; body: string; draft: boolean }) => Promise<{ number: number; htmlUrl: string; title: string }>
   githubListPRs:  (args: { owner: string; repo: string }) => Promise<PullRequest[]>
+  githubPrFiles:  (args: { owner: string; repo: string; prNumber: number }) => Promise<string[]>
   githubMergePR:  (args: { owner: string; repo: string; prNumber: number; repoPath: string }) => Promise<void>
   githubClosePR:  (args: { owner: string; repo: string; prNumber: number }) => Promise<void>
 
