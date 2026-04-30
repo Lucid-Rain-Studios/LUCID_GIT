@@ -7,6 +7,7 @@ import { useLockStore } from '@/stores/lockStore'
 import { usePRStore } from '@/stores/prStore'
 import { ContributionGraph } from './ContributionGraph'
 import { getLastFetch, markFetchPerformed, onFetchPerformed } from '@/lib/fetchState'
+import { canCreatePR, canPull, canPush, fetchButtonLabel, pullButtonLabel, pushButtonLabel } from '@/lib/syncButtonLogic'
 
 const sessionFetchedRepos = new Set<string>()
 const sessionRemoteUrls   = new Map<string, string | null>()
@@ -177,6 +178,9 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
 
   const TWO_DAYS  = 2 * 24 * 60 * 60 * 1000
   const behind    = sync?.behind ?? 0
+  const ahead     = sync?.ahead ?? 0
+  const busyState = busy ?? 'idle'
+  const canCreatePRNow = canCreatePR(!!ghSlug, !!currentBranch, ahead, busyState)
   const stalePull = behind > 0 && (lastPull === null || Date.now() - lastPull > TWO_DAYS)
 
   return (
@@ -218,7 +222,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
               {lastPull === null ? "Haven't pulled yet" : `Last pulled ${timeAgo(lastPull)}`}
             </span>
           </div>
-          <SmallBtn label={busy === 'pull' ? 'Pulling…' : 'Pull'} color="#f5a832" disabled={!!busy || !hasFetched} onClick={doPull} />
+          <SmallBtn label={pullButtonLabel(busyState)} color="#f5a832" disabled={!canPull(hasFetched, busyState)} onClick={doPull} />
         </div>
       )}
 
@@ -248,13 +252,14 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
         onPull={doPull}
         onPush={doPush}
         onGoChanges={() => onNavigate('timeline')}
-        onOpenPR={() => remoteUrl && openPRDialog(repoPath, currentBranch, remoteUrl)}
+        canCreatePR={canCreatePRNow}
+        onOpenPR={() => remoteUrl && canCreatePRNow && openPRDialog(repoPath, currentBranch, remoteUrl)}
       />
 
       {/* ── Status grid (3 columns) ─────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gridAutoRows: '1fr', gap: 14, marginTop: 16, flex: 1, minHeight: 300 }}>
         <LocalStatusCard
-          sync={sync} busy={busy} hasFetched={hasFetched} files={fileStatus}
+          sync={sync} busy={busyState} hasFetched={hasFetched} files={fileStatus}
           staged={staged} unstaged={unstaged}
           onFetch={doFetch} onPull={doPull} onPush={doPush} onNavigate={onNavigate}
         />
@@ -284,16 +289,16 @@ interface FlowStepDef {
 
 function DailyFlowStrip({
   sync, staged, unstaged, busy, hasFetched, ghSlug, currentBranch,
-  onFetch, onPull, onPush, onGoChanges, onOpenPR,
+  onFetch, onPull, onPush, onGoChanges, onOpenPR, canCreatePR,
 }: {
   sync: SyncStatus | null
   staged: number; unstaged: number
-  busy: string | null
+  busy: 'idle' | 'fetch' | 'pull' | 'push'
   hasFetched: boolean
   ghSlug: string | null
   currentBranch: string
   onFetch: () => void; onPull: () => void; onPush: () => void
-  onGoChanges: () => void; onOpenPR: () => void
+  onGoChanges: () => void; onOpenPR: () => void; canCreatePR: boolean
 }) {
   const behind     = sync?.behind ?? 0
   const ahead      = sync?.ahead  ?? 0
@@ -317,15 +322,15 @@ function DailyFlowStrip({
 
   const s1Btns: FlowStepBtn[] = [
     {
-      label:    busy === 'fetch' ? 'Fetching…' : 'Fetch',
+      label:    fetchButtonLabel(busy),
       color:    undefined,
       disabled: isBusy,
       onClick:  onFetch,
     },
     {
-      label:    busy === 'pull' ? 'Pulling…' : 'Pull',
+      label:    pullButtonLabel(busy),
       color:    behind > 0 && hasFetched ? '#f5a832' : undefined,
-      disabled: isBusy || !hasFetched,
+      disabled: !canPull(hasFetched, busy),
       onClick:  onPull,
     },
   ]
@@ -351,7 +356,7 @@ function DailyFlowStrip({
         ? `Merge ${currentBranch} into ${sync?.remoteBranch ?? 'main'}`
         : 'No GitHub remote detected',
       state: 'neutral',
-      btns: ghSlug ? [{ label: 'Create PR', color: '#a78bfa', disabled: false, onClick: onOpenPR }] : undefined,
+      btns: ghSlug ? [{ label: 'Create PR', color: '#a78bfa', disabled: !canCreatePR, onClick: onOpenPR }] : undefined,
     },
   ]
 
@@ -444,7 +449,7 @@ function SuggestionsCard({ lastFetch, lastPull, sync, fileStatus, onFetch, busy 
   sync: SyncStatus | null
   fileStatus: FileStatus[]
   onFetch: () => void
-  busy: string | null
+  busy: 'idle' | 'fetch' | 'pull' | 'push'
 }) {
   const h            = new Date().getHours()
   const lastSyncTime = (lastFetch !== null || lastPull !== null)
@@ -552,7 +557,7 @@ function LocalStatusCard({ sync, busy, hasFetched, files, staged, unstaged, onFe
   const behind      = sync?.behind ?? 0
   const ahead       = sync?.ahead  ?? 0
   const clean       = sync && behind === 0 && ahead === 0
-  const pushEnabled = hasFetched && behind === 0 && ahead > 0 && !busy
+  const pushEnabled = canPush(hasFetched, behind, ahead, busy)
   const total       = staged + unstaged
   const preview     = files.slice(0, 4)
 
@@ -576,9 +581,9 @@ function LocalStatusCard({ sync, busy, hasFetched, files, staged, unstaged, onFe
         )}
 
         <div style={{ display: 'flex', gap: 6 }}>
-          <SmallBtn label={busy === 'fetch' ? 'Fetching…' : 'Fetch'} disabled={!!busy} onClick={onFetch} />
-          <SmallBtn label={busy === 'pull' ? 'Pulling…' : 'Pull'} color={behind > 0 && hasFetched ? '#f5a832' : undefined} disabled={!!busy || !hasFetched} onClick={onPull} />
-          <SmallBtn label={busy === 'push' ? 'Pushing…' : 'Push'} color={pushEnabled ? '#2dbd6e' : undefined} disabled={!pushEnabled} onClick={onPush} />
+          <SmallBtn label={fetchButtonLabel(busy)} disabled={busy !== 'idle'} onClick={onFetch} />
+          <SmallBtn label={pullButtonLabel(busy)} color={behind > 0 && hasFetched ? '#f5a832' : undefined} disabled={!canPull(hasFetched, busy)} onClick={onPull} />
+          <SmallBtn label={pushButtonLabel(busy)} color={pushEnabled ? '#2dbd6e' : undefined} disabled={!pushEnabled} onClick={onPush} />
         </div>
 
         <div style={{ height: 1, background: '#1a2030', marginLeft: -14, marginRight: -14 }} />
