@@ -180,7 +180,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
   const stalePull = behind > 0 && (lastPull === null || Date.now() - lastPull > TWO_DAYS)
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', background: '#0d0f15', padding: '22px 24px', fontFamily: "'IBM Plex Sans', system-ui" }}>
+    <div style={{ flex: 1, overflowY: 'auto', background: '#0d0f15', padding: '22px 24px', fontFamily: "'IBM Plex Sans', system-ui", display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 20 }}>
@@ -252,7 +252,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
       />
 
       {/* ── Status grid (3 columns) ─────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gridAutoRows: '300px', gap: 14, marginTop: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gridAutoRows: '1fr', gap: 14, marginTop: 16, flex: 1, minHeight: 300 }}>
         <LocalStatusCard
           sync={sync} busy={busy} hasFetched={hasFetched} files={fileStatus}
           staged={staged} unstaged={unstaged}
@@ -870,7 +870,7 @@ function Card({ title, icon, children, onAction, actionLabel }: {
     <div style={{
       background: '#131720', border: '1px solid #1a2030', borderRadius: 10,
       boxShadow: '0 2px 8px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.025)',
-      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      display: 'flex', flexDirection: 'column', overflow: 'hidden', height: '100%', minHeight: 0,
     }}>
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8, height: 34,
@@ -987,4 +987,3 @@ function PRCardIcon() {
     </svg>
   )
 }
-
