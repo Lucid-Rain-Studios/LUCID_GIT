@@ -155,6 +155,7 @@ export const CHANNELS = {
   // GitHub API
   GITHUB_CREATE_PR: 'github:create-pr',
   GITHUB_LIST_PRS:  'github:list-prs',
+  GITHUB_PR_FILES:  'github:pr-files',
   GITHUB_MERGE_PR:  'github:merge-pr',
   GITHUB_CLOSE_PR:  'github:close-pr',
 

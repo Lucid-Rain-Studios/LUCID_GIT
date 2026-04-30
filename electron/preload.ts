@@ -304,6 +304,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GITHUB_CREATE_PR, args),
   githubListPRs: (args: { owner: string; repo: string }) =>
     ipcRenderer.invoke(CHANNELS.GITHUB_LIST_PRS, args),
+  githubPrFiles: (args: { owner: string; repo: string; prNumber: number }) =>
+    ipcRenderer.invoke(CHANNELS.GITHUB_PR_FILES, args),
   githubMergePR: (args: { owner: string; repo: string; prNumber: number; repoPath: string }) =>
     ipcRenderer.invoke(CHANNELS.GITHUB_MERGE_PR, args),
   githubClosePR: (args: { owner: string; repo: string; prNumber: number }) =>
