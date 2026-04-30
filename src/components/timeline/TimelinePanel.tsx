@@ -492,12 +492,12 @@ function TLBranchDropdown({ open, onToggleOpen, branches, selectedBranches, defa
   branches: BranchInfo[]; selectedBranches: Set<string>; defaultBranch: string
   branchColors: Map<string, string>; onToggleBranch: (name: string) => void; onShowAll: () => void; onHideAll: () => void
 }) {
-  const localBranches = branches.filter(b => !b.isRemote)
-  const allShown = localBranches.length > 0 && localBranches.every(b => selectedBranches.has(b.name))
-  const visibleCount = localBranches.filter(b => b.name === defaultBranch || selectedBranches.has(b.name)).length
+  const allBranches = branches
+  const allShown = allBranches.length > 0 && allBranches.every(b => selectedBranches.has(b.name))
+  const visibleCount = allBranches.filter(b => b.name === defaultBranch || selectedBranches.has(b.name)).length
   const sorted = [
-    ...localBranches.filter(b => b.name === defaultBranch),
-    ...localBranches.filter(b => b.name !== defaultBranch),
+    ...allBranches.filter(b => b.name === defaultBranch),
+    ...allBranches.filter(b => b.name !== defaultBranch),
   ]
   return (
     <div style={{ position: 'relative' }}>
@@ -1401,13 +1401,13 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     return GRAPH_PAD + (maxLane + 1) * LANE_W + GRAPH_PAD
   }, [nodes])
 
-  const localBranchNames = React.useMemo(
-    () => branches.filter(b => !b.isRemote).map(b => b.name),
+  const branchNames = React.useMemo(
+    () => branches.map(b => b.name),
     [branches]
   )
   const areAllBranchesSelected = React.useMemo(
-    () => localBranchNames.length > 0 && localBranchNames.every(name => selBranches.has(name)),
-    [localBranchNames, selBranches]
+    () => branchNames.length > 0 && branchNames.every(name => selBranches.has(name)),
+    [branchNames, selBranches]
   )
   const isCollapsed = !areAllBranchesSelected
 
@@ -1496,7 +1496,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     setHistLoading(true)
     try {
       const active = branches ?? selBranches
-      const hasAllSelected = localBranchNames.length > 0 && localBranchNames.every(name => active.has(name))
+      const hasAllSelected = branchNames.length > 0 && branchNames.every(name => active.has(name))
       const refs = hasAllSelected ? undefined : [...new Set([defaultBranch, ...active])]
       const commits = await opRun('Loading history…', () => ipc.log(repoPath, { limit, all: !refs, refs }))
       setNodes(computeGraph(commits))
@@ -1504,7 +1504,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     } finally {
       setHistLoading(false)
     }
-  }, [repoPath, opRun, selBranches, defaultBranch, localBranchNames])
+  }, [repoPath, opRun, selBranches, defaultBranch, branchNames])
 
   // ── Initial load ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1516,7 +1516,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
       setBranches(bl)
       setDefaultBranch(def)
       fetchBranchTips(bl)
-      const nextSel = new Set(bl.filter(b => !b.isRemote).map(b => b.name))
+      const nextSel = new Set(bl.map(b => b.name))
       setSelBranches(nextSel)
       limitRef.current = INITIAL_LIMIT
       loadHistory(INITIAL_LIMIT, nextSel)
