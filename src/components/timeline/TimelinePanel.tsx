@@ -95,7 +95,7 @@ function GraphCell({ node, graphColW, lineColorLabels }: { node: GraphNode; grap
   const cy = ROW_H / 2
   const dotR = DOT_R + 0.5
   return (
-    <svg width={graphColW} height={ROW_H} style={{ flexShrink: 0, overflow: 'visible', display: 'block' }}>
+    <svg width={graphColW} height={ROW_H} style={{ flexShrink: 0, overflow: 'visible', display: 'block', position: 'relative', zIndex: 9999 }}>
       {node.topLines.map((seg, i) => (
         <path key={`t${i}`} d={linePath(seg, true)}
           stroke={seg.color} fill="none"
@@ -1355,12 +1355,11 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     return map
   }, [branches, defaultBranch])
   const lineColorLabels = React.useMemo(() => {
-    const labels = new Map<string, string>()
+      const labels = new Map<string, string>()
     branches.forEach(b => {
       const color = (branchColors.get(b.name) ?? '').toLowerCase()
       if (!color) return
-      const existing = labels.get(color)
-      labels.set(color, existing ? `${existing}, ${b.name}` : b.name)
+      if (!labels.has(color)) labels.set(color, b.name)
     })
     return labels
   }, [branches, branchColors])
@@ -1372,6 +1371,25 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   }, [nodes])
 
   const isCollapsed = selBranches.size > 0
+
+  const getRecentBranchSelection = useCallback(async (branchList: BranchInfo[], fallbackDefault: string) => {
+    const locals = branchList.filter(b => !b.isRemote)
+    const withTs = await Promise.all(locals.map(async b => {
+      try {
+        const [tip] = await ipc.log(repoPath, { limit: 1, refs: [b.name] })
+        return { branch: b.name, ts: tip?.timestamp ?? 0 }
+      } catch {
+        return { branch: b.name, ts: 0 }
+      }
+    }))
+    const defaultName = fallbackDefault || 'main'
+    const top = withTs
+      .filter(x => x.branch !== defaultName)
+      .sort((a, b) => b.ts - a.ts)
+      .slice(0, 5)
+      .map(x => x.branch)
+    return new Set<string>(top)
+  }, [repoPath, fetchBranchTips, getRecentBranchSelection, loadHistory])
 
   const fetchBranchTips = useCallback(async (branchList: BranchInfo[]) => {
     const tips = new Map<string, BranchInfo[]>()
@@ -1454,12 +1472,15 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     setCenterFile(null); setDiff(null); setBlame([])
     setLeftSel({ kind: 'working-tree' })
     ipc.getRemoteUrl(repoPath).then(setRemoteUrl).catch(() => {})
-    Promise.all([ipc.branchList(repoPath), ipc.gitDefaultBranch(repoPath)]).then(([bl, def]) => {
+    Promise.all([ipc.branchList(repoPath), ipc.gitDefaultBranch(repoPath)]).then(async ([bl, def]) => {
       setBranches(bl)
       setDefaultBranch(def)
       fetchBranchTips(bl)
+      const nextSel = await getRecentBranchSelection(bl, def)
+      setSelBranches(nextSel)
+      limitRef.current = INITIAL_LIMIT
+      loadHistory(INITIAL_LIMIT, nextSel)
     }).catch(() => {})
-    loadHistory(INITIAL_LIMIT, new Set())
   }, [repoPath])
 
   // ── Refresh history when a git operation changes HEAD (fetch, pull, push, checkout, merge, commit) ──
