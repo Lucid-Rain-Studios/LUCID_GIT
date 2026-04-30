@@ -413,7 +413,6 @@ function TLBranchDropdownRow({ branch, checked, locked, bCol, onToggle }: {
   const [hover, setHover] = useState(false)
   return (
     <div
-      onClick={locked ? undefined : onToggle}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
@@ -426,14 +425,17 @@ function TLBranchDropdownRow({ branch, checked, locked, bCol, onToggle }: {
       }}
     >
       <label
-        onClick={e => e.stopPropagation()}
         style={{ width: 13, height: 13, position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: locked ? 'default' : 'pointer' }}
       >
         <input
           type="checkbox"
           checked={checked}
           disabled={locked}
-          onChange={() => onToggle()}
+          onClick={e => e.stopPropagation()}
+          onChange={e => {
+            e.stopPropagation()
+            onToggle()
+          }}
           style={{
             appearance: 'none',
             margin: 0,
@@ -453,10 +455,17 @@ function TLBranchDropdownRow({ branch, checked, locked, bCol, onToggle }: {
         )}
       </label>
       <span style={{ width: 3, height: 14, borderRadius: 2, background: bCol, flexShrink: 0 }} />
-      <span style={{
-        fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#c8cdd8',
-        flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-      }}>{branch.name}</span>
+      <button
+        type="button"
+        onClick={locked ? undefined : onToggle}
+        style={{
+          all: 'unset',
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#c8cdd8',
+          flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          cursor: locked ? 'default' : 'pointer',
+        }}
+        title={branch.name}
+      >{branch.name}</button>
       <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
         {locked && (
           <span style={{
@@ -485,10 +494,10 @@ function TLBranchDropdown({ open, onToggleOpen, branches, selectedBranches, defa
 }) {
   const localBranches = branches.filter(b => !b.isRemote)
   const allShown = localBranches.length > 0 && localBranches.every(b => selectedBranches.has(b.name))
-  const visibleCount = branches.filter(b => b.name === defaultBranch || selectedBranches.has(b.name)).length
+  const visibleCount = localBranches.filter(b => b.name === defaultBranch || selectedBranches.has(b.name)).length
   const sorted = [
-    ...branches.filter(b => b.name === defaultBranch),
-    ...branches.filter(b => b.name !== defaultBranch),
+    ...localBranches.filter(b => b.name === defaultBranch),
+    ...localBranches.filter(b => b.name !== defaultBranch),
   ]
   return (
     <div style={{ position: 'relative' }}>
