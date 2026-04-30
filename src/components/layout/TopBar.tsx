@@ -8,6 +8,7 @@ import { useErrorStore } from '@/stores/errorStore'
 import { usePRStore } from '@/stores/prStore'
 import { NotificationBell } from '@/components/notifications/NotificationBell'
 import { markFetchPerformed } from '@/lib/fetchState'
+import { canCreatePR, canPull, canPush, fetchButtonLabel, pullButtonLabel, pushButtonLabel } from '@/lib/syncButtonLogic'
 
 interface TopBarProps {
   onOpen:       () => void
@@ -128,7 +129,9 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
   const hasBehind = (sync?.behind ?? 0) > 0
   const hasAhead  = (sync?.ahead  ?? 0) > 0
   const ghSlug = remoteUrl ? parseGitHubSlug(remoteUrl) : null
-  const canCreatePR = !!repoPath && !!ghSlug && !!currentBranch && isIdle && (sync?.ahead ?? 0) > 0
+  const busyState = syncOp === 'idle' ? 'idle' : syncOp === 'fetching' ? 'fetch' : syncOp === 'pulling' ? 'pull' : 'push'
+  const canPushNow = canPush(hasFetched, sync?.behind ?? 0, sync?.ahead ?? 0, busyState)
+  const canCreatePRNow = canCreatePR(!!ghSlug, !!currentBranch, sync?.ahead ?? 0, busyState)
 
   const doFetch = async () => {
     if (!repoPath || syncOp !== 'idle') return
@@ -499,8 +502,8 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
           {/* Split Fetch | Pull button */}
           {repoPath && (
             <FetchPullSplitBtn
-              fetchLabel={syncOp === 'fetching' ? 'Fetching…' : 'Fetch'}
-              pullLabel={syncOp === 'pulling' ? 'Pulling…' : 'Pull'}
+              fetchLabel={fetchButtonLabel(busyState)}
+              pullLabel={pullButtonLabel(busyState)}
               behindCount={hasBehind && isIdle ? (sync?.behind ?? 0) : 0}
               hasFetched={hasFetched}
               error={!!syncErr}
@@ -513,13 +516,13 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
           {/* Push button */}
           {repoPath && (
             <SyncBtn
-              label={syncOp === 'pushing' ? 'Pushing…' : 'Push'}
+              label={pushButtonLabel(busyState)}
               icon={<ArrowUp />}
               count={hasAhead && isIdle ? (sync?.ahead ?? 0) : 0}
               countColor="#2dbd6e"
               active={hasAhead}
               error={false}
-              disabled={!isIdle}
+              disabled={!canPushNow}
               onClick={doPush}
             />
           )}
@@ -530,11 +533,11 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
               icon={<PullRequestIcon />}
               count={0}
               countColor="#a78bfa"
-              active={canCreatePR}
+              active={canCreatePRNow}
               error={false}
-              disabled={!canCreatePR}
+              disabled={!canCreatePRNow}
               onClick={() => {
-                if (!repoPath || !remoteUrl || !currentBranch || !canCreatePR) return
+                if (!repoPath || !remoteUrl || !currentBranch || !canCreatePRNow) return
                 openPRDialog(repoPath, currentBranch, remoteUrl)
               }}
             />
