@@ -1382,6 +1382,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   const [stashOpen,   setStashOpen]   = useState(() => {
     try { return localStorage.getItem(STASH_KEY) === '1' } catch { return false }
   })
+  const [syncStatus,  setSyncStatus]  = useState<{ ahead: number; behind: number } | null>(null)
 
   // ── Center column — commit files ───────────────────────────────────────────
   const [commitFiles,   setCommitFiles]   = useState<CommitFileChange[]>([])
@@ -1461,6 +1462,17 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     historyTickRef.current = historyTick
     loadHistoryRef.current(limitRef.current)
   }, [historyTick])
+
+  useEffect(() => {
+    let cancelled = false
+    ipc.getSyncStatus(repoPath)
+      .then(st => { if (!cancelled) setSyncStatus({ ahead: st.ahead, behind: st.behind }) })
+      .catch(() => { if (!cancelled) setSyncStatus(null) })
+    return () => { cancelled = true }
+  }, [repoPath, historyTick])
+
+  const stagedCount = fileStatus.filter(f => f.staged).length
+  const unstagedCount = fileStatus.length - stagedCount
 
   // ── Select left item ───────────────────────────────────────────────────────
   const selectWorkingTree = () => {
