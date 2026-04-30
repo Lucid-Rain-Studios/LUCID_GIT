@@ -92,6 +92,7 @@ export interface AppNotification {
   repoPath: string
   createdAt: string  // ISO date string
   read: boolean
+  meta?: Record<string, unknown>  // structured payload for pr-merged / pr-closed notifications
 }
 
 export interface WebhookConfig {

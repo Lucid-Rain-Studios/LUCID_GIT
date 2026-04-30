@@ -159,6 +159,12 @@ export const CHANNELS = {
   GITHUB_MERGE_PR:  'github:merge-pr',
   GITHUB_CLOSE_PR:  'github:close-pr',
 
+  // PR Monitor — tracks open PRs and notifies on merge/close
+  PR_MONITOR_START:  'pr-monitor:start',
+  PR_MONITOR_STOP:   'pr-monitor:stop',
+  PR_MONITOR_RECORD: 'pr-monitor:record',
+  PR_MONITOR_CHECK:  'pr-monitor:check',
+
   // OS dialogs + shell
   DIALOG_OPEN_DIRECTORY: 'dialog:open-directory',
   DIALOG_OPEN_FILE:      'dialog:open-file',

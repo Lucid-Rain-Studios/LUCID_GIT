@@ -7,7 +7,7 @@ import { logService } from './LogService'
 
 const CLIENT_ID    = 'Ov23licKyg1mhOAj2nRc'
 const KEYTAR_SVC   = 'lucid-git'
-const SCOPES       = 'repo write:lfs read:user'
+const SCOPES       = 'repo read:user'
 const EXPIRY_SKEW_MS = 5 * 60 * 1000
 
 // ── Tiny JSON store for non-secret account metadata ───────────────────────────
@@ -54,7 +54,7 @@ function parseScopes(scopeHeader: string | null): Set<string> {
 }
 
 function hasRequiredScopes(scopes: Set<string>): boolean {
-  return scopes.has('repo') && scopes.has('write:lfs')
+  return scopes.has('repo')
 }
 
 class AuthService {
@@ -142,7 +142,7 @@ class AuthService {
     if (!hasRequiredScopes(grantedScopes)) {
       const scopesText = [...grantedScopes].join(', ') || 'none'
       logService.error('auth.deviceFlow', `GitHub token missing required scopes. Granted: ${scopesText}`)
-      throw new Error('GitHub token missing required scopes (repo, write:lfs). Please sign in again.')
+      throw new Error('GitHub token missing required scopes (repo). Please sign in again.')
     }
 
     const u = await userRes.json() as {

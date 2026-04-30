@@ -311,6 +311,16 @@ const api = {
   githubClosePR: (args: { owner: string; repo: string; prNumber: number }) =>
     ipcRenderer.invoke(CHANNELS.GITHUB_CLOSE_PR, args),
 
+  // ── PR Monitor ────────────────────────────────────────────────────────────
+  prMonitorStart:  (repoPath: string) =>
+    ipcRenderer.invoke(CHANNELS.PR_MONITOR_START, repoPath),
+  prMonitorStop:   (repoPath: string) =>
+    ipcRenderer.invoke(CHANNELS.PR_MONITOR_STOP, repoPath),
+  prMonitorRecord: (repoPath: string, prNumber: number, owner: string, repo: string, lockedFiles: string[], title: string) =>
+    ipcRenderer.invoke(CHANNELS.PR_MONITOR_RECORD, repoPath, prNumber, owner, repo, lockedFiles, title),
+  prMonitorCheck:  (repoPath: string) =>
+    ipcRenderer.invoke(CHANNELS.PR_MONITOR_CHECK, repoPath),
+
   // ── Bug logs ──────────────────────────────────────────────────────────────
   logGetText: () =>
     ipcRenderer.invoke(CHANNELS.LOG_GET_TEXT),

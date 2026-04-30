@@ -113,6 +113,7 @@ export interface AppNotification {
   repoPath: string
   createdAt: string  // ISO date string
   read: boolean
+  meta?: Record<string, unknown>  // structured payload for pr-merged / pr-closed
 }
 
 export interface WebhookConfig {
@@ -626,6 +627,12 @@ export interface LucidGitAPI {
   githubPrFiles:  (args: { owner: string; repo: string; prNumber: number }) => Promise<string[]>
   githubMergePR:  (args: { owner: string; repo: string; prNumber: number; repoPath: string }) => Promise<void>
   githubClosePR:  (args: { owner: string; repo: string; prNumber: number }) => Promise<void>
+
+  // PR Monitor
+  prMonitorStart:  (repoPath: string) => Promise<void>
+  prMonitorStop:   (repoPath: string) => Promise<void>
+  prMonitorRecord: (repoPath: string, prNumber: number, owner: string, repo: string, lockedFiles: string[], title: string) => Promise<void>
+  prMonitorCheck:  (repoPath: string) => Promise<void>
 
   // Bug logs
   logGetText: () => Promise<string>

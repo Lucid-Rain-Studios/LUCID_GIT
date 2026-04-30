@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { BranchDiffCommit, ipc } from '@/ipc'
 import { usePRStore } from '@/stores/prStore'
 import { useRepoStore } from '@/stores/repoStore'
+import { useLockStore } from '@/stores/lockStore'
+import { useAuthStore } from '@/stores/authStore'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -140,7 +142,10 @@ function Btn({ label, onClick, disabled, primary, danger }: {
 
 export function PRDialog() {
   const { open, repoPath, headBranch, remoteUrl, closeDialog } = usePRStore()
-  const branches = useRepoStore(s => s.branches)
+  const branches                     = useRepoStore(s => s.branches)
+  const { locks }                    = useLockStore()
+  const { accounts, currentAccountId } = useAuthStore()
+  const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login ?? null
 
   const [title, setTitle]   = useState('')
   const [body, setBody]     = useState('')
@@ -228,6 +233,13 @@ export function PRDialog() {
       const res = await ipc.githubCreatePR({ owner, repo, head: headBranch, base, title: title.trim(), body, draft })
       setResult(res)
       setPhase('success')
+      // Associate currently-locked files with this PR so we can prompt to unlock on merge
+      if (repoPath) {
+        const myLockedFiles = locks
+          .filter(l => l.owner.login === currentLogin)
+          .map(l => l.path)
+        ipc.prMonitorRecord(repoPath, res.number, owner, repo, myLockedFiles, title.trim()).catch(() => {})
+      }
     } catch (e) {
       setError(String(e).replace(/^Error:\s*/, ''))
       setPhase('error')

@@ -32,6 +32,13 @@ export interface PRActionArgs {
   prNumber: number
 }
 
+export interface PRStatus {
+  number: number
+  state: 'open' | 'closed'
+  merged: boolean
+  title: string
+}
+
 export interface PRListArgs {
   owner: string
   repo: string
@@ -105,6 +112,18 @@ class GitHubService {
   async getPRFiles(token: string, args: PRActionArgs): Promise<string[]> {
     const data = await ghFetch(token, `/repos/${args.owner}/${args.repo}/pulls/${args.prNumber}/files?per_page=100`) as Array<{ filename: string }>
     return data.map(f => f.filename.replace(/\\/g, '/'))
+  }
+
+  async getPRStatus(token: string, args: PRActionArgs): Promise<PRStatus> {
+    const data = await ghFetch(token, `/repos/${args.owner}/${args.repo}/pulls/${args.prNumber}`) as {
+      number: number; state: string; merged: boolean; title: string
+    }
+    return {
+      number: data.number,
+      state:  data.state as 'open' | 'closed',
+      merged: !!data.merged,
+      title:  data.title,
+    }
   }
 }
 

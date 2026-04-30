@@ -22,6 +22,7 @@ import { settingsService } from '../services/SettingsService'
 import { teamConfigService } from '../services/TeamConfigService'
 import { gitHubService } from '../services/GitHubService'
 import type { PRCreateArgs, PRListArgs, PRActionArgs } from '../services/GitHubService'
+import { prMonitorService } from '../services/PRMonitorService'
 import type { WebhookConfig, AppSettings, TeamConfig } from '../types'
 
 async function requireAdmin(repoPath: string): Promise<void> {
@@ -132,9 +133,11 @@ export function registerHandlers(): void {
   })
 
   ipcMain.handle(CHANNELS.GIT_FETCH, async (event, repoPath: string) => {
-    return gitService.fetch(repoPath, (step) => {
+    const result = await gitService.fetch(repoPath, (step) => {
       if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
     })
+    prMonitorService.checkNow(repoPath).catch(() => {})
+    return result
   })
 
   ipcMain.handle(CHANNELS.GIT_LOG, async (_event, repoPath: string, args?: { limit?: number; all?: boolean }) => {
@@ -697,5 +700,30 @@ export function registerHandlers(): void {
     const token = await authService.getCurrentToken()
     if (!token) throw new Error('Not authenticated with GitHub')
     return gitHubService.closePR(token, args)
+  })
+
+  // ── PR Monitor ─────────────────────────────────────────────────────────────
+  ipcMain.handle(CHANNELS.PR_MONITOR_START, async (_event, repoPath: string) => {
+    return prMonitorService.start(repoPath)
+  })
+
+  ipcMain.handle(CHANNELS.PR_MONITOR_STOP, (_event, repoPath: string) => {
+    prMonitorService.stop(repoPath)
+  })
+
+  ipcMain.handle(CHANNELS.PR_MONITOR_RECORD, (
+    _event,
+    repoPath: string,
+    prNumber: number,
+    owner: string,
+    repo: string,
+    lockedFiles: string[],
+    title: string,
+  ) => {
+    prMonitorService.recordPR(repoPath, prNumber, owner, repo, lockedFiles, title)
+  })
+
+  ipcMain.handle(CHANNELS.PR_MONITOR_CHECK, async (_event, repoPath: string) => {
+    return prMonitorService.checkNow(repoPath)
   })
 }

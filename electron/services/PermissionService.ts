@@ -86,6 +86,8 @@ class PermissionService {
     const token = await authService.getToken(currentAccountId)
     if (!token) return 'write'
 
+    const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login ?? null
+
     let remoteUrl: string | null = null
     try { remoteUrl = await gitService.getRemoteUrl(repoPath) } catch {}
     if (!remoteUrl) return 'write'
@@ -93,21 +95,18 @@ class PermissionService {
     const parsed = parseRemoteUrl(remoteUrl)
     if (!parsed) return 'write'
 
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    }
+
     try {
-      const res = await fetch(`${parsed.apiBase}/repos/${parsed.owner}/${parsed.repo}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: 'application/vnd.github+json',
-          'X-GitHub-Api-Version': '2022-11-28',
-        },
-      })
+      const res = await fetch(`${parsed.apiBase}/repos/${parsed.owner}/${parsed.repo}`, { headers })
 
       if (!res.ok) {
-        // Use stale cache on non-auth errors; 401/403 means definitely not admin
-        if (res.status === 401 || res.status === 403) {
-          this.setCache(repoPath, 'write')
-          return 'write'
-        }
+        // Don't cache on auth failures — the user may log in with a different account
+        if (res.status === 401 || res.status === 403) return 'write'
         const stale = readStore().cache[repoPath]
         if (stale) return stale.permission
         return 'write'
@@ -115,13 +114,40 @@ class PermissionService {
 
       const data = await res.json() as {
         permissions?: { admin?: boolean; push?: boolean }
+        owner?: { login?: string }
       }
 
-      const permission: RepoPermission =
-        data.permissions?.admin === true ? 'admin' :
-        data.permissions?.push  === true ? 'write' :
-        'read'
+      // Fast path: explicit admin flag in the repo response (direct collaborators)
+      if (data.permissions?.admin === true) {
+        this.setCache(repoPath, 'admin')
+        return 'admin'
+      }
 
+      // Fallback: current user is the repo owner (personal repos / org owners)
+      if (currentLogin && data.owner?.login?.toLowerCase() === currentLogin.toLowerCase()) {
+        this.setCache(repoPath, 'admin')
+        return 'admin'
+      }
+
+      // Fallback: collaborator-level permission endpoint — reliable for org members
+      // whose admin access flows through org membership rather than direct collaboration
+      if (currentLogin) {
+        try {
+          const collabRes = await fetch(
+            `${parsed.apiBase}/repos/${parsed.owner}/${parsed.repo}/collaborators/${currentLogin}/permission`,
+            { headers },
+          )
+          if (collabRes.ok) {
+            const collabData = await collabRes.json() as { permission?: string }
+            if (collabData.permission === 'admin') {
+              this.setCache(repoPath, 'admin')
+              return 'admin'
+            }
+          }
+        } catch {}
+      }
+
+      const permission: RepoPermission = data.permissions?.push === true ? 'write' : 'read'
       this.setCache(repoPath, permission)
       return permission
     } catch {

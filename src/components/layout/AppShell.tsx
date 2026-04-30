@@ -247,6 +247,7 @@ export function AppShell() {
     if (repoPath) {
       loadLocks(repoPath)
       ipc.startLockPolling(repoPath)
+      ipc.prMonitorStart(repoPath).catch(() => {})
       ipc.notificationList(repoPath).then(persisted => {
         const existingIds = new Set(notifications.map(n => n.id))
         persisted.filter(n => !existingIds.has(n.id)).forEach(n => pushNotification(n))

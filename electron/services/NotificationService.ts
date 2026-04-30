@@ -37,6 +37,7 @@ class NotificationService {
     type: string,
     title: string,
     body: string,
+    meta?: Record<string, unknown>,
   ): AppNotification {
     const notifications = load(repoPath)
     const n: AppNotification = {
@@ -47,6 +48,7 @@ class NotificationService {
       repoPath,
       createdAt: new Date().toISOString(),
       read:      false,
+      meta,
     }
     notifications.unshift(n)
     save(repoPath, notifications.slice(0, MAX_NOTIFICATIONS))
