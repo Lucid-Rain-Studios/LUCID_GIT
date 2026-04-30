@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, Menu, shell, ipcMain } from 'electron'
 import path from 'path'
 import { autoUpdater } from 'electron-updater'
 import { registerHandlers } from './ipc/handlers'
@@ -70,6 +70,7 @@ function createWindow(): BrowserWindow {
     minHeight: 600,
     backgroundColor: '#0d0f14',
     icon:      iconPath,
+    frame:     false,
     show: false,
     webPreferences: {
       preload:          path.join(__dirname, 'preload.js'),
@@ -109,6 +110,18 @@ function createWindow(): BrowserWindow {
   return win
 }
 
+// ── Window control IPC ────────────────────────────────────────────────────────
+
+function registerWindowHandlers() {
+  ipcMain.handle(CHANNELS.WIN_MINIMIZE, () => { mainWin?.minimize() })
+  ipcMain.handle(CHANNELS.WIN_MAXIMIZE_TOGGLE, () => {
+    if (!mainWin) return
+    mainWin.isMaximized() ? mainWin.unmaximize() : mainWin.maximize()
+  })
+  ipcMain.handle(CHANNELS.WIN_CLOSE, () => { mainWin?.close() })
+  ipcMain.handle(CHANNELS.WIN_IS_MAXIMIZED, () => mainWin?.isMaximized() ?? false)
+}
+
 // ── IPC handlers for updater ─────────────────────────────────────────────────
 // Registered after app is ready so ipcMain is available
 
@@ -136,9 +149,11 @@ app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
 app.commandLine.appendSwitch('disable-features', 'AutofillServerCommunication')
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null)
   logService.init(app.getPath('userData'))
   registerHandlers()
   registerUpdaterHandlers()
+  registerWindowHandlers()
   createWindow()
 
   app.on('activate', () => {

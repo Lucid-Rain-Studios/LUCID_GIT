@@ -185,6 +185,12 @@ export const CHANNELS = {
   EVT_NOTIFICATION:       'evt:notification',
   EVT_UPDATE_AVAILABLE:   'evt:update-available',
   EVT_STATUS_CHANGED:     'evt:status-changed',
+
+  // Window controls (frameless)
+  WIN_MINIMIZE:          'win:minimize',
+  WIN_MAXIMIZE_TOGGLE:   'win:maximize-toggle',
+  WIN_CLOSE:             'win:close',
+  WIN_IS_MAXIMIZED:      'win:is-maximized',
 } as const
 
 export type Channel = typeof CHANNELS[keyof typeof CHANNELS]

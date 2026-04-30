@@ -317,6 +317,16 @@ const api = {
   logSaveDialog: () =>
     ipcRenderer.invoke(CHANNELS.LOG_SAVE_DIALOG),
 
+  // ── Window controls (frameless) ───────────────────────────────────────────
+  windowMinimize: (): Promise<void> =>
+    ipcRenderer.invoke(CHANNELS.WIN_MINIMIZE),
+  windowMaximizeToggle: (): Promise<void> =>
+    ipcRenderer.invoke(CHANNELS.WIN_MAXIMIZE_TOGGLE),
+  windowClose: (): Promise<void> =>
+    ipcRenderer.invoke(CHANNELS.WIN_CLOSE),
+  windowIsMaximized: (): Promise<boolean> =>
+    ipcRenderer.invoke(CHANNELS.WIN_IS_MAXIMIZED),
+
   // ── Events: main → renderer ───────────────────────────────────────────────
   onOperationProgress: (cb: (step: unknown) => void) => {
     const handler = (_e: Electron.IpcRendererEvent, step: unknown) => cb(step)

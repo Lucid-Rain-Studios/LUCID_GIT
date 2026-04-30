@@ -192,3 +192,7 @@ pre,
 .lg-slide-down {
   animation: slide-down 0.2s ease both;
 }
+
+/* ── Electron frameless window drag regions ─────────────────────────────── */
+.drag-region  { -webkit-app-region: drag; }
+.no-drag-region { -webkit-app-region: no-drag; }

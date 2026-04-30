@@ -631,6 +631,12 @@ export interface LucidGitAPI {
   logGetSuggestion: () => Promise<string | null>
   logSaveDialog: () => Promise<string | null>
 
+  // Window controls (frameless)
+  windowMinimize: () => Promise<void>
+  windowMaximizeToggle: () => Promise<void>
+  windowClose: () => Promise<void>
+  windowIsMaximized: () => Promise<boolean>
+
   // Events: main → renderer — each returns an unsubscribe function
   onOperationProgress: (cb: (step: OperationStep) => void) => () => void
   onLockChanged: (cb: (locks: Lock[]) => void) => () => void

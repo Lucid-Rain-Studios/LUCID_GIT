@@ -35,7 +35,19 @@
       "Bash(git lfs *)",
       "Bash(git config *)",
       "Bash(npx electron-builder *)",
-      "Bash(xargs grep *)"
+      "Bash(xargs grep *)",
+      "mcp__plugin_playwright_playwright__browser_snapshot",
+      "mcp__plugin_playwright_playwright__browser_run_code",
+      "mcp__plugin_playwright_playwright__browser_take_screenshot",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git commit *)",
+      "Bash(node -e ' *)",
+      "Bash(git -C H:/LUCID_GIT add src/components/dashboard/ContributionGraph.tsx)",
+      "Bash(git -C H:/LUCID_GIT commit -m \"fix: compute todayKey inline to avoid staleness at midnight\")",
+      "Bash(xargs cat *)",
+      "Bash(grep -E \"\\\\.tsx?$\")",
+      "Bash(grep -E \"\\\\.ts$\")"
     ]
   }
 }

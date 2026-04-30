@@ -238,19 +238,20 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
         onFetch={doFetch}
         onPull={doPull}
         onPush={doPush}
-        onGoChanges={() => onNavigate('changes')}
+        onGoChanges={() => onNavigate('timeline')}
         onOpenPR={() => remoteUrl && openPRDialog(repoPath, currentBranch, remoteUrl)}
       />
 
       {/* ── Status grid (3 columns) ─────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gridAutoRows: '300px', gap: 14, marginTop: 16 }}>
-        <SyncCard sync={sync} busy={busy} hasFetched={hasFetched} onFetch={doFetch} onPull={doPull} onPush={doPush} />
-        <ChangesCard files={fileStatus} staged={staged} unstaged={unstaged} onNavigate={onNavigate} />
+        <LocalStatusCard
+          sync={sync} busy={busy} hasFetched={hasFetched} files={fileStatus}
+          staged={staged} unstaged={unstaged}
+          onFetch={doFetch} onPull={doPull} onPush={doPush} onNavigate={onNavigate}
+        />
         <LocksCard locks={locks} currentLogin={currentLogin} repoPath={repoPath} unlockFile={unlockFile} isAdmin={isAdmin} />
+        <PRsCard ghSlug={ghSlug} />
       </div>
-
-      {/* ── Open Pull Requests ──────────────────────────────────────────── */}
-      {ghSlug && <PRsCard ghSlug={ghSlug} />}
 
     </div>
   )
@@ -531,20 +532,24 @@ function SuggestionsCard({ lastFetch, lastPull, sync, fileStatus, onFetch, busy 
   )
 }
 
-// ── Sync Status Card ──────────────────────────────────────────────────────────
+// ── Local Status Card (sync + changes combined) ───────────────────────────────
 
-function SyncCard({ sync, busy, hasFetched, onFetch, onPull, onPush }: {
+function LocalStatusCard({ sync, busy, hasFetched, files, staged, unstaged, onFetch, onPull, onPush, onNavigate }: {
   sync: SyncStatus | null; busy: string | null; hasFetched: boolean
+  files: FileStatus[]; staged: number; unstaged: number
   onFetch: () => void; onPull: () => void; onPush: () => void
+  onNavigate: (tab: string) => void
 }) {
   const behind      = sync?.behind ?? 0
   const ahead       = sync?.ahead  ?? 0
   const clean       = sync && behind === 0 && ahead === 0
   const pushEnabled = hasFetched && behind === 0 && ahead > 0 && !busy
+  const total       = staged + unstaged
+  const preview     = files.slice(0, 4)
 
   return (
-    <Card title="Sync Status" icon={<SyncIcon />}>
-      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', flex: 1 }}>
+    <Card title="Local Status" icon={<SyncIcon />} onAction={() => onNavigate('timeline')} actionLabel="View All">
+      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 9, overflowY: 'auto', flex: 1, minHeight: 0 }}>
         <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#344057', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {sync?.hasUpstream ? `→ ${sync.remoteName}/${sync.remoteBranch}` : 'No upstream configured'}
         </div>
@@ -561,54 +566,21 @@ function SyncCard({ sync, busy, hasFetched, onFetch, onPull, onPush }: {
           </div>
         )}
 
-        {!hasFetched && ahead > 0 && (
-          <div style={{ fontSize: 10.5, color: '#4a566a', fontFamily: "'IBM Plex Sans', system-ui" }}>
-            Fetch required before push
-          </div>
-        )}
-
         <div style={{ display: 'flex', gap: 6 }}>
-          <SmallBtn
-            label={busy === 'fetch' ? 'Fetching…' : 'Fetch'}
-            disabled={!!busy}
-            onClick={onFetch}
-          />
-          <SmallBtn
-            label={busy === 'pull' ? 'Pulling…' : 'Pull'}
-            color={behind > 0 && hasFetched ? '#f5a832' : undefined}
-            disabled={!!busy || !hasFetched}
-            onClick={onPull}
-          />
-          <SmallBtn
-            label={busy === 'push' ? 'Pushing…' : 'Push'}
-            color={pushEnabled ? '#2dbd6e' : undefined}
-            disabled={!pushEnabled}
-            onClick={onPush}
-          />
+          <SmallBtn label={busy === 'fetch' ? 'Fetching…' : 'Fetch'} disabled={!!busy} onClick={onFetch} />
+          <SmallBtn label={busy === 'pull' ? 'Pulling…' : 'Pull'} color={behind > 0 && hasFetched ? '#f5a832' : undefined} disabled={!!busy || !hasFetched} onClick={onPull} />
+          <SmallBtn label={busy === 'push' ? 'Pushing…' : 'Push'} color={pushEnabled ? '#2dbd6e' : undefined} disabled={!pushEnabled} onClick={onPush} />
         </div>
-      </div>
-    </Card>
-  )
-}
 
-// ── Changes Card ──────────────────────────────────────────────────────────────
+        <div style={{ height: 1, background: '#1a2030', marginLeft: -14, marginRight: -14 }} />
 
-function ChangesCard({ files, staged, unstaged, onNavigate }: {
-  files: FileStatus[]; staged: number; unstaged: number; onNavigate: (tab: string) => void
-}) {
-  const total   = staged + unstaged
-  const preview = files.slice(0, 6)
-
-  return (
-    <Card title="Current Changes" icon={<ChangesCardIcon />} onAction={() => onNavigate('changes')} actionLabel="View All">
-      <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', flex: 1 }}>
         <div style={{ display: 'flex', gap: 12 }}>
-          <StatPill icon="●" value={staged}  label="staged"   color={staged   > 0 ? '#2dbd6e' : '#283047'} />
+          <StatPill icon="●" value={staged}   label="staged"   color={staged   > 0 ? '#2dbd6e' : '#283047'} />
           <StatPill icon="○" value={unstaged} label="modified" color={unstaged > 0 ? '#f5a832' : '#283047'} />
         </div>
 
         {total === 0 ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 2 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ color: '#2dbd6e', fontSize: 12 }}>✓</span>
             <span style={{ fontSize: 11.5, color: '#344057' }}>Working directory clean</span>
           </div>
@@ -631,10 +603,10 @@ function ChangesCard({ files, staged, unstaged, onNavigate }: {
                 </div>
               )
             })}
-            {files.length > 6 && (
-              <button onClick={() => onNavigate('changes')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', marginTop: 2 }}>
+            {files.length > 4 && (
+              <button onClick={() => onNavigate('timeline')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', marginTop: 2 }}>
                 <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#344057' }}>
-                  +{files.length - 6} more files…
+                  +{files.length - 4} more files…
                 </span>
               </button>
             )}
@@ -771,7 +743,7 @@ function LocksCard({ locks, currentLogin, repoPath, unlockFile, isAdmin }: {
 
 // ── Open PRs Card ─────────────────────────────────────────────────────────────
 
-function PRsCard({ ghSlug }: { ghSlug: string }) {
+function PRsCard({ ghSlug }: { ghSlug: string | null }) {
   const [prs, setPrs] = useState<PullRequest[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -779,6 +751,7 @@ function PRsCard({ ghSlug }: { ghSlug: string }) {
   const prTickRef = useRef(prTick)
 
   const load = useCallback(async () => {
+    if (!ghSlug) return
     const [owner, repo] = ghSlug.split('/')
     setLoading(true)
     setError(null)
@@ -800,79 +773,81 @@ function PRsCard({ ghSlug }: { ghSlug: string }) {
   }, [prTick, load])
 
   return (
-    <div style={{ marginTop: 14 }}>
-      <Card title="Open Pull Requests" icon={<PRCardIcon />} onAction={load} actionLabel={loading ? '…' : 'Refresh'}>
-        <div style={{ padding: '10px 14px', overflowY: 'auto', maxHeight: 300 }}>
-          {error ? (
-            <div style={{ padding: '4px 0', fontSize: 12, color: '#e84545', fontFamily: "'IBM Plex Sans', system-ui" }}>
-              {error}
-            </div>
-          ) : loading && prs.length === 0 ? (
-            <div style={{ padding: '4px 0', fontSize: 12, color: '#344057', fontFamily: "'IBM Plex Sans', system-ui" }}>
-              Loading…
-            </div>
-          ) : prs.length === 0 ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0' }}>
-              <span style={{ color: '#2dbd6e', fontSize: 12 }}>✓</span>
-              <span style={{ fontSize: 11.5, color: '#344057', fontFamily: "'IBM Plex Sans', system-ui" }}>No open pull requests</span>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {prs.map(pr => (
-                <button
-                  key={pr.number}
-                  onClick={() => ipc.openExternal(pr.htmlUrl)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '8px 10px', borderRadius: 6,
-                    background: 'transparent', border: '1px solid transparent',
-                    cursor: 'pointer', width: '100%', textAlign: 'left',
-                    transition: 'background 0.1s',
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.borderColor = '#1a2030' }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent' }}
-                >
+    <Card title="Active Pull Requests" icon={<PRCardIcon />} onAction={ghSlug ? load : undefined} actionLabel={loading ? '…' : 'Refresh'}>
+      <div style={{ padding: '10px 14px', overflowY: 'auto', flex: 1, minHeight: 0 }}>
+        {!ghSlug ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0' }}>
+            <span style={{ fontSize: 11.5, color: '#344057', fontFamily: "'IBM Plex Sans', system-ui" }}>No GitHub remote detected</span>
+          </div>
+        ) : error ? (
+          <div style={{ padding: '4px 0', fontSize: 12, color: '#e84545', fontFamily: "'IBM Plex Sans', system-ui" }}>
+            {error}
+          </div>
+        ) : loading && prs.length === 0 ? (
+          <div style={{ padding: '4px 0', fontSize: 12, color: '#344057', fontFamily: "'IBM Plex Sans', system-ui" }}>
+            Loading…
+          </div>
+        ) : prs.length === 0 ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0' }}>
+            <span style={{ color: '#2dbd6e', fontSize: 12 }}>✓</span>
+            <span style={{ fontSize: 11.5, color: '#344057', fontFamily: "'IBM Plex Sans', system-ui" }}>No open pull requests</span>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {prs.map(pr => (
+              <button
+                key={pr.number}
+                onClick={() => ipc.openExternal(pr.htmlUrl)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '8px 10px', borderRadius: 6,
+                  background: 'transparent', border: '1px solid transparent',
+                  cursor: 'pointer', width: '100%', textAlign: 'left',
+                  transition: 'background 0.1s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.borderColor = '#1a2030' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent' }}
+              >
+                <span style={{
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 700,
+                  color: '#a27ef0', background: 'rgba(162,126,240,0.12)',
+                  border: '1px solid rgba(162,126,240,0.25)',
+                  borderRadius: 4, padding: '1px 6px', flexShrink: 0, lineHeight: '16px',
+                }}>#{pr.number}</span>
+                <span style={{
+                  fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#c8d0e8',
+                  flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>{pr.title}</span>
+                {pr.draft && (
                   <span style={{
-                    fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 700,
-                    color: '#a27ef0', background: 'rgba(162,126,240,0.12)',
-                    border: '1px solid rgba(162,126,240,0.25)',
-                    borderRadius: 4, padding: '1px 6px', flexShrink: 0, lineHeight: '16px',
-                  }}>#{pr.number}</span>
-                  <span style={{
-                    fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#c8d0e8',
-                    flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}>{pr.title}</span>
-                  {pr.draft && (
-                    <span style={{
-                      fontFamily: "'IBM Plex Sans', system-ui", fontSize: 9, fontWeight: 700,
-                      background: 'rgba(90,104,128,0.12)', color: '#5a6880',
-                      border: '1px solid rgba(90,104,128,0.2)', borderRadius: 3, padding: '1px 5px',
-                      letterSpacing: '0.05em', flexShrink: 0,
-                    }}>DRAFT</span>
-                  )}
-                  <span style={{
-                    fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5,
-                    flexShrink: 0, display: 'flex', alignItems: 'center', gap: 3,
-                  }}>
-                    <span style={{ color: '#4a9eff' }}>{pr.headBranch}</span>
-                    <span style={{ color: '#283047' }}>→</span>
-                    <span style={{ color: '#344057' }}>{pr.baseBranch}</span>
-                  </span>
-                  <span style={{
-                    fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10.5, color: '#344057',
-                    flexShrink: 0,
-                  }}>{pr.author} · {timeAgoStr(pr.updatedAt)}</span>
-                  <svg width="10" height="10" viewBox="0 0 12 12" fill="none" style={{ color: '#283047', flexShrink: 0 }}>
-                    <path d="M10 2H7M10 2V5M10 2L5 7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-                    <path d="M5 3H2v7h7V7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </Card>
-    </div>
+                    fontFamily: "'IBM Plex Sans', system-ui", fontSize: 9, fontWeight: 700,
+                    background: 'rgba(90,104,128,0.12)', color: '#5a6880',
+                    border: '1px solid rgba(90,104,128,0.2)', borderRadius: 3, padding: '1px 5px',
+                    letterSpacing: '0.05em', flexShrink: 0,
+                  }}>DRAFT</span>
+                )}
+                <span style={{
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5,
+                  flexShrink: 0, display: 'flex', alignItems: 'center', gap: 3,
+                }}>
+                  <span style={{ color: '#4a9eff' }}>{pr.headBranch}</span>
+                  <span style={{ color: '#283047' }}>→</span>
+                  <span style={{ color: '#344057' }}>{pr.baseBranch}</span>
+                </span>
+                <span style={{
+                  fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10.5, color: '#344057',
+                  flexShrink: 0,
+                }}>{pr.author} · {timeAgoStr(pr.updatedAt)}</span>
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none" style={{ color: '#283047', flexShrink: 0 }}>
+                  <path d="M10 2H7M10 2V5M10 2L5 7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M5 3H2v7h7V7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </Card>
   )
 }
 
@@ -970,16 +945,6 @@ function SyncIcon() {
   )
 }
 
-function ChangesCardIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-      <rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.3" />
-      <path d="M5 6h6M5 8.5h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-      <circle cx="11" cy="9" r="2.3" fill="currentColor" fillOpacity="0.15" stroke="currentColor" strokeWidth="1.1" />
-      <path d="M10.3 9l.7.7 1.2-1.2" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
 
 function LockCardIcon() {
   return (

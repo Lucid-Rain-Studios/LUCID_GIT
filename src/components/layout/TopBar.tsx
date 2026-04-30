@@ -15,6 +15,7 @@ interface TopBarProps {
 }
 
 const CONFIRM_BRANCH_KEY = 'lucid-git:confirm-branch-switch'
+const sessionTopBarFetched = new Set<string>()
 
 export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps) {
   const { repoPath, currentBranch, refreshStatus, recentRepos, openRepo, removeRecentRepo, clearRepo, branches, checkout, fileStatus } = useRepoStore()
@@ -27,6 +28,8 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
   const [syncErr, setSyncErr] = useState<string | null>(null)
   const [updatingFromMain, setUpdatingFromMain] = useState(false)
   const [defaultBranch, setDefaultBranch] = useState<string>('main')
+  const [hasFetched, setHasFetched] = useState(() => repoPath ? sessionTopBarFetched.has(repoPath) : false)
+  const [isMaximized, setIsMaximized] = useState(false)
   const [repoMenuOpen, setRepoMenuOpen] = useState(false)
   const [branchMenuOpen, setBranchMenuOpen] = useState(false)
   const [branchConfirm, setBranchConfirm] = useState<string | null>(null)
@@ -60,8 +63,13 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
 
   useEffect(() => {
     setSync(null); setSyncErr(null)
+    setHasFetched(repoPath ? sessionTopBarFetched.has(repoPath) : false)
     if (repoPath) loadSync()
   }, [repoPath, currentBranch])
+
+  useEffect(() => {
+    ipc.windowIsMaximized().then(setIsMaximized).catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (!repoPath) return
@@ -103,20 +111,27 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
   const hasBehind = (sync?.behind ?? 0) > 0
   const hasAhead  = (sync?.ahead  ?? 0) > 0
 
-  const doFetchAndPull = async () => {
+  const doFetch = async () => {
     if (!repoPath || syncOp !== 'idle') return
     setSyncOp('fetching'); setSyncErr(null)
     try {
       await opRun('Fetching…', () => ipc.fetch(repoPath))
       await loadSync()
-      const updated = await ipc.getSyncStatus(repoPath).catch(() => null)
-      if (updated && updated.behind > 0) {
-        setSyncOp('pulling')
-        await opRun('Pulling…', () => ipc.pull(repoPath))
-        await loadSync()
-        await refreshStatus()
-        onSynced?.()
-      }
+      sessionTopBarFetched.add(repoPath)
+      setHasFetched(true)
+      onSynced?.()
+    } catch (e) { const s = String(e); setSyncErr(s); pushErr(s) }
+    finally { setSyncOp('idle') }
+  }
+
+  const doTopBarPull = async () => {
+    if (!repoPath || syncOp !== 'idle') return
+    setSyncOp('pulling'); setSyncErr(null)
+    try {
+      await opRun('Pulling…', () => ipc.pull(repoPath))
+      await loadSync()
+      await refreshStatus()
+      onSynced?.()
     } catch (e) { const s = String(e); setSyncErr(s); pushErr(s) }
     finally { setSyncOp('idle') }
   }
@@ -261,16 +276,16 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
       )}
 
       {/* Main bar */}
-      <header style={{
+      <header className="drag-region" style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        height: 46, paddingLeft: 14, paddingRight: 12,
+        height: 46, paddingLeft: 14, paddingRight: 0,
         background: 'var(--lg-bg-secondary)',
         borderBottom: '1px solid var(--lg-border)',
         boxShadow: '0 1px 0 rgba(0,0,0,0.3), 0 4px 20px rgba(0,0,0,0.2)',
         flexShrink: 0, gap: 12, zIndex: 20, position: 'relative',
       }}>
         {/* Left: wordmark + repo + branch */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+        <div className="no-drag-region" style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
           {/* Logo mark + wordmark — clickable when repo is open to return to welcome */}
           <LogoWordmark hasRepo={!!repoPath} onClick={() => repoPath && clearRepo()} />
 
@@ -450,8 +465,8 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
           )}
         </div>
 
-        {/* Right: sync + notifs + account */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+        {/* Right: sync + notifs + account + window controls */}
+        <div className="no-drag-region" style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
 
           {/* Welcome buttons when no repo */}
           {!repoPath && (
@@ -461,17 +476,17 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
             </>
           )}
 
-          {/* Fetch & Pull button */}
+          {/* Split Fetch | Pull button */}
           {repoPath && (
-            <SyncBtn
-              label={syncOp === 'fetching' ? 'Fetching…' : syncOp === 'pulling' ? 'Pulling…' : 'Fetch & Pull'}
-              icon={syncErr ? <WarnIcon /> : <FetchPullIcon />}
-              count={hasBehind && isIdle ? (sync?.behind ?? 0) : 0}
-              countColor="#f5a832"
-              active={hasBehind}
+            <FetchPullSplitBtn
+              fetchLabel={syncOp === 'fetching' ? 'Fetching…' : 'Fetch'}
+              pullLabel={syncOp === 'pulling' ? 'Pulling…' : 'Pull'}
+              behindCount={hasBehind && isIdle ? (sync?.behind ?? 0) : 0}
+              hasFetched={hasFetched}
               error={!!syncErr}
               disabled={!isIdle}
-              onClick={doFetchAndPull}
+              onFetch={doFetch}
+              onPull={doTopBarPull}
             />
           )}
 
@@ -521,6 +536,9 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
               Sign in
             </button>
           )}
+
+          {/* Window controls */}
+          <WindowControls isMaximized={isMaximized} onMaximizeToggle={() => setIsMaximized(m => !m)} />
         </div>
       </header>
     </>
@@ -1298,6 +1316,161 @@ function CloneIcon() {
       <rect x="1.5" y="3" width="9" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
       <rect x="5.5" y="1.5" width="9" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.3" strokeDasharray="2.5 1.5" />
       <path d="M5.5 6.5h4M5.5 9h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+// ── Split Fetch | Pull button ─────────────────────────────────────────────────
+
+function FetchPullSplitBtn({
+  fetchLabel, pullLabel, behindCount, hasFetched, error, disabled, onFetch, onPull,
+}: {
+  fetchLabel: string; pullLabel: string; behindCount: number
+  hasFetched: boolean; error: boolean; disabled: boolean
+  onFetch: () => void; onPull: () => void
+}) {
+  const [hoverFetch, setHoverFetch] = React.useState(false)
+  const [hoverPull,  setHoverPull]  = React.useState(false)
+  const pullDisabled = disabled || !hasFetched
+  const hasBehind   = behindCount > 0
+  const borderColor = error ? '#e84040' : hasBehind ? '#f5a832' : '#1d2535'
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'stretch',
+      border: `1px solid ${borderColor}`,
+      borderRadius: 5, overflow: 'hidden', height: 28,
+      boxShadow: hasBehind ? '0 0 10px rgba(245,168,50,0.15)' : 'none',
+      animation: hasBehind ? 'glow-pulse 2.5s ease-in-out infinite' : 'none',
+    }}>
+      <button
+        onClick={disabled ? undefined : onFetch}
+        disabled={disabled}
+        onMouseEnter={() => !disabled && setHoverFetch(true)}
+        onMouseLeave={() => setHoverFetch(false)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 5,
+          paddingLeft: 10, paddingRight: 10,
+          background: hoverFetch && !disabled ? 'rgba(74,158,255,0.08)' : 'transparent',
+          border: 'none',
+          color: disabled ? '#344057' : hoverFetch ? '#4a9eff' : '#6b7590',
+          fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5, fontWeight: 500,
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          transition: 'background 0.12s, color 0.12s', whiteSpace: 'nowrap',
+        }}
+      >
+        <FetchIcon />
+        {fetchLabel}
+      </button>
+
+      <div style={{ width: 1, background: borderColor, flexShrink: 0 }} />
+
+      <button
+        onClick={pullDisabled ? undefined : onPull}
+        disabled={pullDisabled}
+        onMouseEnter={() => !pullDisabled && setHoverPull(true)}
+        onMouseLeave={() => setHoverPull(false)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 5,
+          paddingLeft: 10, paddingRight: hasBehind ? 7 : 10,
+          background: hoverPull && !pullDisabled ? (hasBehind ? 'rgba(245,168,50,0.08)' : 'rgba(74,158,255,0.08)') : 'transparent',
+          border: 'none',
+          color: pullDisabled ? '#283047' : hasBehind ? '#f5a832' : hoverPull ? '#4a9eff' : '#6b7590',
+          fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5, fontWeight: 500,
+          cursor: pullDisabled ? 'not-allowed' : 'pointer',
+          opacity: pullDisabled && !hasBehind ? 0.5 : 1,
+          transition: 'background 0.12s, color 0.12s', whiteSpace: 'nowrap',
+        }}
+      >
+        <ArrowDown />
+        {pullLabel}
+        {hasBehind && (
+          <span style={{
+            background: 'rgba(245,168,50,0.2)', color: '#f5a832',
+            fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 700,
+            borderRadius: 8, paddingLeft: 5, paddingRight: 5, lineHeight: '15px',
+            border: '1px solid rgba(245,168,50,0.4)',
+          }}>{behindCount}</span>
+        )}
+      </button>
+    </div>
+  )
+}
+
+// ── Window controls (frameless) ───────────────────────────────────────────────
+
+function WindowControls({ isMaximized, onMaximizeToggle }: { isMaximized: boolean; onMaximizeToggle: () => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'stretch', height: 46, marginLeft: 4 }}>
+      <WinCtrlBtn onClick={() => ipc.windowMinimize()} title="Minimize">
+        <MinimizeWinIcon />
+      </WinCtrlBtn>
+      <WinCtrlBtn
+        onClick={() => { onMaximizeToggle(); ipc.windowMaximizeToggle() }}
+        title={isMaximized ? 'Restore' : 'Maximize'}
+      >
+        {isMaximized ? <RestoreWinIcon /> : <MaximizeWinIcon />}
+      </WinCtrlBtn>
+      <WinCtrlBtn onClick={() => ipc.windowClose()} title="Close" isClose>
+        <CloseWinIcon />
+      </WinCtrlBtn>
+    </div>
+  )
+}
+
+function WinCtrlBtn({ onClick, title, isClose, children }: {
+  onClick: () => void; title: string; isClose?: boolean; children: React.ReactNode
+}) {
+  const [hover, setHover] = React.useState(false)
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        width: 42, height: '100%',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: hover ? (isClose ? 'rgba(196,43,28,0.85)' : 'rgba(255,255,255,0.07)') : 'transparent',
+        border: 'none', cursor: 'pointer',
+        color: hover ? '#fff' : '#344057',
+        transition: 'background 0.1s, color 0.1s', flexShrink: 0,
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
+function MinimizeWinIcon() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+      <path d="M2 5h6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function MaximizeWinIcon() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+      <rect x="1.5" y="1.5" width="7" height="7" rx="0.5" stroke="currentColor" strokeWidth="1.1" />
+    </svg>
+  )
+}
+
+function RestoreWinIcon() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+      <rect x="3" y="1.5" width="5.5" height="5.5" rx="0.5" stroke="currentColor" strokeWidth="1.1" />
+      <path d="M1.5 3.5V8.5h5" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function CloseWinIcon() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+      <path d="M2 2l6 6M8 2L2 8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
     </svg>
   )
 }
