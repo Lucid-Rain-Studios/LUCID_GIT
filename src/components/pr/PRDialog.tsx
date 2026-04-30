@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react'
-import { ipc } from '@/ipc'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { BranchDiffCommit, ipc } from '@/ipc'
 import { usePRStore } from '@/stores/prStore'
 import { useRepoStore } from '@/stores/repoStore'
 
@@ -149,6 +149,7 @@ export function PRDialog() {
   const [phase, setPhase]   = useState<Phase>('form')
   const [error, setError]   = useState<string | null>(null)
   const [result, setResult] = useState<{ number: number; htmlUrl: string; title: string } | null>(null)
+  const [mergeCommits, setMergeCommits] = useState<BranchDiffCommit[]>([])
 
   const slug  = remoteUrl ? parseGitHubSlug(remoteUrl) : null
   const parts = slug ? slug.split('/') : []
@@ -177,6 +178,34 @@ export function PRDialog() {
       .then(def => setBase(def))
       .catch(() => setBase('main'))
   }, [open, repoPath, headBranch])
+
+  useEffect(() => {
+    if (!open || !repoPath || !headBranch || !base) {
+      setMergeCommits([])
+      return
+    }
+
+    let cancelled = false
+    ipc.branchDiff(repoPath, base, headBranch)
+      .then(diff => {
+        if (cancelled) return
+        const commits = diff.aheadCommits
+        setMergeCommits(commits)
+        if (commits.length > 0) {
+          setTitle(commits[0].message)
+          setBody(commits.map(c => `- ${c.message}`).join('\n'))
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setMergeCommits([])
+      })
+
+    return () => { cancelled = true }
+  }, [open, repoPath, headBranch, base])
+
+  const commitCountLabel = useMemo(() => (
+    mergeCommits.length === 1 ? '1 commit' : `${mergeCommits.length} commits`
+  ), [mergeCommits])
 
   // Close on Escape
   const overlayRef = useRef<HTMLDivElement>(null)
@@ -219,7 +248,7 @@ export function PRDialog() {
       }}
     >
       <div style={{
-        width: 520, background: '#131720',
+        width: 980, maxWidth: '96vw', background: '#131720',
         border: '1px solid #1e2a3d', borderRadius: 12,
         boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
         overflow: 'hidden',
@@ -260,7 +289,8 @@ export function PRDialog() {
         {phase === 'success' && result ? (
           <SuccessView result={result} onClose={closeDialog} />
         ) : (
-          <div style={{ padding: '20px 20px 18px' }}>
+          <div style={{ padding: '20px 20px 18px', display: 'flex', gap: 18 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
 
             {/* Branch row */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18 }}>
@@ -330,6 +360,37 @@ export function PRDialog() {
                 disabled={busy || (!canSubmit && phase !== 'error')}
                 primary
               />
+            </div>
+            </div>
+
+            <div style={{
+              width: 320, flexShrink: 0,
+              border: '1px solid #1e2a3d', borderRadius: 8,
+              background: '#0f141d', padding: 12,
+              alignSelf: 'stretch',
+            }}>
+              <Label>Commits staged for merge</Label>
+              <div style={{ fontSize: 12, color: '#5a6880', marginBottom: 10 }}>{commitCountLabel}</div>
+              {mergeCommits.length === 0 ? (
+                <div style={{ fontSize: 12, color: '#4a566a' }}>No commits found between these branches.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 300, overflowY: 'auto', paddingRight: 2 }}>
+                  {mergeCommits.map(commit => (
+                    <div
+                      key={commit.hash}
+                      style={{
+                        border: '1px solid #1b2433', borderRadius: 6,
+                        padding: '8px 9px', background: '#111722',
+                      }}
+                    >
+                      <div style={{ fontSize: 12.5, color: '#c8d0e8', lineHeight: 1.35 }}>{commit.message}</div>
+                      <div style={{ marginTop: 4, fontSize: 10.5, color: '#4a566a', fontFamily: "'JetBrains Mono', monospace" }}>
+                        {commit.hash.slice(0, 7)} · {commit.author}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
