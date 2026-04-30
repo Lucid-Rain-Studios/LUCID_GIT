@@ -5,6 +5,9 @@ import { useForecastStore } from '@/stores/forecastStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useDialogStore } from '@/stores/dialogStore'
 import { useAssetViewerStore } from '@/stores/assetViewerStore'
+import { AppCheckbox } from '@/components/ui/AppCheckbox'
+import { AppTooltip } from '@/components/ui/AppTooltip'
+import { AppRightSelectionItem, AppRightSelectionOptions, AppRightSelectionSeparator } from '@/components/ui/AppRightSelectionOptions'
 
 interface FileRowProps {
   file: FileStatus
@@ -28,29 +31,6 @@ const STATUS_BG: Record<string, string> = {
   M: 'rgba(245,168,50,0.15)',  A: 'rgba(46,197,115,0.15)',  D: 'rgba(232,69,69,0.15)',
   R: 'rgba(77,157,255,0.15)',  C: 'rgba(77,157,255,0.15)',  U: 'rgba(232,69,69,0.15)',
   '?': 'rgba(162,126,240,0.15)', '!': 'rgba(139,148,176,0.1)',
-}
-
-function Checkbox({ checked, color }: { checked: boolean; color: string }) {
-  const [hover, setHover] = useState(false)
-  return (
-    <button
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        width: 16, height: 16, borderRadius: 3, flexShrink: 0,
-        border: `1.5px solid ${checked ? color : hover ? '#2f3a54' : '#252d42'}`,
-        background: checked ? `${color}22` : hover ? '#242a3d' : 'transparent',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        cursor: 'pointer', transition: 'all 0.12s', padding: 0,
-      }}
-    >
-      {checked && (
-        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-          <polyline points="1.5,5 4,7.5 8.5,2.5" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      )}
-    </button>
-  )
 }
 
 export function FileRow({
@@ -103,8 +83,7 @@ export function FileRow({
     return () => document.removeEventListener('mousedown', handler)
   }, [ctx])
 
-  const toggleStage = async (e: React.MouseEvent) => {
-    e.stopPropagation()
+  const toggleStage = async () => {
     if (isLockedByOther) { alert(`Cannot stage "${file.path}" — locked by ${lock!.owner.name}`); return }
     try {
       if (file.staged) await ipc.unstage(repoPath, [file.path])
@@ -172,9 +151,7 @@ export function FileRow({
         onMouseEnter={e => { if (!selected && !isMultiSelected) e.currentTarget.style.background = '#1e2436' }}
         onMouseLeave={e => { if (!selected && !isMultiSelected) e.currentTarget.style.background = 'transparent' }}
       >
-        <button onClick={toggleStage} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
-          <Checkbox checked={file.staged} color={checkColor} />
-        </button>
+        <AppCheckbox checked={file.staged} onChange={toggleStage} color={checkColor} />
 
         {/* Status pill */}
         <span style={{
@@ -186,9 +163,8 @@ export function FileRow({
 
         {/* Asset thumbnail — clickable to open viewer */}
         {isPreviewable && thumbnail && (
-          <button
+          <AppTooltip content="Preview file" side="top" delay={250}><button
             onClick={e => { e.stopPropagation(); openViewer(repoPath, file.path) }}
-            title="Preview file"
             style={{
               width: 24, height: 24, borderRadius: 4, overflow: 'hidden', flexShrink: 0,
               border: '1px solid rgba(255,255,255,0.07)',
@@ -204,7 +180,7 @@ export function FileRow({
               alt=""
               style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
             />
-          </button>
+          </button></AppTooltip>
         )}
 
         {/* Name + dir */}
@@ -264,92 +240,42 @@ export function FileRow({
 
       {/* Context menu */}
       {ctx && (
-        <div
-          ref={ctxRef}
-          style={{
-            position: 'fixed', top: ctx.y, left: ctx.x, zIndex: 50,
-            background: '#1d2235', border: '1px solid #2f3a54',
-            borderRadius: 6, boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
-            padding: '4px 0', minWidth: 200,
-          }}
-        >
-          <CtxItem label={isUntracked ? 'Delete file…' : 'Discard changes…'} onClick={doDiscard} danger />
-          <CtxSep />
-          <CtxItem label="Ignore file"                onClick={doIgnoreFile} />
-          {dir && <CtxItem label="Ignore folder"      onClick={doIgnoreFolder} />}
-          <CtxSep />
-          <CtxItem label="Copy file path"             onClick={doCopyFullPath} />
-          <CtxItem label="Copy relative path"         onClick={doCopyRelPath} />
-          <CtxSep />
-          <CtxItem label="Show in Explorer"           onClick={doShowInExplorer} />
-          <CtxItem label="Open in VS Code"            onClick={doOpenVSCode} />
-          <CtxItem label="Open with default app"      onClick={doOpenDefault} />
-          <CtxSep />
-          {!lock && <CtxItem label="Lock file"        onClick={doLock} />}
-          {isLockedByMe && <CtxItem label="Unlock"   onClick={() => doUnlock(false)} />}
+        <AppRightSelectionOptions x={ctx.x} y={ctx.y} minWidth={200} menuRef={ctxRef}>
+          <AppRightSelectionItem label={isUntracked ? 'Delete file…' : 'Discard changes…'} onClick={doDiscard} danger />
+          <AppRightSelectionSeparator />
+          <AppRightSelectionItem label="Ignore file"                onClick={doIgnoreFile} />
+          {dir && <AppRightSelectionItem label="Ignore folder"      onClick={doIgnoreFolder} />}
+          <AppRightSelectionSeparator />
+          <AppRightSelectionItem label="Copy file path"             onClick={doCopyFullPath} />
+          <AppRightSelectionItem label="Copy relative path"         onClick={doCopyRelPath} />
+          <AppRightSelectionSeparator />
+          <AppRightSelectionItem label="Show in Explorer"           onClick={doShowInExplorer} />
+          <AppRightSelectionItem label="Open in VS Code"            onClick={doOpenVSCode} />
+          <AppRightSelectionItem label="Open with default app"      onClick={doOpenDefault} />
+          <AppRightSelectionSeparator />
+          {!lock && <AppRightSelectionItem label="Lock file"        onClick={doLock} />}
+          {isLockedByMe && <AppRightSelectionItem label="Unlock"   onClick={() => doUnlock(false)} />}
           {isLockedByOther && <>
-            <CtxItem label={`Locked by ${lock!.owner.name}`} disabled />
-            <CtxItem
+            <AppRightSelectionItem label={`Locked by ${lock!.owner.name}`} disabled />
+            <AppRightSelectionItem
               label="Force unlock…"
               onClick={isAdmin ? () => doUnlock(true) : undefined}
               disabled={!isAdmin}
               danger={isAdmin}
               title={isAdmin ? undefined : 'Admin access required'}
             />
-            <CtxItem label="Notify me when unlocked"  onClick={doWatch} />
+            <AppRightSelectionItem label="Notify me when unlocked"  onClick={doWatch} />
           </>}
           {isPreviewable && <>
-            <CtxSep />
-            <CtxItem label="Preview file" onClick={() => { close(); openViewer(repoPath, file.path) }} />
+            <AppRightSelectionSeparator />
+            <AppRightSelectionItem label="Preview file" onClick={() => { close(); openViewer(repoPath, file.path) }} />
           </>}
           {isUEAsset && onBlameDeps && <>
-            <CtxItem label="Blame with dependencies" onClick={() => { close(); onBlameDeps(file) }} />
+            <AppRightSelectionItem label="Blame with dependencies" onClick={() => { close(); onBlameDeps(file) }} />
           </>}
-        </div>
+        </AppRightSelectionOptions>
       )}
     </div>
   )
 }
 
-function CtxItem({ label, onClick, disabled, danger, title }: {
-  label: string; onClick?: () => void; disabled?: boolean; danger?: boolean; title?: string
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      style={{
-        width: '100%', textAlign: 'left', padding: '5px 12px',
-        fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12,
-        background: 'transparent', border: 'none',
-        color: disabled ? '#4e5870' : danger ? '#e84545' : '#dde1f0',
-        cursor: disabled ? 'default' : 'pointer',
-        display: 'flex', alignItems: 'center', gap: 6,
-      }}
-      onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = '#242a3d' }}
-      onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-    >
-      <span style={{ flex: 1 }}>{label}</span>
-      {disabled && title && (
-        <svg width="9" height="10" viewBox="0 0 9 10" fill="none" style={{ flexShrink: 0, opacity: 0.5 }}>
-          <rect x="0.5" y="4" width="8" height="5.5" rx="1" stroke="currentColor" strokeWidth="1" />
-          <path d="M2 4V3a2.5 2.5 0 0 1 5 0v1" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
-        </svg>
-      )}
-    </button>
-  )
-}
-
-function CtxSep() {
-  return <div style={{ margin: '4px 0', borderTop: '1px solid #252d42' }} />
-}
-
-function LockIcon({ color }: { color: string }) {
-  return (
-    <svg width="9" height="10" viewBox="0 0 9 10" fill="none" style={{ flexShrink: 0 }}>
-      <rect x="0.75" y="4.5" width="7.5" height="5" rx="1" stroke={color} strokeWidth="1" />
-      <path d="M2.5 4.5V3a2 2 0 1 1 4 0v1.5" stroke={color} strokeWidth="1" strokeLinecap="round" />
-    </svg>
-  )
-}

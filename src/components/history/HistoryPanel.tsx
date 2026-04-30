@@ -4,6 +4,9 @@ import { useOperationStore } from '@/stores/operationStore'
 import { useDialogStore } from '@/stores/dialogStore'
 import { useRepoStore } from '@/stores/repoStore'
 import { computeGraph, GraphNode, LANE_W, ROW_H, DOT_R, GRAPH_PAD, LineSegment } from './graphLayout'
+import { AppCheckbox } from '@/components/ui/AppCheckbox'
+import { AppTooltip } from '@/components/ui/AppTooltip'
+import { AppRightSelectionItem, AppRightSelectionOptions, AppRightSelectionSeparator } from '@/components/ui/AppRightSelectionOptions'
 
 function parseGitHubSlug(url: string): string | null {
   const m = url.match(/github\.com[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?$/)
@@ -119,35 +122,6 @@ function GraphCell({ node, graphColW, emphasize, branchNamesByColor }: {
 }
 
 // ── Context menu helpers ────────────────────────────────────────────────────────
-
-function CtxItem({ label, onClick, disabled, danger, title }: {
-  label: string; onClick?: () => void; disabled?: boolean; danger?: boolean; title?: string
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      style={{
-        width: '100%', textAlign: 'left', padding: '5px 12px',
-        fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12,
-        background: 'transparent', border: 'none',
-        color: disabled ? '#4e5870' : danger ? '#e84545' : '#dde1f0',
-        cursor: disabled ? 'default' : 'pointer',
-        display: 'flex', alignItems: 'center', gap: 6,
-        opacity: disabled ? 0.6 : 1,
-      }}
-      onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = '#242a3d' }}
-      onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-    >
-      <span style={{ flex: 1 }}>{label}</span>
-    </button>
-  )
-}
-
-function CtxSep() {
-  return <div style={{ margin: '4px 0', borderTop: '1px solid #252d42' }} />
-}
 
 // ── Branch tip helpers ─────────────────────────────────────────────────────────
 
@@ -426,31 +400,23 @@ function CommitRow({ node, selected, isPrimary, repoPath, remoteUrl, onRefresh, 
 
       {/* Context menu */}
       {ctx && (
-        <div
-          ref={ctxRef}
-          style={{
-            position: 'fixed', top: ctx.y, left: ctx.x, zIndex: 50,
-            background: '#1d2235', border: '1px solid #2f3a54',
-            borderRadius: 6, boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
-            padding: '4px 0', minWidth: 230,
-          }}
-        >
-          <CtxItem label="Undo commit (soft reset)"      onClick={handleUndoCommit} />
-          <CtxItem label="Reset to commit…"            onClick={handleResetTo}    danger />
-          <CtxItem label="Checkout commit"             onClick={handleCheckout} />
-          <CtxSep />
-          <CtxItem label="Revert changes in commit"    onClick={handleRevert} />
-          <CtxItem label="Create branch from commit…"  onClick={handleCreateBranch} />
-          <CtxItem label="Cherry-pick commit…"         onClick={handleCherryPick} />
-          <CtxSep />
-          <CtxItem label="Copy SHA"                    onClick={handleCopySHA} />
-          <CtxItem
+        <AppRightSelectionOptions x={ctx.x} y={ctx.y} minWidth={230} menuRef={ctxRef}>
+          <AppRightSelectionItem label="Undo commit (soft reset)"      onClick={handleUndoCommit} />
+          <AppRightSelectionItem label="Reset to commit…"            onClick={handleResetTo}    danger />
+          <AppRightSelectionItem label="Checkout commit"             onClick={handleCheckout} />
+          <AppRightSelectionSeparator />
+          <AppRightSelectionItem label="Revert changes in commit"    onClick={handleRevert} />
+          <AppRightSelectionItem label="Create branch from commit…"  onClick={handleCreateBranch} />
+          <AppRightSelectionItem label="Cherry-pick commit…"         onClick={handleCherryPick} />
+          <AppRightSelectionSeparator />
+          <AppRightSelectionItem label="Copy SHA"                    onClick={handleCopySHA} />
+          <AppRightSelectionItem
             label="View on GitHub"
             onClick={ghSlug ? handleViewOnGitHub : undefined}
             disabled={!ghSlug}
             title={ghSlug ? undefined : 'No GitHub remote detected'}
           />
-        </div>
+        </AppRightSelectionOptions>
       )}
     </div>
   )
@@ -702,31 +668,23 @@ function CommitDetail({ commit, files, filesLoading, repoPath, remoteUrl }: {
 
       {/* File context menu */}
       {ctxMenu && (
-        <div
-          ref={ctxRef}
-          style={{
-            position: 'fixed', top: ctxMenu.y, left: ctxMenu.x, zIndex: 100,
-            background: '#1d2235', border: '1px solid #2f3a54',
-            borderRadius: 6, boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
-            padding: '4px 0', minWidth: 230,
-          }}
-        >
-          <CtxItem label="Blame" onClick={() => { setBlameTarget(ctxMenu.file); closeCtx() }} />
-          <CtxSep />
-          <CtxItem label="Show in Explorer"           onClick={() => { ipc.showInFolder(absPath(ctxMenu.file)); closeCtx() }} />
-          <CtxItem label="Open in Visual Studio Code" onClick={() => { ipc.openExternal('vscode://file/' + absPath(ctxMenu.file)); closeCtx() }} />
-          <CtxItem label="Open with default program"  onClick={() => { ipc.openPath(absPath(ctxMenu.file)); closeCtx() }} />
-          <CtxSep />
-          <CtxItem label="Copy file path"          onClick={() => { navigator.clipboard.writeText(absPath(ctxMenu.file)); closeCtx() }} />
-          <CtxItem label="Copy relative file path" onClick={() => { navigator.clipboard.writeText(ctxMenu.file.path); closeCtx() }} />
-          <CtxSep />
-          <CtxItem
+        <AppRightSelectionOptions x={ctxMenu.x} y={ctxMenu.y} minWidth={230} menuRef={ctxRef}>
+          <AppRightSelectionItem label="Blame" onClick={() => { setBlameTarget(ctxMenu.file); closeCtx() }} />
+          <AppRightSelectionSeparator />
+          <AppRightSelectionItem label="Show in Explorer"           onClick={() => { ipc.showInFolder(absPath(ctxMenu.file)); closeCtx() }} />
+          <AppRightSelectionItem label="Open in Visual Studio Code" onClick={() => { ipc.openExternal('vscode://file/' + absPath(ctxMenu.file)); closeCtx() }} />
+          <AppRightSelectionItem label="Open with default program"  onClick={() => { ipc.openPath(absPath(ctxMenu.file)); closeCtx() }} />
+          <AppRightSelectionSeparator />
+          <AppRightSelectionItem label="Copy file path"          onClick={() => { navigator.clipboard.writeText(absPath(ctxMenu.file)); closeCtx() }} />
+          <AppRightSelectionItem label="Copy relative file path" onClick={() => { navigator.clipboard.writeText(ctxMenu.file.path); closeCtx() }} />
+          <AppRightSelectionSeparator />
+          <AppRightSelectionItem
             label="View on GitHub"
             onClick={ghSlug ? () => { ipc.openExternal(`https://github.com/${ghSlug}/blob/${commit.hash}/${ctxMenu.file.path}`); closeCtx() } : undefined}
             disabled={!ghSlug}
             title={ghSlug ? undefined : 'No GitHub remote detected'}
           />
-        </div>
+        </AppRightSelectionOptions>
       )}
 
       {/* Blame modal */}
@@ -939,22 +897,9 @@ function BranchDropdownRow({ branch, checked, locked, bCol, onToggle }: {
         transition: 'opacity 0.12s, background 0.1s',
       }}
     >
-      {/* Checkbox */}
-      <span style={{
-        width: 14, height: 14, borderRadius: 3, flexShrink: 0,
-        background: checked ? bCol : 'transparent',
-        border: `1.5px solid ${checked ? bCol : '#2f3a54'}`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        transition: 'all 0.12s',
-      }}>
-        {checked && (
-          <svg width="8" height="6" viewBox="0 0 8 6" fill="none">
-            <path d="M1 3L3 5L7 1" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        )}
-      </span>
+      <AppCheckbox checked={checked} onChange={onToggle} color={bCol} size={14} />
       {/* Lane color bar */}
-      <span title={`Branch lane: ${branch.name}`} style={{ width: 3, height: 16, borderRadius: 2, background: bCol, flexShrink: 0, boxShadow: hover ? `0 0 8px ${bCol}` : 'none' }} />
+      <AppTooltip content={`Branch lane: ${branch.name}`} side="top" delay={250}><span style={{ width: 3, height: 16, borderRadius: 2, background: bCol, flexShrink: 0, boxShadow: hover ? `0 0 8px ${bCol}` : 'none' }} /></AppTooltip>
       {/* Branch name */}
       <span style={{
         fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#dde1f0',
@@ -1662,28 +1607,20 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
 
       {/* Multi-select context menu */}
       {multiCtx && (
-        <div
-          ref={multiCtxRef}
-          style={{
-            position: 'fixed', top: multiCtx.y, left: multiCtx.x, zIndex: 60,
-            background: '#1d2235', border: '1px solid #2f3a54',
-            borderRadius: 6, boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
-            padding: '4px 0', minWidth: 260,
-          }}
-        >
+        <AppRightSelectionOptions x={multiCtx.x} y={multiCtx.y} minWidth={260} menuRef={multiCtxRef}>
           <div style={{ padding: '4px 12px 6px', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, fontWeight: 700, color: '#4e5870', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
             {selectedHashes.size} commits selected
           </div>
-          <CtxSep />
-          <CtxItem label={`Cherry-pick ${selectedHashes.size} commits`}    onClick={handleMultiCherryPick} />
-          <CtxItem label={`Revert ${selectedHashes.size} commits`}         onClick={handleMultiRevert}    danger />
-          <CtxSep />
-          <CtxItem label={`Stage changes from ${selectedHashes.size} commits`}  onClick={handleMultiStageChanges} />
-          <CtxItem label={`Stash changes from ${selectedHashes.size} commits`}  onClick={handleMultiStashChanges} />
-          <CtxSep />
-          <CtxItem label="Copy SHAs"     onClick={handleMultiCopySHAs} />
-          <CtxItem label="Clear selection" onClick={() => { setMultiCtx(null); setSelectedHashes(new Set()); setPrimaryCommit(null); setFiles([]) }} />
-        </div>
+          <AppRightSelectionSeparator />
+          <AppRightSelectionItem label={`Cherry-pick ${selectedHashes.size} commits`}    onClick={handleMultiCherryPick} />
+          <AppRightSelectionItem label={`Revert ${selectedHashes.size} commits`}         onClick={handleMultiRevert}    danger />
+          <AppRightSelectionSeparator />
+          <AppRightSelectionItem label={`Stage changes from ${selectedHashes.size} commits`}  onClick={handleMultiStageChanges} />
+          <AppRightSelectionItem label={`Stash changes from ${selectedHashes.size} commits`}  onClick={handleMultiStashChanges} />
+          <AppRightSelectionSeparator />
+          <AppRightSelectionItem label="Copy SHAs"     onClick={handleMultiCopySHAs} />
+          <AppRightSelectionItem label="Clear selection" onClick={() => { setMultiCtx(null); setSelectedHashes(new Set()); setPrimaryCommit(null); setFiles([]) }} />
+        </AppRightSelectionOptions>
       )}
     </div>
   )

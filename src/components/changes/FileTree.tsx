@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { FileStatus, Lock, ipc } from '@/ipc'
 import { useOperationStore } from '@/stores/operationStore'
 import { FileRow } from './FileRow'
+import { AppCheckbox } from '@/components/ui/AppCheckbox'
 import { useDialogStore } from '@/stores/dialogStore'
 import { useLockStore } from '@/stores/lockStore'
 import { useAuthStore } from '@/stores/authStore'
@@ -120,63 +121,8 @@ function SectionCheckbox({ allChecked, onToggle, color }: {
   onToggle: () => void
   color: string
 }) {
-  const [hover, setHover] = useState(false)
   return (
-    <button
-      onClick={e => { e.stopPropagation(); onToggle() }}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        width: 16, height: 16, borderRadius: 3, flexShrink: 0,
-        border: `1.5px solid ${allChecked ? color : hover ? '#2f3a54' : '#252d42'}`,
-        background: allChecked ? `${color}22` : hover ? '#242a3d' : 'transparent',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        cursor: 'pointer', transition: 'all 0.12s', padding: 0,
-      }}
-    >
-      {allChecked && (
-        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-          <polyline points="1.5,5 4,7.5 8.5,2.5"
-            stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      )}
-      {!allChecked && hover && (
-        <svg width="8" height="2" viewBox="0 0 8 2" fill="none">
-          <line x1="0" y1="1" x2="8" y2="1" stroke="#4e5870" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      )}
-    </button>
-  )
-}
-
-function SectionHeader({ label, count, allChecked, onToggleAll, color }: {
-  label: string
-  count: number
-  allChecked: boolean
-  onToggleAll: () => void
-  color: string
-}) {
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 8,
-      height: 30, paddingLeft: 10, paddingRight: 10,
-      background: '#10131c', borderBottom: '1px solid #252d42',
-      position: 'sticky', top: 0, zIndex: 5,
-    }}>
-      <SectionCheckbox allChecked={allChecked} onToggle={onToggleAll} color={color} />
-      <span style={{
-        fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, fontWeight: 600,
-        color: '#8b94b0', letterSpacing: '0.05em', textTransform: 'uppercase', flex: 1,
-      }}>
-        {label}
-        <span style={{
-          marginLeft: 6, fontFamily: "'JetBrains Mono', monospace",
-          background: '#242a3d', color: '#4e5870',
-          borderRadius: 8, paddingLeft: 5, paddingRight: 5,
-          fontSize: 10,
-        }}>{count}</span>
-      </span>
-    </div>
+    <AppCheckbox checked={allChecked} onChange={onToggle} color={color} showHoverDash />
   )
 }
 

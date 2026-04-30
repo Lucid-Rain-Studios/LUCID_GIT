@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useRepoStore } from '@/stores/repoStore'
 import { useAuthStore } from '@/stores/authStore'
-import { Tooltip } from '@/components/ui/Tooltip'
+import { AppTooltip } from '@/components/ui/AppTooltip'
+import { AppCheckbox } from '@/components/ui/AppCheckbox'
 
 export type TabId =
   | 'dashboard' | 'timeline' | 'branches'
@@ -387,20 +388,7 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
                   onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)' }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
                 >
-                  {/* Checkbox */}
-                  <div style={{
-                    width: 14, height: 14, borderRadius: 3, flexShrink: 0,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    background: visible ? 'rgba(232,98,47,0.15)' : 'transparent',
-                    border: `1.5px solid ${visible ? '#e8622f' : '#283047'}`,
-                    transition: 'all 0.1s',
-                  }}>
-                    {visible && (
-                      <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
-                        <polyline points="1,4 3,6 7,2" stroke="#e8622f" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    )}
-                  </div>
+                  <AppCheckbox checked={visible} onChange={() => toggleItemVisibility(group.key, item.id)} color="#e8622f" size={14} />
                   <span style={{ color: 'var(--lg-text-secondary)', flexShrink: 0, display: 'flex' }}>
                     <item.Icon size={13} />
                   </span>
@@ -516,7 +504,7 @@ function NavBtn({ item, isActive, collapsed, badge, disabled, onClick }: {
   )
 
   return collapsed ? (
-    <Tooltip content={item.label} side="right" delay={300}>{btn}</Tooltip>
+    <AppTooltip content={item.label} side="right" delay={300}>{btn}</AppTooltip>
   ) : btn
 }
 
@@ -566,7 +554,7 @@ function BottomBtn({ Icon, label, collapsed, disabled, onClick, active, accent }
   )
 
   return collapsed ? (
-    <Tooltip content={label} side="right" delay={300}>{btn}</Tooltip>
+    <AppTooltip content={label} side="right" delay={300}>{btn}</AppTooltip>
   ) : btn
 }
 
