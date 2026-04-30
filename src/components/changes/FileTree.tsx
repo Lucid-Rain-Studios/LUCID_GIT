@@ -116,6 +116,34 @@ interface FileTreeProps {
   onBlameDeps?: (file: FileStatus) => void
 }
 
+
+function SectionHeader({
+  label,
+  count,
+  allChecked,
+  onToggleAll,
+  color,
+}: {
+  label: string
+  count: number
+  allChecked: boolean
+  onToggleAll: () => void
+  color: string
+}) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8,
+      height: 26, padding: '0 10px',
+      background: '#131a2b', borderTop: '1px solid #252d42', borderBottom: '1px solid #252d42',
+    }}>
+      <SectionCheckbox allChecked={allChecked} onToggle={onToggleAll} color={color} />
+      <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#8b94b0', textTransform: 'uppercase', letterSpacing: 0.5, flex: 1 }}>
+        {label}
+      </span>
+      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#4e5870' }}>{count}</span>
+    </div>
+  )
+}
 function SectionCheckbox({ allChecked, onToggle, color }: {
   allChecked: boolean
   onToggle: () => void
