@@ -143,7 +143,9 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): 
 export function gitAuthArgs(token: string | null): string[] {
   if (!token) return []
   const b64 = Buffer.from(`x-access-token:${token}`).toString('base64')
-  return ['-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${b64}`]
+  // Apply auth header generically so it works for GitHub.com, GitHub Enterprise,
+  // and any HTTPS remote URL that requires token auth.
+  return ['-c', `http.extraheader=AUTHORIZATION: basic ${b64}`]
 }
 
 // ── execSafe (never throws — returns exitCode instead) ────────────────────────

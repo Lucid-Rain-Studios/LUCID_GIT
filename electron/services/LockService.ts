@@ -66,8 +66,14 @@ class LockService {
   async unlockFile(repoPath: string, filePath: string, force = false, lockId?: string, actorLogin = '', actorName = ''): Promise<void> {
     const normalized = filePath.replace(/\\/g, '/')
     const token = await authService.getCurrentToken()
-    // Prefer --id when available: works even when the file no longer exists on disk (ghost file)
-    const pathArgs = lockId ? ['--id', lockId] : [normalized]
+    // Prefer --id when available: works even when the file no longer exists on disk (ghost file).
+    // If the caller did not provide a lockId, resolve one from current LFS locks.
+    let resolvedLockId = lockId
+    if (!resolvedLockId) {
+      const locks = await this.listLocks(repoPath)
+      resolvedLockId = locks.find(l => l.path === normalized)?.id
+    }
+    const pathArgs = resolvedLockId ? ['--id', resolvedLockId] : [normalized]
     const args = [...gitAuthArgs(token), 'lfs', 'unlock', ...pathArgs]
     if (force) args.push('--force')
     await exec(args, repoPath)
