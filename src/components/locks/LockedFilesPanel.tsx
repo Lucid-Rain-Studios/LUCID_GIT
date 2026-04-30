@@ -44,6 +44,8 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
   const [unlocking, setUnlocking] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [collapsedOwners, setCollapsedOwners] = useState<Set<string>>(new Set())
+  const [selectedLockIds, setSelectedLockIds] = useState<Set<string>>(new Set())
+  const lastSelectedIndexRef = useRef<number | null>(null)
 
   const myLocks   = locks.filter(l => currentLogin && l.owner.login === currentLogin)
   const teamLocks = locks.filter(l => !currentLogin || l.owner.login !== currentLogin)
@@ -56,6 +58,12 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
         l.owner.name.toLowerCase().includes(search.toLowerCase())
       )
     : source
+
+  const selectableLocks = filtered.filter(lock => {
+    const isOwn = currentLogin && lock.owner.login === currentLogin
+    return Boolean(isOwn || isAdmin)
+  })
+  const selectedLocks = selectableLocks.filter(lock => selectedLockIds.has(lock.id))
 
   // Group team locks by owner
   const ownerGroups: { login: string; name: string; locks: typeof teamLocks }[] = []
@@ -83,6 +91,52 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
     setRefreshing(true)
     try { await loadLocks(repoPath) } finally { setRefreshing(false) }
   }, [repoPath, loadLocks])
+
+  const toggleLockSelection = (lock: Lock, index: number, shiftKey: boolean) => {
+    setSelectedLockIds(prev => {
+      const next = new Set(prev)
+      if (shiftKey && lastSelectedIndexRef.current !== null) {
+        const start = Math.min(lastSelectedIndexRef.current, index)
+        const end = Math.max(lastSelectedIndexRef.current, index)
+        const inRange = selectableLocks.slice(start, end + 1)
+        const shouldSelectRange = !next.has(lock.id)
+        for (const item of inRange) {
+          shouldSelectRange ? next.add(item.id) : next.delete(item.id)
+        }
+      } else {
+        next.has(lock.id) ? next.delete(lock.id) : next.add(lock.id)
+      }
+      return next
+    })
+    lastSelectedIndexRef.current = index
+  }
+
+  const doBulkUnlock = async () => {
+    if (selectedLocks.length === 0) return
+    const hasForce = selectedLocks.some(lock => !currentLogin || lock.owner.login !== currentLogin)
+    if (hasForce) {
+      const ok = await dialog.confirm({
+        title: 'Force unlock selected files',
+        message: `Force-unlock ${selectedLocks.length} selected file${selectedLocks.length === 1 ? '' : 's'}?`,
+        detail: 'This includes files owned by other users.',
+        confirmLabel: 'Force Unlock',
+        danger: true,
+      })
+      if (!ok) return
+    }
+    setUnlocking('__bulk__')
+    try {
+      for (const lock of selectedLocks) {
+        const force = !currentLogin || lock.owner.login !== currentLogin
+        await unlockFile(repoPath, lock.path, force)
+      }
+      setSelectedLockIds(new Set())
+    } catch (e) {
+      await dialog.alert({ title: 'Error', message: String(e) })
+    } finally {
+      setUnlocking(null)
+    }
+  }
 
   const doUnlock = async (lock: Lock, force: boolean) => {
     if (force) {
@@ -225,6 +279,24 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
           )}
         </div>
       </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 24px 0', flexShrink: 0 }}>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#4a566a' }}>
+          {selectedLocks.length} selected · Shift+Click to multi-select
+        </div>
+        <button
+          onClick={doBulkUnlock}
+          disabled={selectedLocks.length === 0 || unlocking === '__bulk__'}
+          style={{
+            height: 26, padding: '0 12px', borderRadius: 5, flexShrink: 0,
+            background: 'transparent', border: '1px solid rgba(74,158,255,0.3)', color: '#4a9eff',
+            fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, fontWeight: 600,
+            cursor: selectedLocks.length === 0 || unlocking === '__bulk__' ? 'default' : 'pointer',
+            opacity: selectedLocks.length === 0 || unlocking === '__bulk__' ? 0.45 : 1,
+          }}
+        >
+          {unlocking === '__bulk__' ? 'Unlocking…' : 'Unlock Selected'}
+        </button>
+      </div>
 
       {/* ── Stats bar ── */}
       <div style={{ display: 'flex', gap: 16, padding: '12px 24px 0', flexShrink: 0 }}>
@@ -249,7 +321,7 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
           />
         ) : tab === 'mine' ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {filtered.map(lock => (
+            {filtered.map((lock, index) => (
               <LockRow
                 key={lock.id}
                 lock={lock}
@@ -257,7 +329,9 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
                 currentLogin={currentLogin}
                 isAdmin={isAdmin}
                 unlocking={unlocking}
+                selected={selectedLockIds.has(lock.id)}
                 onUnlock={doUnlock}
+                onSelect={(shiftKey) => toggleLockSelection(lock, index, shiftKey)}
                 onCopyPath={doCopyPath}
                 onShowInExplorer={doShowInExplorer}
               />
@@ -334,7 +408,12 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
                           currentLogin={currentLogin}
                           isAdmin={isAdmin}
                           unlocking={unlocking}
+                          selected={selectedLockIds.has(lock.id)}
                           onUnlock={doUnlock}
+                          onSelect={(shiftKey) => {
+                            const index = selectableLocks.findIndex(item => item.id === lock.id)
+                            if (index >= 0) toggleLockSelection(lock, index, shiftKey)
+                          }}
                           onCopyPath={doCopyPath}
                           onShowInExplorer={doShowInExplorer}
                         />
@@ -355,14 +434,16 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
 
 function LockRow({
   lock, repoPath, currentLogin, isAdmin, unlocking,
-  onUnlock, onCopyPath, onShowInExplorer,
+  selected, onUnlock, onSelect, onCopyPath, onShowInExplorer,
 }: {
   lock: Lock
   repoPath: string
   currentLogin: string | null
   isAdmin: boolean
   unlocking: string | null
+  selected: boolean
   onUnlock: (lock: Lock, force: boolean) => void
+  onSelect: (shiftKey: boolean) => void
   onCopyPath: (lock: Lock) => void
   onShowInExplorer: (lock: Lock) => void
 }) {
@@ -386,16 +467,25 @@ function LockRow({
     <div
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => { setHover(false); setMenuOpen(false) }}
+      onClick={(e) => {
+        if ((e.target as HTMLElement).closest('button')) return
+        onSelect(e.shiftKey)
+      }}
       style={{
         display: 'flex', alignItems: 'center', gap: 12,
         padding: '10px 14px', borderRadius: 8,
         background: hover ? '#131720' : 'rgba(19,23,32,0.5)',
-        border: `1px solid ${isOwn ? 'rgba(74,158,255,0.15)' : '#1a2030'}`,
+        border: `1px solid ${selected ? 'rgba(74,158,255,0.5)' : isOwn ? 'rgba(74,158,255,0.15)' : '#1a2030'}`,
         transition: 'all 0.1s', cursor: 'default',
         position: 'relative',
       }}
     >
       {/* Avatar */}
+      <div style={{
+        width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+        border: selected ? '1px solid #4a9eff' : '1px solid #344057',
+        background: selected ? 'rgba(74,158,255,0.25)' : 'transparent',
+      }} />
       <div style={{
         width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
         background: `${color}18`, border: `1.5px solid ${color}44`,
