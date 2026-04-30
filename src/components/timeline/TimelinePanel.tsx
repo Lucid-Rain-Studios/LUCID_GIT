@@ -1400,6 +1400,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     const maxLane = nodes.reduce((m, n) => Math.max(m, n.maxLane), 0)
     return GRAPH_PAD + (maxLane + 1) * LANE_W + GRAPH_PAD
   }, [nodes])
+  const minLeftWidth = React.useMemo(() => Math.max(320, graphColW + 190), [graphColW])
 
   const branchNames = React.useMemo(
     () => branches.map(b => b.name),
@@ -1467,6 +1468,10 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   const dragStartX = useRef(0)
   const dragStartW = useRef(0)
 
+  useEffect(() => {
+    setLeftWidth(w => Math.max(w, minLeftWidth))
+  }, [minLeftWidth])
+
   const makeDragStart = useCallback((which: 'left' | 'center', currentW: number) => (e: React.MouseEvent) => {
     dragging.current   = which
     dragStartX.current = e.clientX
@@ -1477,7 +1482,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
       if (!dragging.current) return
       const delta = ev.clientX - dragStartX.current
       const w = Math.max(240, Math.min(520, dragStartW.current + delta))
-      if (which === 'left') setLeftWidth(w)
+      if (which === 'left') setLeftWidth(Math.max(w, minLeftWidth))
       else setCenterWidth(w)
     }
     const onUp = () => {
@@ -1489,7 +1494,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
-  }, [])
+  }, [minLeftWidth])
 
   // ── Load history ───────────────────────────────────────────────────────────
   const loadHistory = useCallback(async (limit: number, branches?: Set<string>) => {
