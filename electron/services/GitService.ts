@@ -147,7 +147,39 @@ class GitService {
   /** Pull current branch. Streams progress. */
   async pull(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
     const token = await authService.getCurrentToken()
-    await execWithProgress([...gitAuthArgs(token), 'pull', '--progress'], repoPath, onProgress)
+    try {
+      await execWithProgress([...gitAuthArgs(token), 'pull', '--progress'], repoPath, onProgress)
+    } catch (error) {
+      if (!this.shouldRunLfsRecovery(error)) throw error
+      await this.recoverLfsAndMergeState(repoPath)
+      await execWithProgress([...gitAuthArgs(token), 'pull', '--progress'], repoPath, onProgress)
+    }
+  }
+
+
+  private shouldRunLfsRecovery(error: unknown): boolean {
+    const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
+    return (
+      message.includes('smudge filter lfs failed') ||
+      message.includes('batch response: bad credentials') ||
+      message.includes('unable to write index')
+    )
+  }
+
+  private async recoverLfsAndMergeState(repoPath: string): Promise<void> {
+    await execSafe(['lfs', 'uninstall'], repoPath)
+    await execSafe(['lfs', 'install'], repoPath)
+    await execSafe(['merge', '--abort'], repoPath)
+
+    const gitDirRes = await execSafe(['rev-parse', '--git-dir'], repoPath)
+    if (gitDirRes.exitCode !== 0) return
+    const gitDir = path.resolve(repoPath, gitDirRes.stdout.trim())
+    const lockPath = path.join(gitDir, 'index.lock')
+    try {
+      await fs.promises.rm(lockPath, { force: true })
+    } catch {
+      // best-effort cleanup
+    }
   }
 
   /** Fetch all remotes. Streams progress. */
