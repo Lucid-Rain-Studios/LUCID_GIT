@@ -5,6 +5,7 @@ import { useRepoStore } from '@/stores/repoStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useOperationStore } from '@/stores/operationStore'
 import { useErrorStore } from '@/stores/errorStore'
+import { usePRStore } from '@/stores/prStore'
 import { NotificationBell } from '@/components/notifications/NotificationBell'
 import { markFetchPerformed } from '@/lib/fetchState'
 
@@ -18,11 +19,20 @@ interface TopBarProps {
 const CONFIRM_BRANCH_KEY = 'lucid-git:confirm-branch-switch'
 const sessionTopBarFetched = new Set<string>()
 
+function parseGitHubSlug(url: string): string | null {
+  const m1 = url.match(/^git@github\.com:([^/]+)\/(.+?)(?:\.git)?$/)
+  if (m1) return `${m1[1]}/${m1[2]}`
+  const m2 = url.match(/^https?:\/\/github\.com\/([^/]+)\/(.+?)(?:\.git)?$/)
+  if (m2) return `${m2[1]}/${m2[2]}`
+  return null
+}
+
 export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps) {
   const { repoPath, currentBranch, refreshStatus, recentRepos, openRepo, removeRecentRepo, clearRepo, branches, checkout, fileStatus, syncTick } = useRepoStore()
   const { accounts, currentAccountId, permissionErrors, fetchRepoPermission, viewAsRole, setViewAsRole } = useAuthStore()
   const opRun   = useOperationStore(s => s.run)
   const pushErr = useErrorStore(s => s.pushRaw)
+  const openPRDialog = usePRStore(s => s.openDialog)
 
   const [sync, setSync]       = useState<SyncStatus | null>(null)
   const [syncOp, setSyncOp]   = useState<'idle' | 'fetching' | 'pulling' | 'pushing'>('idle')
@@ -31,6 +41,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
   const [defaultBranch, setDefaultBranch] = useState<string>('main')
   const [hasFetched, setHasFetched] = useState(() => repoPath ? sessionTopBarFetched.has(repoPath) : false)
   const [isMaximized, setIsMaximized] = useState(false)
+  const [remoteUrl, setRemoteUrl] = useState<string | null>(null)
   const [repoMenuOpen, setRepoMenuOpen] = useState(false)
   const [branchMenuOpen, setBranchMenuOpen] = useState(false)
   const [branchConfirm, setBranchConfirm] = useState<string | null>(null)
@@ -78,6 +89,11 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
   }, [repoPath])
 
   useEffect(() => {
+    if (!repoPath) { setRemoteUrl(null); return }
+    ipc.getRemoteUrl(repoPath).then(setRemoteUrl).catch(() => setRemoteUrl(null))
+  }, [repoPath])
+
+  useEffect(() => {
     const unsubAvail = ipc.onUpdateAvailable((info: UpdateInfo) => { setUpdateInfo(info); setUpdateDismissed(false) })
     const unsubReady = ipc.onUpdateReady(() => { setUpdateReady(true); setDownloading(false) })
     return () => { unsubAvail(); unsubReady() }
@@ -111,6 +127,8 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
   const isIdle    = syncOp === 'idle'
   const hasBehind = (sync?.behind ?? 0) > 0
   const hasAhead  = (sync?.ahead  ?? 0) > 0
+  const ghSlug = remoteUrl ? parseGitHubSlug(remoteUrl) : null
+  const canCreatePR = !!repoPath && !!ghSlug && !!currentBranch && isIdle && (sync?.ahead ?? 0) === 0
 
   const doFetch = async () => {
     if (!repoPath || syncOp !== 'idle') return
@@ -503,6 +521,22 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
               error={false}
               disabled={!isIdle}
               onClick={doPush}
+            />
+          )}
+
+          {repoPath && (
+            <SyncBtn
+              label="Create PR"
+              icon={<PullRequestIcon />}
+              count={0}
+              countColor="#a78bfa"
+              active={canCreatePR}
+              error={false}
+              disabled={!canCreatePR}
+              onClick={() => {
+                if (!repoPath || !remoteUrl || !currentBranch || !canCreatePR) return
+                openPRDialog(repoPath, currentBranch, remoteUrl)
+              }}
             />
           )}
 
@@ -1281,6 +1315,17 @@ function ArrowUp() {
   return (
     <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
       <path d="M6 9.5V2.5M3 5L6 2L9 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function PullRequestIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+      <circle cx="4" cy="3.5" r="1.7" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="12" cy="12.5" r="1.7" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="4" cy="12.5" r="1.7" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M4 5.2v4.9M5.7 4.1h2.6c1.8 0 3.2 1.4 3.2 3.2v2.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
   )
 }
