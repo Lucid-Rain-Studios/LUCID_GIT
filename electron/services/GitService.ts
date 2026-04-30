@@ -272,18 +272,17 @@ class GitService {
     }
   }
 
-  /** Fetch origin then merge origin/main (or origin/master) into HEAD. */
+  /** Fetch origin then merge origin/main into HEAD. */
   async updateFromMain(repoPath: string): Promise<void> {
     const token = await authService.getCurrentToken()
     await execSafe([...gitAuthArgs(token), 'fetch', 'origin'], repoPath)
-    for (const branch of ['origin/main', 'origin/master']) {
-      const check = await execSafe(['rev-parse', '--verify', branch], repoPath)
-      if (check.exitCode === 0) {
-        await exec(['merge', branch], repoPath)
-        return
-      }
+
+    const check = await execSafe(['rev-parse', '--verify', 'origin/main'], repoPath)
+    if (check.exitCode !== 0) {
+      throw new Error('Could not find origin/main')
     }
-    throw new Error('Could not find origin/main or origin/master')
+
+    await exec(['merge', 'origin/main'], repoPath)
   }
 
   /** git log with parsed output. Pass filePath to filter to a single file, or refs to limit to specific branches. */
@@ -302,13 +301,13 @@ class GitService {
     return parseGitLog(stdout)
   }
 
-  /** Returns the name of the default branch (main or master). */
+  /** Returns the preferred branch label for update UX. */
   async defaultBranch(repoPath: string): Promise<string> {
     for (const name of ['main', 'master']) {
       const r = await execSafe(['rev-parse', '--verify', name], repoPath)
       if (r.exitCode === 0) return name
     }
-    return 'HEAD'
+    return 'main'
   }
 
   /** Per-branch activity: last committer + timestamp for each local + remote branch. */
