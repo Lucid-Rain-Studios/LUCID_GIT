@@ -1450,6 +1450,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     try { return localStorage.getItem(STASH_KEY) === '1' } catch { return false }
   })
   const [syncStatus,  setSyncStatus]  = useState<{ ahead: number; behind: number } | null>(null)
+  const [prReadyCommits, setPrReadyCommits] = useState<CommitEntry[]>([])
 
   // ── Center column — commit files ───────────────────────────────────────────
   const [commitFiles,   setCommitFiles]   = useState<CommitFileChange[]>([])
@@ -1545,6 +1546,18 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
       .catch(() => { if (!cancelled) setSyncStatus(null) })
     return () => { cancelled = true }
   }, [repoPath, historyTick])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!defaultBranch) {
+      setPrReadyCommits([])
+      return () => { cancelled = true }
+    }
+    ipc.log(repoPath, { limit: 30, all: false, refs: [`${defaultBranch}..HEAD`] })
+      .then(commits => { if (!cancelled) setPrReadyCommits(commits) })
+      .catch(() => { if (!cancelled) setPrReadyCommits([]) })
+    return () => { cancelled = true }
+  }, [repoPath, defaultBranch, historyTick])
 
   const stagedCount = fileStatus.filter(f => f.staged).length
   const unstagedCount = fileStatus.length - stagedCount
@@ -1689,6 +1702,50 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
             onMouseEnter={e => { if (!histLoading) e.currentTarget.style.color = '#e8622f' }}
             onMouseLeave={e => { if (!histLoading) e.currentTarget.style.color = '#3a4260' }}
           >{histLoading ? '…' : '↺'}</button>
+        </div>
+
+        <div style={{ padding: '8px 10px', borderBottom: '1px solid #1e2436', background: '#0b0e16' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: '#8b96b8', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+              Ready for PR
+            </span>
+            <span style={{ fontSize: 11, color: prReadyCommits.length ? '#2ec573' : '#59607a', fontWeight: 700 }}>
+              {prReadyCommits.length}
+            </span>
+          </div>
+          {prReadyCommits.length === 0 ? (
+            <div style={{ fontSize: 11, color: '#59607a' }}>No commits ahead of {defaultBranch}.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 92, overflow: 'auto', paddingRight: 2 }}>
+              {prReadyCommits.slice(0, 4).map(c => (
+                <button
+                  key={c.hash}
+                  onClick={() => selectCommit(c)}
+                  style={{
+                    all: 'unset',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    gap: 6,
+                    alignItems: 'center',
+                    color: '#bcc5e1',
+                    fontSize: 11,
+                  }}
+                  title={c.message}
+                >
+                  <span style={{ color: '#4d9dff', fontFamily: 'monospace', fontSize: 10 }}>{c.hash.slice(0, 7)}</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.message}</span>
+                </button>
+              ))}
+              {prReadyCommits.length > 4 && (
+                <div style={{ fontSize: 10, color: '#59607a' }}>+{prReadyCommits.length - 4} more commits</div>
+              )}
+            </div>
+          )}
+          {syncStatus && (
+            <div style={{ marginTop: 6, fontSize: 10, color: '#59607a' }}>
+              Upstream: {syncStatus.ahead} ahead / {syncStatus.behind} behind
+            </div>
+          )}
         </div>
 
         {/* Working tree — pinned above commit list */}
