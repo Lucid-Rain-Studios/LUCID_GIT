@@ -75,7 +75,7 @@ function fileStatusLabel(f: FileStatus): { char: string; color: string } {
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
-  const { currentBranch, fileStatus, syncTick } = useRepoStore()
+  const { currentBranch, fileStatus, syncTick, bumpHistoryTick } = useRepoStore()
   const { accounts, currentAccountId } = useAuthStore()
   const isAdmin = useAuthStore(s => s.isAdmin(repoPath))
   const opRun = useOperationStore(s => s.run)
@@ -141,6 +141,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
       sessionFetchedRepos.add(repoPath)
       setHasFetched(true)
       await loadSync()
+      bumpHistoryTick()
     } finally { setBusy(null) }
   }
 
@@ -152,6 +153,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
       localStorage.setItem(LAST_PULL_KEY(repoPath), String(now))
       setLastPull(now)
       await loadSync()
+      bumpHistoryTick()
     } finally { setBusy(null) }
   }
 
@@ -160,6 +162,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
     try {
       await opRun('Pushing…', () => ipc.push(repoPath))
       await loadSync()
+      bumpHistoryTick()
     } finally { setBusy(null) }
   }
 
@@ -772,6 +775,8 @@ function PRsCard({ ghSlug }: { ghSlug: string }) {
   const [prs, setPrs] = useState<PullRequest[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const prTick = useRepoStore(s => s.prTick)
+  const prTickRef = useRef(prTick)
 
   const load = useCallback(async () => {
     const [owner, repo] = ghSlug.split('/')
@@ -787,6 +792,12 @@ function PRsCard({ ghSlug }: { ghSlug: string }) {
   }, [ghSlug])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (prTick === prTickRef.current) return
+    prTickRef.current = prTick
+    load()
+  }, [prTick, load])
 
   return (
     <div style={{ marginTop: 14 }}>

@@ -384,9 +384,11 @@ class GitService {
     await exec(args, repoPath)
   }
 
-  /** Cherry-pick a commit onto HEAD. */
-  async cherryPick(repoPath: string, hash: string): Promise<void> {
-    await exec(['cherry-pick', hash], repoPath)
+  /** Cherry-pick a commit onto HEAD. noCommit=true stages changes without creating a commit. */
+  async cherryPick(repoPath: string, hash: string, noCommit = false): Promise<void> {
+    const args = ['cherry-pick', hash]
+    if (noCommit) args.push('--no-commit')
+    await exec(args, repoPath)
   }
 
   /** Reset HEAD to a given commit with the specified mode. */

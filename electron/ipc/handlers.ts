@@ -505,8 +505,8 @@ export function registerHandlers(): void {
     gitService.revert(repoPath, hash, noCommit)
   )
 
-  ipcMain.handle(CHANNELS.GIT_CHERRY_PICK, (_event, repoPath: string, hash: string) =>
-    gitService.cherryPick(repoPath, hash)
+  ipcMain.handle(CHANNELS.GIT_CHERRY_PICK, (_event, repoPath: string, hash: string, noCommit?: boolean) =>
+    gitService.cherryPick(repoPath, hash, noCommit)
   )
 
   ipcMain.handle(CHANNELS.GIT_RESET_TO, async (_event, repoPath: string, hash: string, mode: 'soft' | 'mixed' | 'hard') => {

@@ -1096,7 +1096,7 @@ const STASH_KEY = 'lucid-git:timeline-stash-open'
 
 export function TimelinePanel({ repoPath }: { repoPath: string }) {
   const opRun        = useOperationStore(s => s.run)
-  const { fileStatus, isLoading, refreshStatus, bumpSyncTick } = useRepoStore()
+  const { fileStatus, isLoading, refreshStatus, bumpSyncTick, historyTick } = useRepoStore()
   const { locks }    = useLockStore()
   const { accounts, currentAccountId } = useAuthStore()
   const currentUserName = accounts.find(a => a.userId === currentAccountId)?.login ?? null
@@ -1197,6 +1197,16 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     }).catch(() => {})
     loadHistory(INITIAL_LIMIT, new Set())
   }, [repoPath])
+
+  // ── Refresh history when a git operation changes HEAD (fetch, pull, push, checkout, merge, commit) ──
+  const historyTickRef   = useRef(historyTick)
+  const loadHistoryRef   = useRef(loadHistory)
+  useEffect(() => { loadHistoryRef.current = loadHistory }, [loadHistory])
+  useEffect(() => {
+    if (historyTick === historyTickRef.current) return
+    historyTickRef.current = historyTick
+    loadHistoryRef.current(limitRef.current)
+  }, [historyTick])
 
   // ── Select left item ───────────────────────────────────────────────────────
   const selectWorkingTree = () => {

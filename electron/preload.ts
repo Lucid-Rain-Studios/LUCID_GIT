@@ -231,8 +231,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GIT_RESTORE_FILE, repoPath, filePath, fromHash),
   gitRevert: (repoPath: string, hash: string, noCommit: boolean) =>
     ipcRenderer.invoke(CHANNELS.GIT_REVERT, repoPath, hash, noCommit),
-  gitCherryPick: (repoPath: string, hash: string) =>
-    ipcRenderer.invoke(CHANNELS.GIT_CHERRY_PICK, repoPath, hash),
+  gitCherryPick: (repoPath: string, hash: string, noCommit?: boolean) =>
+    ipcRenderer.invoke(CHANNELS.GIT_CHERRY_PICK, repoPath, hash, noCommit),
   gitResetTo: (repoPath: string, hash: string, mode: 'soft' | 'mixed' | 'hard') =>
     ipcRenderer.invoke(CHANNELS.GIT_RESET_TO, repoPath, hash, mode),
   gitLsFiles: (repoPath: string) =>

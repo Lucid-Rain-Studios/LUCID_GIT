@@ -22,7 +22,11 @@ interface RepoState {
   error: string | null
   recentRepos: string[]
   syncTick: number
+  historyTick: number  // bumped when commit history may have changed (fetch, pull, push, checkout, merges, commits)
+  prTick: number       // bumped when PR list may have changed (create, merge, close)
   bumpSyncTick: () => void
+  bumpHistoryTick: () => void
+  bumpPrTick: () => void
 
   openRepo: (path: string) => Promise<void>
   refreshStatus: () => Promise<void>
@@ -44,6 +48,8 @@ export const useRepoStore = create<RepoState>((set, get) => ({
   error: null,
   recentRepos: loadRecentRepos(),
   syncTick: 0,
+  historyTick: 0,
+  prTick: 0,
 
   openRepo: async (path: string) => {
     set({ isLoading: true, error: null })
@@ -125,11 +131,13 @@ export const useRepoStore = create<RepoState>((set, get) => ({
         window.lucidGit.status(repoPath),
         window.lucidGit.currentBranch(repoPath),
       ])
-      set({ currentBranch, fileStatus: status ?? [] })
+      set(s => ({ currentBranch, fileStatus: status ?? [], historyTick: s.historyTick + 1 }))
     })
   },
 
-  bumpSyncTick: () => set(s => ({ syncTick: s.syncTick + 1 })),
+  bumpSyncTick:    () => set(s => ({ syncTick: s.syncTick + 1, historyTick: s.historyTick + 1 })),
+  bumpHistoryTick: () => set(s => ({ historyTick: s.historyTick + 1 })),
+  bumpPrTick:      () => set(s => ({ prTick: s.prTick + 1 })),
 
   clearRepo: () => set({ repoPath: null, fileStatus: [], currentBranch: '', branches: [], error: null }),
 

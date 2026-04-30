@@ -98,13 +98,15 @@ function CtxSep() {
 
 // ── Commit row ─────────────────────────────────────────────────────────────────
 
-function CommitRow({ node, selected, repoPath, remoteUrl, onRefresh, onClick }: {
+function CommitRow({ node, selected, isPrimary, repoPath, remoteUrl, onRefresh, onClick, onMultiContextMenu }: {
   node: GraphNode
-  selected: boolean
+  selected: boolean     // in the selected set (highlighted)
+  isPrimary: boolean    // the one commit whose details show on the right
   repoPath: string
   remoteUrl: string | null
   onRefresh: () => void
-  onClick: () => void
+  onClick: (e: React.MouseEvent) => void
+  onMultiContextMenu?: (e: React.MouseEvent) => void
 }) {
   const { commit } = node
   const [hover, setHover] = useState(false)
@@ -246,13 +248,20 @@ function CommitRow({ node, selected, repoPath, remoteUrl, onRefresh, onClick }: 
     <div style={{ position: 'relative' }}>
       <div
         onClick={onClick}
-        onContextMenu={e => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY }) }}
+        onContextMenu={e => {
+          e.preventDefault()
+          if (onMultiContextMenu) {
+            onMultiContextMenu(e)
+          } else {
+            setCtx({ x: e.clientX, y: e.clientY })
+          }
+        }}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
         style={{
           display: 'flex', alignItems: 'center', height: ROW_H,
-          background: selected ? '#242a3d' : hover ? '#1e2436' : 'transparent',
-          borderLeft: `2px solid ${selected ? '#e8622f' : 'transparent'}`,
+          background: isPrimary ? '#242a3d' : selected ? '#1c2236' : hover ? '#1e2436' : 'transparent',
+          borderLeft: `2px solid ${isPrimary ? '#e8622f' : selected ? 'rgba(232,98,47,0.4)' : 'transparent'}`,
           borderBottom: '1px solid #252d42',
           cursor: 'pointer', transition: 'background 0.1s',
         }}
@@ -267,7 +276,7 @@ function CommitRow({ node, selected, repoPath, remoteUrl, onRefresh, onClick }: 
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
             <span style={{
               fontFamily: "'IBM Plex Sans', system-ui", fontSize: 13,
-              fontWeight: selected ? 600 : 400, color: '#dde1f0',
+              fontWeight: isPrimary ? 600 : 400, color: selected ? '#dde1f0' : '#b0b8cc',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
             }}>{commit.message}</span>
             {isMerge && (
@@ -847,7 +856,9 @@ const INITIAL_LIMIT  = 300
 const MORE_INCREMENT = 300
 
 export function HistoryPanel({ repoPath }: HistoryPanelProps) {
-  const opRun = useOperationStore(s => s.run)
+  const opRun        = useOperationStore(s => s.run)
+  const dialog       = useDialogStore()
+  const { historyTick, bumpSyncTick } = useRepoStore()
 
   const [activeTab,    setActiveTab]    = useState<'commits' | 'stashes'>('commits')
   const [nodes,        setNodes]        = useState<GraphNode[]>([])
@@ -856,9 +867,38 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
   const [limitRef]                      = useState({ current: INITIAL_LIMIT })
   const [remoteUrl,    setRemoteUrl]    = useState<string | null>(null)
 
-  const [selected,     setSelected]     = useState<CommitEntry | null>(null)
-  const [files,        setFiles]        = useState<CommitFileChange[]>([])
-  const [filesLoading, setFilesLoading] = useState(false)
+  // ── Selection (single primary + multi-select set) ────────────────────────────
+  const [selectedHashes, setSelectedHashes] = useState<Set<string>>(new Set())
+  const [primaryCommit,  setPrimaryCommit]  = useState<CommitEntry | null>(null)
+  const [lastClickedIdx, setLastClickedIdx] = useState<number | null>(null)
+  const [files,          setFiles]          = useState<CommitFileChange[]>([])
+  const [filesLoading,   setFilesLoading]   = useState(false)
+
+  // ── Multi-select context menu ────────────────────────────────────────────────
+  const [multiCtx,  setMultiCtx]  = useState<{ x: number; y: number } | null>(null)
+  const multiCtxRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!multiCtx) return
+    const handler = (e: MouseEvent) => {
+      if (multiCtxRef.current && !multiCtxRef.current.contains(e.target as Node)) setMultiCtx(null)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [multiCtx])
+
+  // Escape clears multi-selection
+  useEffect(() => {
+    if (selectedHashes.size < 2) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelectedHashes(new Set(primaryCommit ? [primaryCommit.hash] : []))
+        setMultiCtx(null)
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [selectedHashes, primaryCommit])
 
   // ── Branch filter ────────────────────────────────────────────────────────────
   const [branches,       setBranches]       = useState<BranchInfo[]>([])
@@ -925,10 +965,11 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
 
   useEffect(() => {
     limitRef.current = INITIAL_LIMIT
-    setSelected(null)
+    setSelectedHashes(new Set())
+    setPrimaryCommit(null)
+    setLastClickedIdx(null)
     setFiles([])
     ipc.getRemoteUrl(repoPath).then(setRemoteUrl).catch(() => {})
-    // Load branches + default branch
     Promise.all([
       ipc.branchList(repoPath),
       ipc.gitDefaultBranch(repoPath),
@@ -938,6 +979,16 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
     }).catch(() => {})
     loadHistory(INITIAL_LIMIT, new Set())
   }, [repoPath])
+
+  // ── Refresh history when a git op changes HEAD (fetch, pull, push, checkout, etc.) ──
+  const historyTickRef  = useRef(historyTick)
+  const loadHistoryRef  = useRef(loadHistory)
+  useEffect(() => { loadHistoryRef.current = loadHistory }, [loadHistory])
+  useEffect(() => {
+    if (historyTick === historyTickRef.current) return
+    historyTickRef.current = historyTick
+    loadHistoryRef.current(limitRef.current)
+  }, [historyTick])
 
   const handleLoadMore = () => {
     limitRef.current += MORE_INCREMENT
@@ -953,9 +1004,9 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
     loadHistory(INITIAL_LIMIT, next)
   }
 
-  const handleSelect = async (commit: CommitEntry) => {
-    if (selected?.hash === commit.hash) return
-    setSelected(commit)
+  // Load files for whichever commit is the primary (detail panel)
+  const loadPrimary = useCallback(async (commit: CommitEntry) => {
+    setPrimaryCommit(commit)
     setFiles([])
     setFilesLoading(true)
     try {
@@ -965,6 +1016,122 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
     } finally {
       setFilesLoading(false)
     }
+  }, [repoPath])
+
+  // Click handler — supports single click, Ctrl+click (toggle), Shift+click (range)
+  const handleCommitClick = useCallback((commit: CommitEntry, nodeIdx: number, e: React.MouseEvent) => {
+    if (e.shiftKey && lastClickedIdx !== null) {
+      // Range select: extend selection from anchor to this row
+      const min = Math.min(lastClickedIdx, nodeIdx)
+      const max = Math.max(lastClickedIdx, nodeIdx)
+      setSelectedHashes(new Set(nodes.slice(min, max + 1).map(n => n.commit.hash)))
+      // Primary stays as the anchor commit (don't reload files)
+    } else if (e.ctrlKey || e.metaKey) {
+      // Toggle this commit in/out of selection
+      setSelectedHashes(prev => {
+        const next = new Set(prev)
+        if (next.has(commit.hash)) {
+          next.delete(commit.hash)
+          if (primaryCommit?.hash === commit.hash) {
+            setPrimaryCommit(null); setFiles([])
+          }
+        } else {
+          next.add(commit.hash)
+          loadPrimary(commit)
+        }
+        return next
+      })
+      setLastClickedIdx(nodeIdx)
+    } else {
+      // Plain click: single selection
+      setSelectedHashes(new Set([commit.hash]))
+      setLastClickedIdx(nodeIdx)
+      if (primaryCommit?.hash !== commit.hash) loadPrimary(commit)
+    }
+  }, [lastClickedIdx, nodes, primaryCommit, loadPrimary])
+
+  // ── Multi-select actions ──────────────────────────────────────────────────────
+
+  // Sorted nodes from the selection (oldest → newest unless noted)
+  const selectedNodes = useCallback((order: 'asc' | 'desc' = 'asc') => {
+    const picked = nodes.filter(n => selectedHashes.has(n.commit.hash))
+    return picked.sort((a, b) => order === 'asc'
+      ? a.commit.timestamp - b.commit.timestamp
+      : b.commit.timestamp - a.commit.timestamp)
+  }, [nodes, selectedHashes])
+
+  const handleMultiCherryPick = async () => {
+    setMultiCtx(null)
+    const sorted = selectedNodes('asc')
+    const ok = await dialog.confirm({
+      title: `Cherry-pick ${sorted.length} commits`,
+      message: `Apply ${sorted.length} commits to the current branch?`,
+      confirmLabel: 'Cherry-pick all',
+    })
+    if (!ok) return
+    try {
+      for (const n of sorted)
+        await opRun(`Cherry-picking ${n.commit.hash.slice(0, 7)}…`, () => ipc.gitCherryPick(repoPath, n.commit.hash))
+      bumpSyncTick()
+      loadHistoryRef.current(limitRef.current)
+    } catch (e) { await dialog.alert({ title: 'Cherry-pick failed', message: String(e) }) }
+  }
+
+  const handleMultiRevert = async () => {
+    setMultiCtx(null)
+    const sorted = selectedNodes('desc') // newest first for clean revert chain
+    const ok = await dialog.confirm({
+      title: `Revert ${sorted.length} commits`,
+      message: `Create ${sorted.length} revert commits on the current branch?`,
+      confirmLabel: 'Revert all',
+      danger: true,
+    })
+    if (!ok) return
+    try {
+      for (const n of sorted)
+        await opRun(`Reverting ${n.commit.hash.slice(0, 7)}…`, () => ipc.gitRevert(repoPath, n.commit.hash, false))
+      bumpSyncTick()
+      loadHistoryRef.current(limitRef.current)
+    } catch (e) { await dialog.alert({ title: 'Revert failed', message: String(e) }) }
+  }
+
+  const handleMultiStageChanges = async () => {
+    setMultiCtx(null)
+    const sorted = selectedNodes('asc')
+    const ok = await dialog.confirm({
+      title: `Stage changes from ${sorted.length} commits`,
+      message: `Apply the diff of ${sorted.length} commits to the staging area without committing?`,
+      confirmLabel: 'Stage changes',
+    })
+    if (!ok) return
+    try {
+      for (const n of sorted)
+        await opRun(`Staging ${n.commit.hash.slice(0, 7)}…`, () => ipc.gitCherryPick(repoPath, n.commit.hash, true))
+      bumpSyncTick()
+    } catch (e) { await dialog.alert({ title: 'Stage failed', message: String(e) }) }
+  }
+
+  const handleMultiStashChanges = async () => {
+    setMultiCtx(null)
+    const sorted = selectedNodes('asc')
+    const ok = await dialog.confirm({
+      title: `Stash changes from ${sorted.length} commits`,
+      message: `Apply the diff of ${sorted.length} commits then stash the result?`,
+      confirmLabel: 'Stash changes',
+    })
+    if (!ok) return
+    try {
+      for (const n of sorted)
+        await opRun(`Staging ${n.commit.hash.slice(0, 7)}…`, () => ipc.gitCherryPick(repoPath, n.commit.hash, true))
+      await opRun('Stashing…', () => ipc.stashSave(repoPath, `Changes from ${sorted.length} commits`))
+      bumpSyncTick()
+    } catch (e) { await dialog.alert({ title: 'Stash failed', message: String(e) }) }
+  }
+
+  const handleMultiCopySHAs = () => {
+    setMultiCtx(null)
+    const sorted = selectedNodes('asc')
+    navigator.clipboard.writeText(sorted.map(n => n.commit.hash).join('\n'))
   }
 
   const localBranches = branches.filter(b => !b.isRemote)
@@ -1085,15 +1252,19 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
             </p>
           )}
 
-          {nodes.map(node => (
+          {nodes.map((node, idx) => (
             <CommitRow
               key={node.commit.hash}
               node={node}
-              selected={selected?.hash === node.commit.hash}
+              selected={selectedHashes.has(node.commit.hash)}
+              isPrimary={primaryCommit?.hash === node.commit.hash}
               repoPath={repoPath}
               remoteUrl={remoteUrl}
               onRefresh={() => loadHistory(limitRef.current)}
-              onClick={() => handleSelect(node.commit)}
+              onClick={(e) => handleCommitClick(node.commit, idx, e)}
+              onMultiContextMenu={selectedHashes.size > 1 && selectedHashes.has(node.commit.hash)
+                ? (e) => { e.preventDefault(); setMultiCtx({ x: e.clientX, y: e.clientY }) }
+                : undefined}
             />
           ))}
 
@@ -1122,8 +1293,18 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
 
       {/* Right: commit detail */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {selected ? (
-          <CommitDetail commit={selected} files={files} filesLoading={filesLoading} repoPath={repoPath} remoteUrl={remoteUrl} />
+        {selectedHashes.size > 1 && (
+          <div style={{
+            padding: '6px 14px', background: '#1a1f2e', borderBottom: '1px solid #252d42',
+            fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11.5, color: '#8b94b0',
+            display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
+          }}>
+            <span style={{ fontWeight: 600, color: '#e8622f' }}>{selectedHashes.size}</span>
+            commits selected — right-click to act on selection · Esc to clear
+          </div>
+        )}
+        {primaryCommit ? (
+          <CommitDetail commit={primaryCommit} files={files} filesLoading={filesLoading} repoPath={repoPath} remoteUrl={remoteUrl} />
         ) : (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
             <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
@@ -1136,6 +1317,32 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
           </div>
         )}
       </div>
+
+      {/* Multi-select context menu */}
+      {multiCtx && (
+        <div
+          ref={multiCtxRef}
+          style={{
+            position: 'fixed', top: multiCtx.y, left: multiCtx.x, zIndex: 60,
+            background: '#1d2235', border: '1px solid #2f3a54',
+            borderRadius: 6, boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
+            padding: '4px 0', minWidth: 260,
+          }}
+        >
+          <div style={{ padding: '4px 12px 6px', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, fontWeight: 700, color: '#4e5870', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+            {selectedHashes.size} commits selected
+          </div>
+          <CtxSep />
+          <CtxItem label={`Cherry-pick ${selectedHashes.size} commits`}    onClick={handleMultiCherryPick} />
+          <CtxItem label={`Revert ${selectedHashes.size} commits`}         onClick={handleMultiRevert}    danger />
+          <CtxSep />
+          <CtxItem label={`Stage changes from ${selectedHashes.size} commits`}  onClick={handleMultiStageChanges} />
+          <CtxItem label={`Stash changes from ${selectedHashes.size} commits`}  onClick={handleMultiStashChanges} />
+          <CtxSep />
+          <CtxItem label="Copy SHAs"     onClick={handleMultiCopySHAs} />
+          <CtxItem label="Clear selection" onClick={() => { setMultiCtx(null); setSelectedHashes(new Set()); setPrimaryCommit(null); setFiles([]) }} />
+        </div>
+      )}
     </div>
   )
 }

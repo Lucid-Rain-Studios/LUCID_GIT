@@ -450,7 +450,9 @@ function ResolveDialog({
   onClose: () => void
   onDone: () => void
 }) {
-  const opRun = useOperationStore(s => s.run)
+  const opRun         = useOperationStore(s => s.run)
+  const bumpHistoryTick = useRepoStore(s => s.bumpHistoryTick)
+  const bumpPrTick      = useRepoStore(s => s.bumpPrTick)
   const [choice, setChoice] = useState<'accept' | 'decline'>('accept')
   const [conflicts, setConflicts] = useState<ConflictPreviewFile[]>([])
   const [conflictLoading, setConflictLoading] = useState(false)
@@ -477,8 +479,11 @@ function ResolveDialog({
     try {
       if (choice === 'accept') {
         await opRun(`Merging PR #${pr.number}…`, () => ipc.githubMergePR({ owner, repo, prNumber: pr.number, repoPath }))
+        bumpHistoryTick()
+        bumpPrTick()
       } else {
         await opRun(`Closing PR #${pr.number}…`, () => ipc.githubClosePR({ owner, repo, prNumber: pr.number }))
+        bumpPrTick()
       }
       onDone()
       onClose()
@@ -876,6 +881,20 @@ export function OverviewPanel({ repoPath, onNavigate, onRefresh }: OverviewPanel
       }
     }
   }, [repoPath])
+
+  // Refresh when history or PR state changes (fetch, pull, push, PR merge/close, branch switch)
+  const historyTick    = useRepoStore(s => s.historyTick)
+  const prTick         = useRepoStore(s => s.prTick)
+  const historyTickRef = useRef(historyTick)
+  const prTickRef      = useRef(prTick)
+  const loadAllRef     = useRef(loadAll)
+  useEffect(() => { loadAllRef.current = loadAll }, [loadAll])
+  useEffect(() => {
+    if (historyTick === historyTickRef.current && prTick === prTickRef.current) return
+    historyTickRef.current = historyTick
+    prTickRef.current = prTick
+    loadAllRef.current()
+  }, [historyTick, prTick])
 
   const loadSize = useCallback(async () => {
     if (!mounted.current) return

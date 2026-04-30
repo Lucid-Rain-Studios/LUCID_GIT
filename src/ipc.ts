@@ -582,7 +582,7 @@ export interface LucidGitAPI {
   // Git Tools
   gitRestoreFile: (repoPath: string, filePath: string, fromHash: string) => Promise<void>
   gitRevert: (repoPath: string, hash: string, noCommit: boolean) => Promise<void>
-  gitCherryPick: (repoPath: string, hash: string) => Promise<void>
+  gitCherryPick: (repoPath: string, hash: string, noCommit?: boolean) => Promise<void>
   gitResetTo: (repoPath: string, hash: string, mode: 'soft' | 'mixed' | 'hard') => Promise<void>
   gitLsFiles: (repoPath: string) => Promise<string[]>
   gitFileLog: (repoPath: string, filePath: string, limit?: number) => Promise<CommitEntry[]>
