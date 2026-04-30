@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { useOperationStore } from '@/stores/operationStore'
 import { useErrorStore } from '@/stores/errorStore'
 import { NotificationBell } from '@/components/notifications/NotificationBell'
+import { markFetchPerformed } from '@/lib/fetchState'
 
 interface TopBarProps {
   onOpen:       () => void
@@ -116,6 +117,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
     setSyncOp('fetching'); setSyncErr(null)
     try {
       await opRun('Fetching…', () => ipc.fetch(repoPath))
+      markFetchPerformed(repoPath)
       await loadSync()
       sessionTopBarFetched.add(repoPath)
       setHasFetched(true)

@@ -4,6 +4,7 @@ import { ipc } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useAuthStore } from '@/stores/authStore'
 import { cn } from '@/lib/utils'
+import { markFetchPerformed } from '@/lib/fetchState'
 
 interface CommandPaletteProps {
   open: boolean
@@ -43,7 +44,7 @@ export function CommandPalette({
   const doFetch = async () => {
     if (!repoPath) return
     setSyncing(true)
-    try { await ipc.fetch(repoPath) } finally { setSyncing(false) }
+    try { await ipc.fetch(repoPath); markFetchPerformed(repoPath) } finally { setSyncing(false) }
   }
 
   const doPull = async () => {

@@ -6,6 +6,7 @@ import { useOperationStore } from '@/stores/operationStore'
 import { useLockStore } from '@/stores/lockStore'
 import { usePRStore } from '@/stores/prStore'
 import { ContributionGraph } from './ContributionGraph'
+import { getLastFetch, markFetchPerformed, onFetchPerformed } from '@/lib/fetchState'
 
 const sessionFetchedRepos = new Set<string>()
 const sessionRemoteUrls   = new Map<string, string | null>()
@@ -18,7 +19,6 @@ interface DashboardPanelProps {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const LAST_PULL_KEY  = (p: string) => `lucid-git:last-pull:${p}`
-const LAST_FETCH_KEY = (p: string) => `lucid-git:last-fetch:${p}`
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -118,10 +118,20 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
         .catch(() => { sessionRemoteUrls.set(repoPath, null) })
     }
     const storedPull  = localStorage.getItem(LAST_PULL_KEY(repoPath))
-    const storedFetch = localStorage.getItem(LAST_FETCH_KEY(repoPath))
+    const storedFetch = getLastFetch(repoPath)
     setLastPull(storedPull   ? parseInt(storedPull,  10) : null)
-    setLastFetch(storedFetch ? parseInt(storedFetch, 10) : null)
+    setLastFetch(storedFetch)
     setHasFetched(sessionFetchedRepos.has(repoPath))
+  }, [repoPath])
+
+
+  useEffect(() => {
+    return onFetchPerformed((path, at) => {
+      if (path !== repoPath) return
+      setLastFetch(at)
+      sessionFetchedRepos.add(path)
+      setHasFetched(true)
+    })
   }, [repoPath])
 
   // Refresh sync status when a history operation (undo, reset, revert, cherry-pick) changes local HEAD
@@ -135,8 +145,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
     setBusy('fetch')
     try {
       await opRun('Fetching…', () => ipc.fetch(repoPath))
-      const now = Date.now()
-      localStorage.setItem(LAST_FETCH_KEY(repoPath), String(now))
+      const now = markFetchPerformed(repoPath)
       setLastFetch(now)
       sessionFetchedRepos.add(repoPath)
       setHasFetched(true)
