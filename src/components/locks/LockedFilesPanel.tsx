@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef, useMemo } from 'react'
 import { ipc, Lock } from '@/ipc'
 import { useLockStore } from '@/stores/lockStore'
 import { useAuthStore } from '@/stores/authStore'
+import { AppCheckbox } from '@/components/ui/AppCheckbox'
 import { useDialogStore } from '@/stores/dialogStore'
 
 interface LockedFilesPanelProps {
@@ -386,13 +387,11 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
                     onMouseLeave={e => { e.currentTarget.style.background = '#131720' }}
                   >
                     {/* Avatar */}
-                    <input
-                      type="checkbox"
+                    <AppCheckbox
                       checked={getGroupSelectionState(group.locks).checked}
-                      ref={el => { if (el) el.indeterminate = getGroupSelectionState(group.locks).indeterminate }}
+                      indeterminate={getGroupSelectionState(group.locks).indeterminate}
                       disabled={getGroupSelectionState(group.locks).disabled}
-                      onClick={e => e.stopPropagation()}
-                      onChange={e => selectAllInGroup(group.locks, e.target.checked)}
+                      onChange={checked => selectAllInGroup(group.locks, checked)}
                     />
                     <div style={{
                       width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
