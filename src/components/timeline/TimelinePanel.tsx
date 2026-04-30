@@ -95,7 +95,7 @@ function GraphCell({ node, graphColW, lineColorLabels }: { node: GraphNode; grap
   const cy = ROW_H / 2
   const dotR = DOT_R + 0.5
   return (
-    <svg width={graphColW} height={ROW_H} style={{ flexShrink: 0, overflow: 'visible', display: 'block', position: 'relative', zIndex: 9999 }}>
+    <svg width={graphColW} height={ROW_H} style={{ flexShrink: 0, overflow: 'visible', display: 'block', position: 'relative', zIndex: 1 }}>
       {node.topLines.map((seg, i) => (
         <path key={`t${i}`} d={linePath(seg, true)}
           stroke={seg.color} fill="none"
