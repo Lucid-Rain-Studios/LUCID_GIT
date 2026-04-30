@@ -1066,7 +1066,7 @@ const MORE_INCREMENT = 300
 export function HistoryPanel({ repoPath }: HistoryPanelProps) {
   const opRun        = useOperationStore(s => s.run)
   const dialog       = useDialogStore()
-  const { historyTick, bumpSyncTick } = useRepoStore()
+  const { historyTick, bumpSyncTick, fileStatus, currentBranch } = useRepoStore()
 
   const [activeTab,    setActiveTab]    = useState<'commits' | 'stashes'>('commits')
   const [nodes,        setNodes]        = useState<GraphNode[]>([])
@@ -1151,6 +1151,20 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
     setBranchTips(new Map(tips))
   }, [repoPath])
 
+
+  const [syncStatus, setSyncStatus] = useState<{ ahead: number; behind: number } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    ipc.getSyncStatus(repoPath)
+      .then(st => { if (!cancelled) setSyncStatus({ ahead: st.ahead, behind: st.behind }) })
+      .catch(() => { if (!cancelled) setSyncStatus(null) })
+    return () => { cancelled = true }
+  }, [repoPath, historyTick])
+
+  const stagedCount = fileStatus.filter(f => f.staged).length
+  const unstagedCount = fileStatus.length - stagedCount
+
   // ── Drag resize ──────────────────────────────────────────────────────────────
   const [listWidth,   setListWidth]   = useState(480)
   const dragging      = useRef(false)
@@ -1210,7 +1224,7 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
       ipc.gitDefaultBranch(repoPath),
     ]).then(([bList, def]) => {
       const locals = bList.filter(b => !b.isRemote)
-      setBranches(locals)
+      setBranches(bList)
       setDefaultBranch(def)
       fetchBranchTips(locals)
     }).catch(() => {})
@@ -1441,6 +1455,18 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
           }}>
             {totalLoaded > 0 ? `${totalLoaded} COMMITS` : 'HISTORY'}
           </span>
+
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#4e5870' }}>
+            {currentBranch || 'HEAD'}
+          </span>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#f5a832' }}>
+            WT {stagedCount} staged · {unstagedCount} unstaged
+          </span>
+          {syncStatus && (
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#4d9dff' }}>
+              ↑{syncStatus.ahead} ↓{syncStatus.behind}
+            </span>
+          )}
 
           <div style={{ flex: 1 }} />
 

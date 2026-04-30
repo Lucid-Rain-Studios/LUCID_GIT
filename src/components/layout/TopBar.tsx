@@ -18,7 +18,7 @@ const CONFIRM_BRANCH_KEY = 'lucid-git:confirm-branch-switch'
 const sessionTopBarFetched = new Set<string>()
 
 export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps) {
-  const { repoPath, currentBranch, refreshStatus, recentRepos, openRepo, removeRecentRepo, clearRepo, branches, checkout, fileStatus } = useRepoStore()
+  const { repoPath, currentBranch, refreshStatus, recentRepos, openRepo, removeRecentRepo, clearRepo, branches, checkout, fileStatus, syncTick } = useRepoStore()
   const { accounts, currentAccountId, permissionErrors, fetchRepoPermission, viewAsRole, setViewAsRole } = useAuthStore()
   const opRun   = useOperationStore(s => s.run)
   const pushErr = useErrorStore(s => s.pushRaw)
@@ -65,7 +65,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
     setSync(null); setSyncErr(null)
     setHasFetched(repoPath ? sessionTopBarFetched.has(repoPath) : false)
     if (repoPath) loadSync()
-  }, [repoPath, currentBranch])
+  }, [repoPath, currentBranch, syncTick])
 
   useEffect(() => {
     ipc.windowIsMaximized().then(setIsMaximized).catch(() => {})

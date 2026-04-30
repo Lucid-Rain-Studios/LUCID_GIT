@@ -11,7 +11,7 @@ import { useAuthStore } from '@/stores/authStore'
 type HookState = 'idle' | 'running' | 'passed' | 'failed'
 
 export function CommitBox() {
-  const { repoPath, fileStatus, refreshStatus } = useRepoStore()
+  const { repoPath, fileStatus, refreshStatus, bumpSyncTick } = useRepoStore()
   const opRun = useOperationStore(s => s.run)
   const dialog = useDialogStore()
   const { locks, unlockFile } = useLockStore()
@@ -49,6 +49,10 @@ export function CommitBox() {
       setHookState('idle')
       setHookOutput('')
       refreshStatus()
+
+      // Keep upstream sync counts accurate for Pull/Push badges
+      await ipc.fetch(repoPath).catch(() => {})
+      bumpSyncTick()
 
       // Unlock any files that were staged and locked by us — mirrors Unreal Engine behaviour
       for (const file of stagedLockedByMe) {
