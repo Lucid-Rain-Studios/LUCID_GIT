@@ -1389,7 +1389,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
       .slice(0, 5)
       .map(x => x.branch)
     return new Set<string>(top)
-  }, [repoPath, fetchBranchTips, getRecentBranchSelection, loadHistory])
+  }, [repoPath])
 
   const fetchBranchTips = useCallback(async (branchList: BranchInfo[]) => {
     const tips = new Map<string, BranchInfo[]>()
@@ -1405,7 +1405,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
       } catch {}
     }))
     setBranchTips(new Map(tips))
-  }, [repoPath])
+  }, [repoPath, fetchBranchTips, getRecentBranchSelection, loadHistory])
   const [stashOpen,   setStashOpen]   = useState(() => {
     try { return localStorage.getItem(STASH_KEY) === '1' } catch { return false }
   })
