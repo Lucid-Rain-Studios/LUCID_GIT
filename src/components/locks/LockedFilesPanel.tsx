@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react'
+import React, { useState, useCallback, useRef, useMemo } from 'react'
 import { ipc, Lock } from '@/ipc'
 import { useLockStore } from '@/stores/lockStore'
 import { useAuthStore } from '@/stores/authStore'
@@ -65,6 +65,8 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
   })
   const selectedLocks = selectableLocks.filter(lock => selectedLockIds.has(lock.id))
 
+  const selectableLockIds = useMemo(() => new Set(selectableLocks.map(lock => lock.id)), [selectableLocks])
+
   // Group team locks by owner
   const ownerGroups: { login: string; name: string; locks: typeof teamLocks }[] = []
   if (tab === 'team') {
@@ -77,6 +79,27 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
       }
       seen.get(l.owner.login)!.locks.push(l)
     }
+  }
+
+
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
+
+  const clearContextMenu = () => setCtxMenu(null)
+
+  const selectAllInGroup = (locksInGroup: Lock[], checked: boolean) => {
+    const ids = locksInGroup.filter(lock => selectableLockIds.has(lock.id)).map(lock => lock.id)
+    setSelectedLockIds(prev => {
+      const next = new Set(prev)
+      for (const id of ids) checked ? next.add(id) : next.delete(id)
+      return next
+    })
+  }
+
+  const getGroupSelectionState = (locksInGroup: Lock[]) => {
+    const eligible = locksInGroup.filter(lock => selectableLockIds.has(lock.id)).map(lock => lock.id)
+    if (eligible.length === 0) return { checked: false, indeterminate: false, disabled: true }
+    const selected = eligible.filter(id => selectedLockIds.has(id)).length
+    return { checked: selected === eligible.length, indeterminate: selected > 0 && selected < eligible.length, disabled: false }
   }
 
   const toggleOwner = (login: string) => {
@@ -92,19 +115,21 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
     try { await loadLocks(repoPath) } finally { setRefreshing(false) }
   }, [repoPath, loadLocks])
 
-  const toggleLockSelection = (lock: Lock, index: number, shiftKey: boolean) => {
+  const toggleLockSelection = (lock: Lock, index: number, options: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => {
+    const { shiftKey, ctrlKey, metaKey } = options
+    const isToggle = ctrlKey || metaKey
     setSelectedLockIds(prev => {
       const next = new Set(prev)
       if (shiftKey && lastSelectedIndexRef.current !== null) {
         const start = Math.min(lastSelectedIndexRef.current, index)
         const end = Math.max(lastSelectedIndexRef.current, index)
         const inRange = selectableLocks.slice(start, end + 1)
-        const shouldSelectRange = !next.has(lock.id)
-        for (const item of inRange) {
-          shouldSelectRange ? next.add(item.id) : next.delete(item.id)
-        }
-      } else {
+        for (const item of inRange) next.add(item.id)
+      } else if (isToggle) {
         next.has(lock.id) ? next.delete(lock.id) : next.add(lock.id)
+      } else {
+        next.clear()
+        next.add(lock.id)
       }
       return next
     })
@@ -312,7 +337,7 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
       <div style={{ margin: '14px 24px 0', height: 1, background: '#1a2030', flexShrink: 0 }} />
 
       {/* ── Lock list ── */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 24px 24px' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 24px 24px' }} onClick={clearContextMenu}>
         {filtered.length === 0 ? (
           <EmptyState
             tab={tab}
@@ -320,7 +345,7 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
             onClearSearch={() => setSearch('')}
           />
         ) : tab === 'mine' ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }} onContextMenu={e => { e.preventDefault(); if (selectedLocks.length > 0) setCtxMenu({ x: e.clientX, y: e.clientY }) }}>
             {filtered.map((lock, index) => (
               <LockRow
                 key={lock.id}
@@ -331,7 +356,7 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
                 unlocking={unlocking}
                 selected={selectedLockIds.has(lock.id)}
                 onUnlock={doUnlock}
-                onSelect={(shiftKey) => toggleLockSelection(lock, index, shiftKey)}
+                onSelect={(mods) => toggleLockSelection(lock, index, mods)}
                 onCopyPath={doCopyPath}
                 onShowInExplorer={doShowInExplorer}
               />
@@ -339,7 +364,7 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
           </div>
         ) : (
           /* Team tab — grouped by owner */
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }} onContextMenu={e => { e.preventDefault(); if (selectedLocks.length > 0) setCtxMenu({ x: e.clientX, y: e.clientY }) }}>
             {ownerGroups.map(group => {
               const isCollapsed = !expandedOwners.has(group.login)
               const color = authorColor(group.name)
@@ -361,6 +386,14 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
                     onMouseLeave={e => { e.currentTarget.style.background = '#131720' }}
                   >
                     {/* Avatar */}
+                    <input
+                      type="checkbox"
+                      checked={getGroupSelectionState(group.locks).checked}
+                      ref={el => { if (el) el.indeterminate = getGroupSelectionState(group.locks).indeterminate }}
+                      disabled={getGroupSelectionState(group.locks).disabled}
+                      onClick={e => e.stopPropagation()}
+                      onChange={e => selectAllInGroup(group.locks, e.target.checked)}
+                    />
                     <div style={{
                       width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
                       background: `${color}18`, border: `1.5px solid ${color}44`,
@@ -410,9 +443,9 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
                           unlocking={unlocking}
                           selected={selectedLockIds.has(lock.id)}
                           onUnlock={doUnlock}
-                          onSelect={(shiftKey) => {
+                          onSelect={(mods) => {
                             const index = selectableLocks.findIndex(item => item.id === lock.id)
-                            if (index >= 0) toggleLockSelection(lock, index, shiftKey)
+                            if (index >= 0) toggleLockSelection(lock, index, mods)
                           }}
                           onCopyPath={doCopyPath}
                           onShowInExplorer={doShowInExplorer}
@@ -426,6 +459,19 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
           </div>
         )}
       </div>
+
+      {ctxMenu && selectedLocks.length > 0 && (
+        <div
+          style={{ position: 'fixed', left: ctxMenu.x, top: ctxMenu.y, zIndex: 50, background: '#131720', border: '1px solid #283047', borderRadius: 6, padding: 4 }}
+          onMouseLeave={clearContextMenu}
+        >
+          <button
+            onClick={() => { clearContextMenu(); void doBulkUnlock() }}
+            disabled={unlocking === '__bulk__'}
+            style={{ display: 'block', width: '100%', textAlign: 'left', background: 'transparent', border: 'none', color: '#c8d0e8', padding: '6px 10px', cursor: 'pointer' }}
+          >Force Unlock Selected</button>
+        </div>
+      )}
     </div>
   )
 }
@@ -443,12 +489,11 @@ function LockRow({
   unlocking: string | null
   selected: boolean
   onUnlock: (lock: Lock, force: boolean) => void
-  onSelect: (shiftKey: boolean) => void
+  onSelect: (mods: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => void
   onCopyPath: (lock: Lock) => void
   onShowInExplorer: (lock: Lock) => void
 }) {
   const [hover, setHover] = useState(false)
-  const [menuOpen, setMenuOpen] = useState(false)
 
   const isOwn     = currentLogin && lock.owner.login === currentLogin
   const isBusy    = unlocking === lock.path
@@ -466,10 +511,10 @@ function LockRow({
   return (
     <div
       onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => { setHover(false); setMenuOpen(false) }}
+      onMouseLeave={() => { setHover(false) }}
       onClick={(e) => {
         if ((e.target as HTMLElement).closest('button')) return
-        onSelect(e.shiftKey)
+        onSelect({ shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey })
       }}
       style={{
         display: 'flex', alignItems: 'center', gap: 12,
