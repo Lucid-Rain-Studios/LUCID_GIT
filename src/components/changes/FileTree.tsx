@@ -274,10 +274,9 @@ export function FileTree({
       const untrackedPaths = multiUntrackedPaths
       if (trackedPaths.length > 0) await ipc.discard(repoPath, trackedPaths, false)
       if (untrackedPaths.length > 0) await ipc.discard(repoPath, untrackedPaths, true)
-      // Release locks we own only for newly created files that are being discarded
+      // Release my locks for files explicitly discarded from multi-select.
       if (currentLogin) {
         for (const f of multiUnstaged) {
-          if (f.workingStatus !== '?') continue
           const lk = lockFor(f)
           if (lk && lk.owner.login === currentLogin) unlockFile(repoPath, f.path).catch(() => {})
         }
@@ -335,9 +334,9 @@ export function FileTree({
           onClick={async () => {
             const ok = await dialog.confirm({ title: 'Discard all changes', message: 'This will discard all working-tree changes. This cannot be undone.', confirmLabel: 'Discard All', danger: true })
             if (!ok) return
-            // Capture newly created files locked by us before discarding
+            // Capture files locked by me before discarding so they can be unlocked after reset.
             const myLockedFiles = currentLogin
-              ? unstaged.filter(f => f.workingStatus === '?' && locks.some(
+              ? unstaged.filter(f => locks.some(
                   l => l.path.replace(/\\/g, '/') === f.path.replace(/\\/g, '/') &&
                        l.owner.login === currentLogin
                 ))
