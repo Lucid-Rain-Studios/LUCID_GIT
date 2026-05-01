@@ -19,6 +19,7 @@ interface RepoState {
   branches: BranchInfo[]
   fileStatus: FileStatus[]
   isLoading: boolean
+  isSilentRefreshing: boolean
   error: string | null
   recentRepos: string[]
   syncTick: number
@@ -45,6 +46,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
   branches: [],
   fileStatus: [],
   isLoading: false,
+  isSilentRefreshing: false,
   error: null,
   recentRepos: loadRecentRepos(),
   syncTick: 0,
@@ -56,19 +58,25 @@ export const useRepoStore = create<RepoState>((set, get) => ({
     const op = useOperationStore.getState()
     try {
       await op.run('Opening repository…', async () => {
-        const [status, branch, branches] = await Promise.all([
-          window.lucidGit.status(path),
-          window.lucidGit.currentBranch(path),
-          window.lucidGit.branchList(path),
-        ])
+        // Hydrate shell immediately so large repos don't appear frozen while
+        // expensive git status/branch scans are still running.
+        set({ repoPath: path, fileStatus: [], currentBranch: '', branches: [], error: null })
+        get().addRecentRepo(path)
+
+        const branchPromise = window.lucidGit.currentBranch(path)
+        const statusPromise = window.lucidGit.status(path)
+        const branchesPromise = window.lucidGit.branchList(path)
+
+        const branch = await branchPromise.catch(() => 'unknown')
+        set({ currentBranch: branch ?? 'unknown' })
+
+        const [statusRes, branchesRes] = await Promise.allSettled([statusPromise, branchesPromise])
+
         set({
-          repoPath: path,
-          fileStatus: status ?? [],
-          currentBranch: branch ?? '',
-          branches: branches ?? [],
+          fileStatus: statusRes.status === 'fulfilled' ? (statusRes.value ?? []) : [],
+          branches: branchesRes.status === 'fulfilled' ? (branchesRes.value ?? []) : [],
           error: null,
         })
-        get().addRecentRepo(path)
       })
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Failed to open repository' })
@@ -99,9 +107,10 @@ export const useRepoStore = create<RepoState>((set, get) => ({
   },
 
   silentRefresh: async () => {
-    const { repoPath, isLoading } = get()
+    const { repoPath, isLoading, isSilentRefreshing } = get()
     // Skip if an explicit refreshStatus is already in flight — it will win
-    if (!repoPath || isLoading) return
+    if (!repoPath || isLoading || isSilentRefreshing) return
+    set({ isSilentRefreshing: true })
     try {
       const [status, branch] = await Promise.all([
         window.lucidGit.status(repoPath),
@@ -112,6 +121,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
         set({ fileStatus: status ?? [], currentBranch: branch ?? '' })
       }
     } catch { /* ignore */ }
+    finally { set({ isSilentRefreshing: false }) }
   },
 
   loadBranches: async () => {
