@@ -24,6 +24,9 @@ class WatcherService {
       ],
       ignoreInitial: true,
       persistent: true,
+      // Prevent expensive deep crawls on very large repos during first boot.
+      // We only need near-root activity to trigger a lightweight refresh.
+      depth: 3,
       awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 100 },
     })
 

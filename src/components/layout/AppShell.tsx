@@ -161,7 +161,7 @@ export function AppShell() {
   const [filePanelWidth,   setFilePanelWidth]   = useState(280)
   const [showCloneDialog,  setShowCloneDialog]  = useState(false)
   const [showLoginDialog,  setShowLoginDialog]  = useState(false)
-  const [leftTab, setLeftTab] = useState<TabId>('timeline')
+  const [leftTab, setLeftTab] = useState<TabId>('dashboard')
   const [mergeTarget, setMergeTarget] = useState<string | null>(null)
   const [cmdOpen, setCmdOpen] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
@@ -285,9 +285,12 @@ export function AppShell() {
   // ── File-system watcher — auto-refresh when working tree changes ───────────
   useEffect(() => {
     if (!repoPath) return
-    ipc.watchStatusChanges(repoPath).catch(() => {})
+    const timer = window.setTimeout(() => {
+      ipc.watchStatusChanges(repoPath).catch(() => {})
+    }, 1500)
     const unsub = ipc.onStatusChanged(() => silentRefresh())
     return () => {
+      window.clearTimeout(timer)
       unsub()
       ipc.unwatchStatusChanges(repoPath).catch(() => {})
     }
