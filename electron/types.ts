@@ -180,6 +180,7 @@ export interface AppSettings {
   fontSize: number
   uiDensity: 'compact' | 'normal' | 'relaxed'
   theme: 'dark' | 'darker' | 'midnight'
+  defaultBranchName?: string
 }
 
 export interface TeamConfig {
