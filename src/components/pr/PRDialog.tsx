@@ -4,6 +4,7 @@ import { usePRStore } from '@/stores/prStore'
 import { useRepoStore } from '@/stores/repoStore'
 import { useLockStore } from '@/stores/lockStore'
 import { useAuthStore } from '@/stores/authStore'
+import { useStatusToastStore } from '@/stores/statusToastStore'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -145,6 +146,7 @@ export function PRDialog() {
   const branches                     = useRepoStore(s => s.branches)
   const { locks }                    = useLockStore()
   const { accounts, currentAccountId } = useAuthStore()
+  const showStatusToast = useStatusToastStore(s => s.show)
   const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login ?? null
 
   const [title, setTitle]   = useState('')
@@ -233,6 +235,7 @@ export function PRDialog() {
       const res = await ipc.githubCreatePR({ owner, repo, head: headBranch, base, title: title.trim(), body, draft })
       setResult(res)
       setPhase('success')
+      showStatusToast('PR created successfully.')
       // Associate currently-locked files with this PR so we can prompt to unlock on merge
       if (repoPath) {
         const myLockedFiles = locks
@@ -241,6 +244,7 @@ export function PRDialog() {
         ipc.prMonitorRecord(repoPath, res.number, owner, repo, myLockedFiles, title.trim()).catch(() => {})
       }
     } catch (e) {
+      showStatusToast('PR creation failed.')
       setError(String(e).replace(/^Error:\s*/, ''))
       setPhase('error')
     }

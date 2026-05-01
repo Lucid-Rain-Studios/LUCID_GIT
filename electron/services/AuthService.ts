@@ -289,6 +289,13 @@ class AuthService {
     if (!currentAccountId) return null
     return this.getToken(currentAccountId)
   }
+
+  async getCurrentLogin(): Promise<string | null> {
+    const { currentAccountId, accounts } = readData()
+    if (!currentAccountId) return null
+    const account = accounts.find(a => a.userId === currentAccountId)
+    return account?.login ?? null
+  }
 }
 
 export const authService = new AuthService()

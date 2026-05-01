@@ -202,7 +202,11 @@ class PRMonitorService {
   private async stillLockedFiles(repoPath: string, filePaths: string[]): Promise<string[]> {
     try {
       const currentLocks = await lockService.listLocks(repoPath)
-      const lockedSet    = new Set(currentLocks.map(l => l.path))
+      const lockedSet = new Set(
+        currentLocks
+          .filter((lock): lock is (typeof currentLocks)[number] => Boolean(lock))
+          .map(lock => lock.path),
+      )
       return filePaths.filter(p => lockedSet.has(p))
     } catch {
       return filePaths  // best-effort: if we can't check, show all
