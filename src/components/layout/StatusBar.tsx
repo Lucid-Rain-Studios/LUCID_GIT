@@ -4,6 +4,8 @@ import { useOperationStore } from '@/stores/operationStore'
 import { useAuthStore } from '@/stores/authStore'
 import { RepoPermission } from '@/ipc'
 
+declare const __APP_VERSION__: string
+
 const ROLE_OPTIONS: { value: RepoPermission | null; label: string; description: string }[] = [
   { value: null,    label: 'Admin',        description: 'Your real role — full access' },
   { value: 'write', label: 'Collaborator', description: 'Write access, no admin settings' },
@@ -152,6 +154,9 @@ export function StatusBar() {
                   ? <PermBadge label="Collaborator" color="#7b8499" bg="rgba(123,132,153,0.08)" title="You have write access (collaborator)" />
                   : null
           )}
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, color: '#42506a', letterSpacing: '0.03em' }}>
+            v{__APP_VERSION__}
+          </span>
           {isRunning ? (
             <span style={{
               fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: '#e8622f',
