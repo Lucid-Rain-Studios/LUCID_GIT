@@ -567,14 +567,17 @@ export function AppShell() {
             <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
               <BugLogsPanel />
             </PanelErrorBoundary>
+          ) : leftTab === 'branches' ? (
+            /* ── Branches — full width (no outer split) ── */
+            <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
+              <BranchPanel onMergePreview={branch => setMergeTarget(branch)} onRefresh={handleRefresh} />
+            </PanelErrorBoundary>
           ) : (
             /* ── Split: left panel | diff (branches, lfs, cleanup, unreal, hooks) ── */
             <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
             <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
               <div ref={filePanelRef} style={{ width: filePanelWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                {leftTab === 'branches' ? (
-                  <BranchPanel onMergePreview={branch => setMergeTarget(branch)} onRefresh={handleRefresh} />
-                ) : leftTab === 'lfs' ? (
+                {leftTab === 'lfs' ? (
                   <LfsPanel repoPath={repoPath} />
                 ) : leftTab === 'cleanup' ? (
                   <CleanupPanel repoPath={repoPath} />
