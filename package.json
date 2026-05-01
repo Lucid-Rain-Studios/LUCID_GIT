@@ -9,6 +9,8 @@
     "build": "tsc -p tsconfig.main.json && vite build",
     "package": "npm run build && electron-builder",
     "release": "npm run build && electron-builder --publish always",
+    "release:patch": "npm version patch && npm run release",
+    "release:minor": "npm version minor && npm run release",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src electron"
   },
