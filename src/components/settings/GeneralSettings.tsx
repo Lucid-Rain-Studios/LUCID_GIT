@@ -18,6 +18,7 @@ const DEFAULTS: AppSettings = {
   fontSize: 13,
   uiDensity: 'normal',
   theme: 'dark',
+  defaultBranchName: 'main',
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -180,6 +181,17 @@ export function GeneralSettings() {
               checked={confirmBranchSwitch}
               onChange={e => handleConfirmBranchToggle(e.target.checked)}
               className="accent-lg-accent"
+            />
+          </Row>
+          <Row
+            label="Default branch name for new repositories"
+            hint={"GitHub's default branch name is main. You may want to change it due to different workflows, or because your integrations still require the historical default branch name of master. These preferences will edit your global Git config file."}
+          >
+            <input
+              type="text"
+              value={settings.defaultBranchName ?? 'main'}
+              onChange={e => update({ defaultBranchName: e.target.value.trim() || 'main' })}
+              className="w-32 bg-lg-bg-primary border border-lg-border rounded px-2 py-1 text-[11px] font-mono text-lg-text-primary focus:outline-none focus:border-lg-accent"
             />
           </Row>
         </Section>

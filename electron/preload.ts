@@ -143,6 +143,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.NOTIFICATION_MARK_READ, id),
   webhookTest: (url: string) =>
     ipcRenderer.invoke(CHANNELS.WEBHOOK_TEST, url),
+  webhookLoad: (repoPath: string) =>
+    ipcRenderer.invoke(CHANNELS.WEBHOOK_LOAD, repoPath),
   webhookSave: (repoPath: string, config: unknown) =>
     ipcRenderer.invoke(CHANNELS.WEBHOOK_SAVE, repoPath, config),
 

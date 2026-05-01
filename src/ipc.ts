@@ -279,6 +279,7 @@ export interface AppSettings {
   fontWeight?: 300 | 400 | 500 | 600
   borderRadius?: 'sharp' | 'default' | 'rounded' | 'pill'
   accentColor?: string
+  defaultBranchName?: string
 }
 
 export interface TeamConfig {
@@ -532,6 +533,7 @@ export interface LucidGitAPI {
   notificationList: (repoPath: string) => Promise<AppNotification[]>
   notificationMarkRead: (id: number) => Promise<void>
   webhookTest: (url: string) => Promise<boolean>
+  webhookLoad: (repoPath: string) => Promise<WebhookConfig | null>
   webhookSave: (repoPath: string, config: WebhookConfig) => Promise<void>
 
   // Auto-updater

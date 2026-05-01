@@ -65,22 +65,22 @@ export function WebhookPanel({ repoPath }: WebhookPanelProps) {
   // Load saved config on mount / repo change
   useEffect(() => {
     ipc.notificationList(repoPath).catch(() => {}) // warm up
-    // There's no explicit loadConfig IPC — the webhookSave persists it.
-    // We reconstruct from localStorage as a lightweight cache approach.
-    const key = `webhook:${repoPath}`
-    try {
-      const raw = localStorage.getItem(key)
-      if (raw) {
-        const saved: WebhookConfig = JSON.parse(raw)
+    ipc.webhookLoad(repoPath)
+      .then(saved => {
+        if (!saved) return
         setConfig(saved)
         setRolesInput((saved.mentionRoles ?? []).join(', '))
         if (saved.quietHours) {
           setUseQuiet(true)
           setQuietStart(saved.quietHours.start)
           setQuietEnd(saved.quietHours.end)
+        } else {
+          setUseQuiet(false)
+          setQuietStart('')
+          setQuietEnd('')
         }
-      }
-    } catch {}
+      })
+      .catch(() => {})
   }, [repoPath])
 
   const updateEvent = (key: keyof WebhookConfig['events'], value: boolean) => {
@@ -101,8 +101,6 @@ export function WebhookPanel({ repoPath }: WebhookPanelProps) {
     }
     try {
       await ipc.webhookSave(repoPath, finalConfig)
-      // Mirror to localStorage so we can reload it
-      localStorage.setItem(`webhook:${repoPath}`, JSON.stringify(finalConfig))
       setConfig(finalConfig)
       setSaved(true)
     } catch (e) {

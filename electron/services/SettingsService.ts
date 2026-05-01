@@ -16,6 +16,7 @@ export interface AppSettings {
   fontSize: number
   uiDensity: 'compact' | 'normal' | 'relaxed'
   theme: 'dark' | 'darker' | 'midnight'
+  defaultBranchName: string
 }
 
 const DEFAULTS: AppSettings = {
@@ -32,6 +33,7 @@ const DEFAULTS: AppSettings = {
   fontSize: 13,
   uiDensity: 'normal',
   theme: 'dark',
+  defaultBranchName: 'main',
 }
 
 class SettingsService {

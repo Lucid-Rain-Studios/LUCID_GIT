@@ -37,6 +37,14 @@ async function requireAdmin(repoPath: string): Promise<void> {
 }
 
 export function registerHandlers(): void {
+  const runGitOp = async <T>(op: string, fn: () => Promise<T>): Promise<T> => {
+    try {
+      return await fn()
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      throw new Error(`${op} failed: ${msg}`)
+    }
+  }
 
   // ── Shell ──────────────────────────────────────────────────────────────────
   ipcMain.handle(CHANNELS.SHELL_OPEN_EXTERNAL, async (_event, url: string) => {
@@ -207,7 +215,7 @@ export function registerHandlers(): void {
   })
 
   ipcMain.handle(CHANNELS.GIT_STASH_POP, async (_event, repoPath: string, ref: string) => {
-    return gitService.stashPop(repoPath, ref)
+    return runGitOp('Stash pop', () => gitService.stashPop(repoPath, ref))
   })
 
   ipcMain.handle(CHANNELS.GIT_STASH_APPLY, async (_event, repoPath: string, ref: string) => {
@@ -249,7 +257,7 @@ export function registerHandlers(): void {
   })
 
   ipcMain.handle(CHANNELS.GIT_CHECKOUT, async (_event, repoPath: string, branch: string) => {
-    return gitService.checkout(repoPath, branch)
+    return runGitOp('Checkout', () => gitService.checkout(repoPath, branch))
   })
 
   ipcMain.handle(CHANNELS.GIT_MERGE_PREVIEW, async (_event, repoPath: string, targetBranch: string) => {
@@ -266,7 +274,7 @@ export function registerHandlers(): void {
   })
 
   ipcMain.handle(CHANNELS.GIT_MERGE, async (_event, repoPath: string, targetBranch: string) => {
-    await gitService.merge(repoPath, targetBranch)
+    await runGitOp('Merge', () => gitService.merge(repoPath, targetBranch))
     const ourBranch = await gitService.currentBranch(repoPath)
     heatmapService.markConflictsResolved(repoPath, ourBranch, targetBranch)
   })
@@ -366,6 +374,9 @@ export function registerHandlers(): void {
 
   ipcMain.handle(CHANNELS.WEBHOOK_TEST, async (_event, url: string) => {
     return webhookService.test(url)
+  })
+  ipcMain.handle(CHANNELS.WEBHOOK_LOAD, async (_event, repoPath: string) => {
+    return webhookService.loadConfig(repoPath)
   })
 
   ipcMain.handle(CHANNELS.WEBHOOK_SAVE, async (_event, repoPath: string, config: WebhookConfig) => {
@@ -481,9 +492,11 @@ export function registerHandlers(): void {
     settingsService.getAll()
   )
 
-  ipcMain.handle(CHANNELS.SETTINGS_SAVE, (_event, settings: AppSettings) =>
+  ipcMain.handle(CHANNELS.SETTINGS_SAVE, async (_event, settings: AppSettings) => {
     settingsService.save(settings)
-  )
+    const defaultBranch = (settings.defaultBranchName ?? 'main').trim() || 'main'
+    await gitService.setGlobalDefaultBranch(defaultBranch)
+  })
 
   // ── Team Config — Phase 15 ────────────────────────────────────────────────
   ipcMain.handle(CHANNELS.TEAM_CONFIG_LOAD, (_event, repoPath: string) =>
@@ -505,16 +518,16 @@ export function registerHandlers(): void {
   )
 
   ipcMain.handle(CHANNELS.GIT_REVERT, (_event, repoPath: string, hash: string, noCommit: boolean) =>
-    gitService.revert(repoPath, hash, noCommit)
+    runGitOp('Revert', () => gitService.revert(repoPath, hash, noCommit))
   )
 
   ipcMain.handle(CHANNELS.GIT_CHERRY_PICK, (_event, repoPath: string, hash: string, noCommit?: boolean) =>
-    gitService.cherryPick(repoPath, hash, noCommit)
+    runGitOp('Cherry-pick', () => gitService.cherryPick(repoPath, hash, noCommit))
   )
 
   ipcMain.handle(CHANNELS.GIT_RESET_TO, async (_event, repoPath: string, hash: string, mode: 'soft' | 'mixed' | 'hard') => {
     if (mode === 'hard') await requireAdmin(repoPath)
-    return gitService.resetTo(repoPath, hash, mode)
+    return runGitOp('Reset', () => gitService.resetTo(repoPath, hash, mode))
   })
 
   ipcMain.handle(CHANNELS.GIT_FILE_LOG, (_event, repoPath: string, filePath: string, limit?: number) =>
