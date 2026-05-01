@@ -456,12 +456,14 @@ function ResolveDialog({
   const [choice, setChoice] = useState<'accept' | 'decline'>('accept')
   const [conflicts, setConflicts] = useState<ConflictPreviewFile[]>([])
   const [conflictLoading, setConflictLoading] = useState(false)
+  const [conflictError, setConflictError] = useState<string | null>(null)
   const [fileChoices, setFileChoices] = useState<Record<string, ConflictChoice>>({})
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     if (choice !== 'accept') return
     setConflictLoading(true)
+    setConflictError(null)
     ipc.mergePreview(repoPath, pr.headBranch)
       .then(files => {
         setConflicts(files)
@@ -469,7 +471,10 @@ function ResolveDialog({
         files.forEach(f => { defaults[f.path] = 'branch' })
         setFileChoices(defaults)
       })
-      .catch(() => setConflicts([]))
+      .catch((e) => {
+        setConflicts([])
+        setConflictError(String(e))
+      })
       .finally(() => setConflictLoading(false))
   }, [choice, repoPath, pr.headBranch])
 
@@ -573,6 +578,10 @@ function ResolveDialog({
             {conflictLoading ? (
               <div style={{ padding: '16px 18px', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>
                 Checking for conflicts…
+              </div>
+            ) : conflictError ? (
+              <div style={{ padding: '16px 18px', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#e84545' }}>
+                {conflictError}
               </div>
             ) : conflicts.length === 0 ? (
               <div style={{ padding: '16px 18px', display: 'flex', alignItems: 'center', gap: 8 }}>

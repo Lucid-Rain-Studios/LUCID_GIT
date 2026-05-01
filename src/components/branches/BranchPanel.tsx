@@ -207,7 +207,9 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
       await loadBranches()
       onRefresh()
     } catch (e) {
-      setError(String(e))
+      const msg = String(e)
+      setError(msg)
+      if (msg.toLowerCase().includes('conflict')) onMergePreview('main')
     } finally {
       setUpdatingMain(false)
     }
@@ -265,6 +267,35 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
   const remoteBranches = branches.filter(b => b.isRemote)
     .sort((a, b) => a.displayName.localeCompare(b.displayName))
   const selectedBranch = previewBranch ? localBranches.find(b => b.name === previewBranch) ?? null : null
+
+  useEffect(() => {
+    const selected = previewBranch
+    if (!repoPath || !selected || insights[selected]) return
+    ;(async () => {
+      const [activityAll, locks, presenceFile, prs, diff] = await Promise.all([
+        ipc.gitBranchActivity(repoPath).catch(() => []),
+        ipc.listLocks(repoPath).catch(() => []),
+        ipc.presenceRead(repoPath).catch(() => ({ version: 1, entries: {} })),
+        (async () => {
+          if (!ghSlug) return []
+          const [owner, repo] = ghSlug.split('/')
+          return ipc.githubListPRs({ owner, repo }).catch(() => [])
+        })(),
+        ipc.branchDiff(repoPath, 'main', selected).catch(() => null),
+      ])
+      const activity = (activityAll as BranchActivity[]).find(a => a.ref === selected) ?? null
+      const branchPresence = Object.values(presenceFile.entries).filter(e => e.branch === selected)
+      const branchPrs = (prs as PullRequest[]).filter(pr => pr.headBranch === selected)
+      const touchedFiles = new Set((diff?.files ?? []).map(f => f.path))
+      const overlapWarnings = Object.values(presenceFile.entries)
+        .filter(e => e.branch !== selected)
+        .flatMap(e => e.modifiedFiles.filter(f => touchedFiles.has(f)).map(f => `⚠️ ${f} also modified on ${e.branch} (${e.name})`))
+      setInsights(prev => ({
+        ...prev,
+        [selected]: { activity, locks: (locks as Lock[]).filter(l => touchedFiles.has(l.path)), presence: branchPresence, prs: branchPrs, overlapWarnings },
+      }))
+    })()
+  }, [previewBranch, repoPath, ghSlug, insights])
 
   useEffect(() => {
     const selected = previewBranch
