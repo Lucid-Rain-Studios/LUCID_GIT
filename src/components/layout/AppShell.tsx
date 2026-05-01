@@ -177,6 +177,7 @@ export function AppShell() {
   const { conflicts: forecastConflicts, enabled: forecastEnabled, lastPolledAt, setConflicts: setForecastConflicts, setEnabled: setForecastEnabled, setLastPolledAt } = useForecastStore()
 
   const currentUserName = accounts.find(a => a.userId === currentAccountId)?.login ?? null
+  const isSignedIn = Boolean(currentAccountId)
 
   // ── Drag resize — file panel ───────────────────────────────────────────────
   const filePanelRef   = useRef<HTMLDivElement>(null)
@@ -289,8 +290,20 @@ export function AppShell() {
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handleOpenRepo = async () => {
+    if (!isSignedIn) {
+      setShowLoginDialog(true)
+      return
+    }
     const dir = await ipc.openDirectory()
     if (dir) openRepo(dir)
+  }
+
+  const handleCloneRepo = () => {
+    if (!isSignedIn) {
+      setShowLoginDialog(true)
+      return
+    }
+    setShowCloneDialog(true)
   }
 
   const handleRefresh = () => {
@@ -329,25 +342,26 @@ export function AppShell() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--lg-bg-primary)', color: 'var(--lg-text-primary)', overflow: 'hidden' }}>
       <TopBar
         onOpen={handleOpenRepo}
-        onClone={() => setShowCloneDialog(true)}
+        onClone={handleCloneRepo}
         onAddAccount={() => setShowLoginDialog(true)}
         onSynced={handleRefresh}
       />
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        {/* Sidebar handles its own drag resize internally */}
-        <Sidebar
-          active={leftTab}
-          onChange={tab => setLeftTab(tab as TabId)}
-          collapsed={sidebarCollapsed}
-          onToggle={() => setSidebarCollapsed(c => !c)}
-          width={sidebarWidth}
-          onWidthChange={setSidebarWidth}
-          repoPath={repoPath}
-          onOpenTerminal={() => { if (repoPath) ipc.openTerminal(repoPath) }}
-          onOpenRepo={handleOpenRepo}
-          onOpenExplorer={() => { if (repoPath) ipc.showInFolder(repoPath) }}
-        />
+        {repoPath && (
+          <Sidebar
+            active={leftTab}
+            onChange={tab => setLeftTab(tab as TabId)}
+            collapsed={sidebarCollapsed}
+            onToggle={() => setSidebarCollapsed(c => !c)}
+            width={sidebarWidth}
+            onWidthChange={setSidebarWidth}
+            repoPath={repoPath}
+            onOpenTerminal={() => { if (repoPath) ipc.openTerminal(repoPath) }}
+            onOpenRepo={handleOpenRepo}
+            onOpenExplorer={() => { if (repoPath) ipc.showInFolder(repoPath) }}
+          />
+        )}
 
         <main style={{ display: 'flex', flex: 1, overflow: 'hidden', flexDirection: 'column', position: 'relative' }}>
           {/* Settings is always accessible — even without a repo */}
@@ -395,10 +409,32 @@ export function AppShell() {
                     maxWidth: 400, textAlign: 'left', whiteSpace: 'pre-wrap',
                   }}>{error}</div>
                 )}
-                <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 28 }}>
-                  <WelcomeBtn onClick={handleOpenRepo} label="Open Repository" />
-                  <WelcomeBtn onClick={() => setShowCloneDialog(true)} label="Clone Repository" accent />
-                </div>
+                {!isSignedIn ? (
+                  <div style={{ display: 'flex', justifyContent: 'center', marginTop: 28 }}>
+                    <WelcomeBtn onClick={() => setShowLoginDialog(true)} label="Sign In to Continue" accent />
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ marginTop: 24, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
+                      <div style={{
+                        width: 30, height: 30, borderRadius: '50%',
+                        background: '#1d2535', border: '1px solid #2b364d',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: '#7b8499', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, fontWeight: 600,
+                        textTransform: 'uppercase',
+                      }}>
+                        {(currentUserName ?? '?').slice(0, 1)}
+                      </div>
+                      <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 13, color: '#a8b1c2' }}>
+                        {currentUserName}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 18 }}>
+                      <WelcomeBtn onClick={handleOpenRepo} label="Open Repository" />
+                      <WelcomeBtn onClick={handleCloneRepo} label="Clone Repository" accent />
+                    </div>
+                  </>
+                )}
                 <div style={{ marginTop: 20, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#253040', letterSpacing: '0.05em' }}>
                   Press ⌘K to open command palette
                 </div>
@@ -556,7 +592,7 @@ export function AppShell() {
         onClose={() => setCmdOpen(false)}
         onNavigateTab={(tab) => setLeftTab(tab as TabId)}
         onOpenRepo={handleOpenRepo}
-        onClone={() => setShowCloneDialog(true)}
+        onClone={handleCloneRepo}
         onAddAccount={() => setShowLoginDialog(true)}
       />
     </div>
