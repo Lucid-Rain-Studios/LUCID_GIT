@@ -162,6 +162,7 @@ export function AppShell() {
   const [leftTab, setLeftTab] = useState<TabId>('timeline')
   const [mergeTarget, setMergeTarget] = useState<string | null>(null)
   const [cmdOpen, setCmdOpen] = useState(false)
+  const [authChecked, setAuthChecked] = useState(false)
 
   const [selectedFile, setSelectedFile] = useState<FileStatus | null>(null)
   const [diffContent,  setDiffContent]  = useState<DiffContent | null>(null)
@@ -178,6 +179,7 @@ export function AppShell() {
 
   const currentUserName = accounts.find(a => a.userId === currentAccountId)?.login ?? null
   const isSignedIn = Boolean(currentAccountId)
+  const didAttemptSessionRestore = useRef(false)
 
   // ── Drag resize — file panel ───────────────────────────────────────────────
   const filePanelRef   = useRef<HTMLDivElement>(null)
@@ -234,21 +236,26 @@ export function AppShell() {
     return unsub
   }, [pushNotification])
 
-  useEffect(() => { loadAccounts() }, [])
+  useEffect(() => {
+    loadAccounts().finally(() => setAuthChecked(true))
+  }, [loadAccounts])
 
   // ── Restore previous session — auto-open last repo on launch ──────────────
   useEffect(() => {
-    if (isSignedIn && !repoPath && recentRepos.length > 0) {
+    if (didAttemptSessionRestore.current) return
+    if (!authChecked || !isSignedIn) return
+    didAttemptSessionRestore.current = true
+    if (!repoPath && recentRepos.length > 0) {
       openRepo(recentRepos[0]).catch(() => {})
     }
-  }, [isSignedIn, repoPath, recentRepos, openRepo])
+  }, [authChecked, isSignedIn, repoPath, recentRepos, openRepo])
 
   useEffect(() => {
-    if (!isSignedIn) {
+    if (authChecked && !isSignedIn) {
       clearRepo()
       setShowLoginDialog(true)
     }
-  }, [isSignedIn, clearRepo])
+  }, [authChecked, isSignedIn, clearRepo])
 
   useEffect(() => {
     setSelectedFile(null); setDiffContent(null)
