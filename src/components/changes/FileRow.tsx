@@ -33,6 +33,16 @@ const STATUS_BG: Record<string, string> = {
   '?': 'rgba(162,126,240,0.15)', '!': 'rgba(139,148,176,0.1)',
 }
 
+
+function LockIcon({ color }: { color: string }) {
+  return (
+    <svg width="9" height="9" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0 }}>
+      <rect x="2.2" y="5.4" width="7.6" height="5" rx="1.4" stroke={color} strokeWidth="1.2" />
+      <path d="M3.8 5.4V4a2.2 2.2 0 1 1 4.4 0v1.4" stroke={color} strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 export function FileRow({
   file, repoPath, selected, lock, currentUserName, isMultiSelected, onSelect, onRefresh, onBlameDeps, onMultiContextMenu,
 }: FileRowProps) {
