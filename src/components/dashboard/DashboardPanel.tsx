@@ -8,6 +8,7 @@ import { usePRStore } from '@/stores/prStore'
 import { ContributionGraph } from './ContributionGraph'
 import { getLastFetch, markFetchPerformed, onFetchPerformed } from '@/lib/fetchState'
 import { canCreatePR, canPull, canPush, fetchButtonLabel, pullButtonLabel, pushButtonLabel } from '@/lib/syncButtonLogic'
+import { getTopBarSyncHandlers, getTopBarSyncSnapshot, onTopBarSyncChanged } from '@/lib/topBarSyncBridge'
 
 const sessionFetchedRepos = new Set<string>()
 const sessionRemoteUrls   = new Map<string, string | null>()
@@ -86,6 +87,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
   const [sync,      setSync]      = useState<SyncStatus | null>(null)
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null)
   const [busy,      setBusy]      = useState<string | null>(null)
+  const [topBarTick, setTopBarTick] = useState(0)
   const [lastPull,  setLastPull]  = useState<number | null>(null)
   const [lastFetch, setLastFetch] = useState<number | null>(null)
   const [hasFetched, setHasFetched] = useState(() => sessionFetchedRepos.has(repoPath))
@@ -126,6 +128,8 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
   }, [repoPath])
 
 
+  useEffect(() => onTopBarSyncChanged(() => setTopBarTick(t => t + 1)), [])
+
   useEffect(() => {
     return onFetchPerformed((path, at) => {
       if (path !== repoPath) return
@@ -142,7 +146,12 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
     loadSync()
   }, [syncTick, loadSync])
 
+  const topBarSnapshot = getTopBarSyncSnapshot()
+  const topBarHandlers = getTopBarSyncHandlers()
+  const usingTopBarState = topBarSnapshot.repoPath === repoPath
+
   const doFetch = async () => {
+    if (usingTopBarState && topBarHandlers) return void topBarHandlers.fetch()
     setBusy('fetch')
     try {
       await opRun('Fetching…', () => ipc.fetch(repoPath))
@@ -156,6 +165,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
   }
 
   const doPull = async () => {
+    if (usingTopBarState && topBarHandlers) return void topBarHandlers.pull()
     setBusy('pull')
     try {
       await opRun('Pulling…', () => ipc.pull(repoPath))
@@ -168,6 +178,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
   }
 
   const doPush = async () => {
+    if (usingTopBarState && topBarHandlers) return void topBarHandlers.push()
     setBusy('push')
     try {
       await opRun('Pushing…', () => ipc.push(repoPath))
@@ -176,12 +187,19 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
     } finally { setBusy(null) }
   }
 
+  const effectiveSync = usingTopBarState ? topBarSnapshot.sync : sync
+  const effectiveHasFetched = usingTopBarState ? topBarSnapshot.hasFetched : hasFetched
+  const effectiveBusy = usingTopBarState
+    ? (topBarSnapshot.syncOp === 'idle' ? 'idle' : topBarSnapshot.syncOp === 'fetching' ? 'fetch' : topBarSnapshot.syncOp === 'pulling' ? 'pull' : 'push')
+    : (busy ?? 'idle')
+
   const TWO_DAYS  = 2 * 24 * 60 * 60 * 1000
-  const behind    = sync?.behind ?? 0
-  const ahead     = sync?.ahead ?? 0
-  const busyState = busy ?? 'idle'
+  const behind    = effectiveSync?.behind ?? 0
+  const ahead     = effectiveSync?.ahead ?? 0
+  const busyState = effectiveBusy
   const canCreatePRNow = canCreatePR(!!ghSlug, !!currentBranch, ahead, busyState)
   const stalePull = behind > 0 && (lastPull === null || Date.now() - lastPull > TWO_DAYS)
+  void topBarTick
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', background: '#0d0f15', padding: '22px 24px', fontFamily: "'IBM Plex Sans', system-ui", display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
@@ -216,7 +234,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
           <span style={{ fontSize: 15, flexShrink: 0, color: '#f5a832' }}>⚠</span>
           <div style={{ flex: 1 }}>
             <span style={{ fontSize: 12.5, color: '#f5a832', fontWeight: 600 }}>
-              {behind} commit{behind !== 1 ? 's' : ''} behind {sync?.remoteName ?? 'remote'}
+              {behind} commit{behind !== 1 ? 's' : ''} behind {effectiveSync?.remoteName ?? 'remote'}
             </span>
             <span style={{ fontSize: 11.5, color: '#5a6880', marginLeft: 8 }}>
               {lastPull === null ? "Haven't pulled yet" : `Last pulled ${timeAgo(lastPull)}`}
@@ -231,21 +249,21 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
         <SuggestionsCard
           lastFetch={lastFetch}
           lastPull={lastPull}
-          sync={sync}
+          sync={effectiveSync}
           fileStatus={fileStatus}
           onFetch={doFetch}
-          busy={busy}
+          busy={busyState === 'idle' ? null : busyState}
         />
         <ContributionGraph repoPath={repoPath} />
       </div>
 
       {/* ── Daily Flow Guide ───────────────────────────────────────────── */}
       <DailyFlowStrip
-        sync={sync}
+        sync={effectiveSync}
         staged={staged}
         unstaged={unstaged}
-        busy={busy}
-        hasFetched={hasFetched}
+        busy={busyState === 'idle' ? null : busyState}
+        hasFetched={effectiveHasFetched}
         ghSlug={ghSlug}
         currentBranch={currentBranch}
         onFetch={doFetch}
@@ -253,13 +271,13 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
         onPush={doPush}
         onGoChanges={() => onNavigate('timeline')}
         canCreatePR={canCreatePRNow}
-        onOpenPR={() => remoteUrl && canCreatePRNow && openPRDialog(repoPath, currentBranch, remoteUrl)}
+        onOpenPR={() => usingTopBarState && topBarHandlers ? topBarHandlers.createPR() : (remoteUrl && canCreatePRNow && openPRDialog(repoPath, currentBranch, remoteUrl))}
       />
 
       {/* ── Status grid (3 columns) ─────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gridAutoRows: '1fr', gap: 14, marginTop: 16, flex: 1, minHeight: 300 }}>
         <LocalStatusCard
-          sync={sync} busy={busyState} hasFetched={hasFetched} files={fileStatus}
+          sync={effectiveSync} busy={busyState} hasFetched={effectiveHasFetched} files={fileStatus}
           staged={staged} unstaged={unstaged}
           onFetch={doFetch} onPull={doPull} onPush={doPush} onNavigate={onNavigate}
         />

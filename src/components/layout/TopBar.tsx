@@ -10,6 +10,7 @@ import { NotificationBell } from '@/components/notifications/NotificationBell'
 import { markFetchPerformed } from '@/lib/fetchState'
 import { canCreatePR, canPull, canPush, fetchButtonLabel, pullButtonLabel, pushButtonLabel } from '@/lib/syncButtonLogic'
 import { useStatusToastStore } from '@/stores/statusToastStore'
+import { setTopBarSyncHandlers, updateTopBarSyncSnapshot } from '@/lib/topBarSyncBridge'
 
 interface TopBarProps {
   onOpen:       () => void
@@ -185,6 +186,29 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
     }
     finally { setSyncOp('idle') }
   }
+
+
+
+  useEffect(() => {
+    updateTopBarSyncSnapshot({
+      repoPath: repoPath ?? null,
+      sync,
+      syncOp,
+      hasFetched,
+      canPushNow,
+      canCreatePRNow,
+    })
+  }, [repoPath, sync, syncOp, hasFetched, canPushNow, canCreatePRNow])
+
+  useEffect(() => {
+    setTopBarSyncHandlers(repoPath ? {
+      fetch: doFetch,
+      pull: doTopBarPull,
+      push: doPush,
+      createPR: () => remoteUrl && canCreatePRNow && openPRDialog(repoPath, currentBranch, remoteUrl),
+    } : null)
+    return () => setTopBarSyncHandlers(null)
+  }, [repoPath, remoteUrl, canCreatePRNow, currentBranch, doFetch, doTopBarPull, doPush, openPRDialog])
 
   const repoName = repoPath
     ? (repoPath.replace(/\\/g, '/').split('/').pop() ?? repoPath)
