@@ -173,7 +173,7 @@ export function AppShell() {
   const { updateStep } = useOperationStore()
   const { loadAccounts, accounts, currentAccountId } = useAuthStore()
   const { locks, loadLocks, setLocks } = useLockStore()
-  const { notifications, push: pushNotification } = useNotificationStore()
+  const { notifications, push: pushNotification, resolveRequest, clearResolveRequest } = useNotificationStore()
   const pushError = useErrorStore(s => s.pushRaw)
   const { conflicts: forecastConflicts, enabled: forecastEnabled, lastPolledAt, setConflicts: setForecastConflicts, setEnabled: setForecastEnabled, setLastPolledAt } = useForecastStore()
 
@@ -235,6 +235,11 @@ export function AppShell() {
     const unsub = ipc.onNotification((n: AppNotification) => pushNotification(n))
     return unsub
   }, [pushNotification])
+
+  useEffect(() => {
+    if (!resolveRequest) return
+    setLeftTab('locks')
+  }, [resolveRequest])
 
   useEffect(() => {
     loadAccounts().finally(() => setAuthChecked(true))
@@ -547,7 +552,7 @@ export function AppShell() {
           ) : leftTab === 'locks' ? (
             /* ── Locked Files — full width ── */
             <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
-              <LockedFilesPanel repoPath={repoPath} />
+              <LockedFilesPanel repoPath={repoPath} resolveRequest={resolveRequest} onResolvedViewed={clearResolveRequest} />
             </PanelErrorBoundary>
           ) : leftTab === 'logs' ? (
             /* ── Bug Logs — full width, no repo required ── */

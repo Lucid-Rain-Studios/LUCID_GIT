@@ -7,6 +7,8 @@ import { useDialogStore } from '@/stores/dialogStore'
 
 interface LockedFilesPanelProps {
   repoPath: string
+  resolveRequest?: { repoPath: string; containsLocalChanges: string[]; availableToUnlock: string[] } | null
+  onResolvedViewed?: () => void
 }
 
 function timeAgoStr(iso: string): string {
@@ -32,7 +34,7 @@ function initials(name: string): string {
     : name.slice(0, 2).toUpperCase()
 }
 
-export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
+export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }: LockedFilesPanelProps) {
   const { locks, loadLocks, unlockFile } = useLockStore()
   const { accounts, currentAccountId } = useAuthStore()
   const isAdmin = useAuthStore(s => s.isAdmin(repoPath))
@@ -207,10 +209,31 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
     ipc.showInFolder(full.replace(/\//g, '\\'))
   }
 
+  const mergedResolution = resolveRequest && resolveRequest.repoPath === repoPath ? resolveRequest : null
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#0d0f15', overflow: 'hidden', fontFamily: "'IBM Plex Sans', system-ui" }}>
 
       {/* ── Header ── */}
+      {mergedResolution && (
+        <div style={{ margin: '12px 24px 0', border: '1px solid #2f3a54', borderRadius: 8, padding: 12, background: '#131720' }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#dde1f0' }}>PR merged — file resolution</div>
+          <div style={{ fontSize: 11, color: '#7b8499', marginTop: 4 }}>Review merged files below and unlock what is ready.</div>
+          <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 11, color: '#e8622f' }}>Contains local changes ({mergedResolution.containsLocalChanges.length})</div>
+              {mergedResolution.containsLocalChanges.map(p => <div key={p} style={{ fontSize: 10, color: '#9aa3b7', marginTop: 2 }}>{p}</div>)}
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 11, color: '#5fbf7f' }}>Available to unlock ({mergedResolution.availableToUnlock.length})</div>
+              {mergedResolution.availableToUnlock.map(p => <div key={p} style={{ fontSize: 10, color: '#9aa3b7', marginTop: 2 }}>{p}</div>)}
+            </div>
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <button onClick={() => onResolvedViewed?.()} style={{ height: 26, padding: '0 10px', borderRadius: 6, border: '1px solid #2f3a54', background: 'transparent', color: '#9aa3b7', fontSize: 11 }}>Dismiss</button>
+          </div>
+        </div>
+      )}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 12,
         padding: '16px 24px 0', flexShrink: 0,
