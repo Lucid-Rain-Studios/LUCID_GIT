@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useRepoStore } from '@/stores/repoStore'
 import { useAuthStore } from '@/stores/authStore'
+import { useLockStore } from '@/stores/lockStore'
+import { ipc } from '@/ipc'
 import { AppTooltip } from '@/components/ui/AppTooltip'
 import { AppCheckbox } from '@/components/ui/AppCheckbox'
 
@@ -69,6 +71,14 @@ const VISIBILITY_DEFAULTS: Record<string, string[]> = {
   admin:     ['overview', 'lfs', 'cleanup', 'unreal', 'hooks'],
 }
 
+function parseGitHubSlug(url: string): string | null {
+  const ssh = url.match(/^git@github\.com:(.+?)\/(.+?)(?:\.git)?$/i)
+  if (ssh) return `${ssh[1]}/${ssh[2]}`
+  const https = url.match(/^https?:\/\/github\.com\/(.+?)\/(.+?)(?:\.git)?$/i)
+  if (https) return `${https[1]}/${https[2]}`
+  return null
+}
+
 function loadCollapsed(): Record<string, boolean> {
   try { return JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '{}') } catch { return {} }
 }
@@ -99,8 +109,40 @@ function loadVisibility(): Record<string, string[]> {
 
 export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthChange, repoPath, onOpenTerminal, onOpenRepo, onOpenExplorer }: SidebarProps) {
   const { fileStatus } = useRepoStore()
+  const lockedFileCount = useLockStore(s => s.locks.length)
   const isAdmin = useAuthStore(s => s.isAdmin(repoPath ?? ''))
   const totalChanges = fileStatus.length
+  const [openPrCount, setOpenPrCount] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    const loadOpenPrCount = async () => {
+      if (!repoPath || !isAdmin) {
+        setOpenPrCount(0)
+        return
+      }
+      try {
+        const remoteUrl = await ipc.getRemoteUrl(repoPath)
+        const slug = remoteUrl ? parseGitHubSlug(remoteUrl) : null
+        if (!slug) {
+          if (!cancelled) setOpenPrCount(0)
+          return
+        }
+        const [owner, repo] = slug.split('/')
+        const prs = await ipc.githubListPRs({ owner, repo })
+        if (!cancelled) setOpenPrCount(prs.length)
+      } catch {
+        if (!cancelled) setOpenPrCount(0)
+      }
+    }
+
+    loadOpenPrCount()
+    const id = window.setInterval(loadOpenPrCount, 30000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [repoPath, isAdmin])
 
   const [groupsCollapsed,   setGroupsCollapsed]   = useState<Record<string, boolean>>(loadCollapsed)
   const [sectionVisibility, setSectionVisibility] = useState<Record<string, string[]>>(loadVisibility)
@@ -292,7 +334,15 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
                       item={item}
                       isActive={active === item.id}
                       collapsed={collapsed}
-                      badge={item.id === 'timeline' ? totalChanges : 0}
+                      badge={
+                        item.id === 'timeline'
+                          ? totalChanges
+                          : item.id === 'locks'
+                            ? lockedFileCount
+                            : item.id === 'overview'
+                              ? openPrCount
+                              : 0
+                      }
                       disabled={item.id !== 'settings' && item.id !== 'logs' && !repoPath}
                       onClick={() => { if (repoPath || item.id === 'settings' || item.id === 'logs') onChange(item.id) }}
                     />

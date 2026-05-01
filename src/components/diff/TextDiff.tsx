@@ -24,7 +24,7 @@ export function TextDiff({ diff }: TextDiffProps) {
         lineNumbers: 'on',
         wordWrap: 'off',
         renderOverviewRuler: false,
-        scrollbar: { verticalScrollbarSize: 6, horizontalScrollbarSize: 6 },
+        scrollbar: { verticalScrollbarSize: 12, horizontalScrollbarSize: 12 },
       }}
       loading={
         <div className="flex items-center justify-center h-full">
