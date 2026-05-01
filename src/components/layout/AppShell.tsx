@@ -168,7 +168,7 @@ export function AppShell() {
   const [diffLoading,  setDiffLoading]  = useState(false)
   const [blameTarget,  setBlameTarget]  = useState<{ filePath: string; repoPath: string } | null>(null)
 
-  const { repoPath, fileStatus, isLoading, error, openRepo, refreshStatus, silentRefresh, recentRepos, removeRecentRepo } = useRepoStore()
+  const { repoPath, fileStatus, isLoading, error, openRepo, refreshStatus, silentRefresh, recentRepos, removeRecentRepo, clearRepo } = useRepoStore()
   const { updateStep } = useOperationStore()
   const { loadAccounts, accounts, currentAccountId } = useAuthStore()
   const { locks, loadLocks, setLocks } = useLockStore()
@@ -238,10 +238,17 @@ export function AppShell() {
 
   // ── Restore previous session — auto-open last repo on launch ──────────────
   useEffect(() => {
-    if (!repoPath && recentRepos.length > 0) {
+    if (isSignedIn && !repoPath && recentRepos.length > 0) {
       openRepo(recentRepos[0]).catch(() => {})
     }
-  }, [])
+  }, [isSignedIn, repoPath, recentRepos, openRepo])
+
+  useEffect(() => {
+    if (!isSignedIn) {
+      clearRepo()
+      setShowLoginDialog(true)
+    }
+  }, [isSignedIn, clearRepo])
 
   useEffect(() => {
     setSelectedFile(null); setDiffContent(null)
@@ -439,7 +446,7 @@ export function AppShell() {
                   Press ⌘K to open command palette
                 </div>
 
-                {recentRepos.length > 0 && (
+                {isSignedIn && recentRepos.length > 0 && (
                   <div style={{ marginTop: 32, width: 340, textAlign: 'left' }}>
                     <div style={{
                       fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, fontWeight: 700,
