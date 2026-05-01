@@ -72,6 +72,8 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
   const [switchConfirm, setSwitchConfirm]   = useState<string | null>(null)
   const [ctxMenu, setCtxMenu]               = useState<BranchContextMenuState | null>(null)
   const [insights, setInsights]             = useState<Record<string, BranchInsights>>({})
+  const [splitPct, setSplitPct]             = useState(42)
+  const splitWrapRef = useRef<HTMLDivElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
 
   const hasChanges = fileStatus.length > 0
@@ -244,6 +246,23 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
     e.stopPropagation()
     setCtxMenu({ x: e.clientX, y: e.clientY, branch, isLocal })
   }
+  const startSplitDrag = (e: React.MouseEvent) => {
+    e.preventDefault()
+    const wrap = splitWrapRef.current
+    if (!wrap) return
+    const rect = wrap.getBoundingClientRect()
+    const onMove = (ev: MouseEvent) => {
+      const x = ev.clientX - rect.left
+      const pct = (x / rect.width) * 100
+      setSplitPct(Math.max(28, Math.min(72, pct)))
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
 
   const openBranchOnGitHub = (branchName: string) => {
     if (!ghSlug) return
@@ -345,8 +364,8 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
       )}
 
       {/* ── Scrollable branch lists ─────────────────────────────────────── */}
-      <div className="flex-1 min-h-0 flex">
-        <div className="w-1/2 min-w-0 border-r border-lg-border overflow-y-auto">
+      <div ref={splitWrapRef} className="flex-1 min-h-0 flex">
+        <div className="min-w-0 overflow-y-auto" style={{ width: `${splitPct}%` }}>
           {/* ── LOCAL ──────────────────────────────────────────────────────── */}
           <SectionHeader label="Local" count={localBranches.length} />
 
@@ -534,7 +553,12 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
         )}
 
         </div>
-        <div className="w-1/2 min-w-0 overflow-y-auto bg-lg-bg-primary/40">
+        <div
+          onMouseDown={startSplitDrag}
+          className="w-1.5 cursor-col-resize bg-lg-border/80 hover:bg-lg-accent/60 transition-colors"
+          title="Drag to resize panels"
+        />
+        <div className="min-w-0 overflow-y-auto bg-lg-bg-primary/40 flex-1">
           {!selectedBranch && (
             <div className="px-5 py-6 text-[11px] font-mono text-lg-text-secondary">
               Select any local or remote branch to view health, lock activity, presence, risk, and divergence details.
