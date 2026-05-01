@@ -35,7 +35,7 @@ echo.
 :: ── Package with electron-builder ────────────────────────────────────────────
 echo [3/3] Packaging...
 set CSC_IDENTITY_AUTO_DISCOVERY=false
-set OUT_DIR=%~dp0Build\Build_v%VERSION%
+set OUT_DIR=%~dp0Build-exe\Build_v%VERSION%
 call npx electron-builder --win --x64 --config.directories.output="%OUT_DIR%"
 if %errorlevel% neq 0 (
     echo  ERROR: Packaging failed.

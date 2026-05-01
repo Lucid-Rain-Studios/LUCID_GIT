@@ -3,6 +3,7 @@ dist-electron/
 dist-renderer/
 dist/
 Build/
+Build-exe/
 *.log
 npm-debug.log*
 .DS_Store

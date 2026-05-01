@@ -162,13 +162,14 @@ export function AppShell() {
   const [leftTab, setLeftTab] = useState<TabId>('timeline')
   const [mergeTarget, setMergeTarget] = useState<string | null>(null)
   const [cmdOpen, setCmdOpen] = useState(false)
+  const [authChecked, setAuthChecked] = useState(false)
 
   const [selectedFile, setSelectedFile] = useState<FileStatus | null>(null)
   const [diffContent,  setDiffContent]  = useState<DiffContent | null>(null)
   const [diffLoading,  setDiffLoading]  = useState(false)
   const [blameTarget,  setBlameTarget]  = useState<{ filePath: string; repoPath: string } | null>(null)
 
-  const { repoPath, fileStatus, isLoading, error, openRepo, refreshStatus, silentRefresh, recentRepos, removeRecentRepo } = useRepoStore()
+  const { repoPath, fileStatus, isLoading, error, openRepo, refreshStatus, silentRefresh, recentRepos, removeRecentRepo, clearRepo } = useRepoStore()
   const { updateStep } = useOperationStore()
   const { loadAccounts, accounts, currentAccountId } = useAuthStore()
   const { locks, loadLocks, setLocks } = useLockStore()
@@ -178,6 +179,7 @@ export function AppShell() {
 
   const currentUserName = accounts.find(a => a.userId === currentAccountId)?.login ?? null
   const isSignedIn = Boolean(currentAccountId)
+  const didAttemptSessionRestore = useRef(false)
 
   // ── Drag resize — file panel ───────────────────────────────────────────────
   const filePanelRef   = useRef<HTMLDivElement>(null)
@@ -234,14 +236,25 @@ export function AppShell() {
     return unsub
   }, [pushNotification])
 
-  useEffect(() => { loadAccounts() }, [])
+  useEffect(() => {
+    loadAccounts().finally(() => setAuthChecked(true))
+  }, [loadAccounts])
 
   // ── Restore previous session — auto-open last repo on launch ──────────────
   useEffect(() => {
+    if (didAttemptSessionRestore.current) return
+    if (!authChecked || !isSignedIn) return
+    didAttemptSessionRestore.current = true
     if (!repoPath && recentRepos.length > 0) {
       openRepo(recentRepos[0]).catch(() => {})
     }
-  }, [])
+  }, [authChecked, isSignedIn, repoPath, recentRepos, openRepo])
+
+  useEffect(() => {
+    if (authChecked && !isSignedIn) {
+      clearRepo()
+    }
+  }, [authChecked, isSignedIn, clearRepo])
 
   useEffect(() => {
     setSelectedFile(null); setDiffContent(null)
@@ -439,7 +452,7 @@ export function AppShell() {
                   Press ⌘K to open command palette
                 </div>
 
-                {recentRepos.length > 0 && (
+                {isSignedIn && recentRepos.length > 0 && (
                   <div style={{ marginTop: 32, width: 340, textAlign: 'left' }}>
                     <div style={{
                       fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, fontWeight: 700,
