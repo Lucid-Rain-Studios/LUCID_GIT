@@ -64,6 +64,7 @@ jobs:
 
       # ── Package and publish to GitHub Releases ─────────────────────────────
       - name: Package and publish
+        if: matrix.platform == 'win'
         run: npx electron-builder --publish always
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
