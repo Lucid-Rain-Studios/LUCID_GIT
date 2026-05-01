@@ -738,9 +738,8 @@ function BranchStatusPanel({ branch, insights }: { branch: BranchInfo; insights?
       {insights?.activity && <div className="text-lg-text-secondary">Last commit: “{insights.activity.message}” — {insights.activity.author} ({relTime(insights.activity.date)})</div>}
       <div className="text-lg-text-secondary">PR status: {insights?.prs?.length ? `#${insights.prs[0].number} open` : 'none'}</div>
       <div className={safeMerge ? 'text-lg-success' : 'text-lg-warning'}>
-        Safe to merge: {behind === 0 ? 'up-to-date with main ✅' : `needs ${behind} main commit(s) ❌`} · {hasConflictRisk ? 'no overlaps/conflicts ❌' : 'no overlaps/conflicts ✅'} · {(insights?.locks.length ?? 0) === 0 ? 'no locks ✅' : 'locks present ❌'}
+        Safe to merge: {behind === 0 ? 'up-to-date with main ✅' : `needs ${behind} main commit(s) ❌`} · {hasConflictRisk ? 'overlaps/conflicts present ❌' : 'no overlaps/conflicts ✅'} · {(insights?.locks.length ?? 0) === 0 ? 'no locks ✅' : 'locks present ❌'}
       </div>
-      <div className="text-lg-text-secondary/80">Ahead means commits this branch has that main does not. Behind means commits on main this branch does not have yet.</div>
       {insights?.overlapWarnings.slice(0, 3).map(w => <div key={w} className="text-lg-warning">{w}</div>)}
       <div className="text-lg-text-secondary/70">main ─────●────●────● {'\\'} ●─● ({branch.name})</div>
     </div>
@@ -833,11 +832,17 @@ function BranchDiffPreview({ repoPath, base, compare, onSwitch, onClose }: {
             </button>
           </div>
 
+          <div className="grid grid-cols-2 gap-2">
+            <div className="text-[9px] font-mono text-lg-text-secondary/70">Ahead = commits in {compare} that are not in {base}.</div>
+            <div className="text-[9px] font-mono text-lg-text-secondary/70">Behind = commits in {base} that are not in {compare} yet.</div>
+          </div>
+
           {/* Ahead commits */}
           {showAheadLog && diff.aheadCommits.length > 0 && (
             <div className="space-y-0.5">
               {diff.aheadCommits.slice(0, 10).map(c => (
                 <div key={c.hash} className="flex items-start gap-1.5 py-0.5">
+                  <span className="shrink-0 px-1 rounded text-[9px] font-mono leading-4 text-lg-success bg-lg-success/15">ahead</span>
                   <span className="font-mono text-[9px] text-lg-text-secondary/50 shrink-0 mt-0.5">{c.hash.slice(0,6)}</span>
                   <span className="text-[10px] text-lg-text-primary truncate">{c.message}</span>
                 </div>
@@ -853,6 +858,7 @@ function BranchDiffPreview({ repoPath, base, compare, onSwitch, onClose }: {
             <div className="space-y-0.5">
               {diff.behindCommits.slice(0, 10).map(c => (
                 <div key={c.hash} className="flex items-start gap-1.5 py-0.5">
+                  <span className="shrink-0 px-1 rounded text-[9px] font-mono leading-4 text-lg-warning bg-lg-warning/15">behind</span>
                   <span className="font-mono text-[9px] text-lg-text-secondary/50 shrink-0 mt-0.5">{c.hash.slice(0,6)}</span>
                   <span className="text-[10px] text-lg-text-primary truncate">{c.message}</span>
                 </div>
