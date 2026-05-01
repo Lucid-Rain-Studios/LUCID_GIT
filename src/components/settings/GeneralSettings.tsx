@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { ipc, AppSettings } from '@/ipc'
+import { ipc, AppSettings, UpdateInfo } from '@/ipc'
 import { cn } from '@/lib/utils'
 
 const CONFIRM_BRANCH_KEY = 'lucid-git:confirm-branch-switch'
@@ -53,10 +53,29 @@ export function GeneralSettings() {
   const [confirmBranchSwitch, setConfirmBranchSwitch] = useState(
     () => localStorage.getItem(CONFIRM_BRANCH_KEY) !== 'false'
   )
+  const [checkingUpdates, setCheckingUpdates] = useState(false)
+  const [downloadingUpdate, setDownloadingUpdate] = useState(false)
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
+  const [updateReady, setUpdateReady] = useState(false)
+  const [updateStatus, setUpdateStatus] = useState<string>('')
 
   useEffect(() => {
     ipc.settingsGet().then(setSettings).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    const unsubAvail = ipc.onUpdateAvailable((info) => {
+      setUpdateInfo(info)
+      setUpdateReady(false)
+      setUpdateStatus(`Update ${info.version} is available.`)
+    })
+    const unsubReady = ipc.onUpdateReady(() => {
+      setUpdateReady(true)
+      setDownloadingUpdate(false)
+      setUpdateStatus(`Update ${updateInfo?.version ?? ''} is downloaded and ready to install.`.trim())
+    })
+    return () => { unsubAvail(); unsubReady() }
+  }, [updateInfo?.version])
 
   const handleConfirmBranchToggle = (checked: boolean) => {
     setConfirmBranchSwitch(checked)
@@ -81,6 +100,34 @@ export function GeneralSettings() {
       setSaved(true)
     } catch {}
     finally { setSaving(false) }
+  }
+
+  const handleCheckUpdates = async () => {
+    setCheckingUpdates(true)
+    setUpdateStatus('Checking for updates…')
+    try {
+      const result = await ipc.updateCheck()
+      if (!result.available) {
+        setUpdateStatus('You are already on the latest version.')
+      } else if (result.version) {
+        setUpdateStatus(`Update ${result.version} is available.`)
+      }
+    } catch {
+      setUpdateStatus('Unable to check for updates right now.')
+    } finally {
+      setCheckingUpdates(false)
+    }
+  }
+
+  const handleDownloadUpdate = async () => {
+    setDownloadingUpdate(true)
+    setUpdateStatus('Downloading update…')
+    try {
+      await ipc.updateDownload()
+    } catch {
+      setDownloadingUpdate(false)
+      setUpdateStatus('Update download failed. Try again.')
+    }
   }
 
   return (
@@ -194,6 +241,57 @@ export function GeneralSettings() {
               className="w-32 bg-lg-bg-primary border border-lg-border rounded px-2 py-1 text-[11px] font-mono text-lg-text-primary focus:outline-none focus:border-lg-accent"
             />
           </Row>
+        </Section>
+
+        <Section title="App updates">
+          <Row
+            label="Check for updates"
+            hint="Check GitHub Releases for a newer installed build."
+          >
+            <button
+              onClick={handleCheckUpdates}
+              disabled={checkingUpdates}
+              className={cn(
+                'px-3 h-7 rounded text-[10px] font-mono border transition-colors disabled:opacity-40',
+                'border-lg-border text-lg-text-primary hover:border-lg-accent hover:text-lg-accent'
+              )}
+            >
+              {checkingUpdates ? 'Checking…' : 'Check now'}
+            </button>
+          </Row>
+
+          {updateInfo && !updateReady && (
+            <Row label={`Update ${updateInfo.version} available`}>
+              <button
+                onClick={handleDownloadUpdate}
+                disabled={downloadingUpdate}
+                className={cn(
+                  'px-3 h-7 rounded text-[10px] font-mono border transition-colors disabled:opacity-40',
+                  'border-lg-accent text-lg-accent hover:bg-lg-accent/10'
+                )}
+              >
+                {downloadingUpdate ? 'Downloading…' : 'Download update'}
+              </button>
+            </Row>
+          )}
+
+          {updateReady && (
+            <Row label="Update ready to install">
+              <button
+                onClick={() => ipc.updateInstall()}
+                className={cn(
+                  'px-3 h-7 rounded text-[10px] font-mono border transition-colors',
+                  'border-lg-success text-lg-success hover:bg-lg-success/10'
+                )}
+              >
+                Restart & install
+              </button>
+            </Row>
+          )}
+
+          {updateStatus && (
+            <div className="text-[10px] font-mono text-lg-text-secondary">{updateStatus}</div>
+          )}
         </Section>
 
         <div className="px-3 py-3 flex items-center gap-3">
