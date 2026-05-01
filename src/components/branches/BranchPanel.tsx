@@ -6,6 +6,15 @@ import { useDialogStore } from '@/stores/dialogStore'
 import { usePRStore } from '@/stores/prStore'
 import { cn } from '@/lib/utils'
 
+
+
+interface BranchContextMenuState {
+  x: number
+  y: number
+  branch: BranchInfo
+  isLocal: boolean
+}
+
 interface BranchPanelProps {
   onMergePreview: (targetBranch: string) => void
   onRefresh: () => void
@@ -54,6 +63,7 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
   const [remoteUrl, setRemoteUrl]           = useState<string | null>(null)
   const [previewBranch, setPreviewBranch]   = useState<string | null>(null)
   const [switchConfirm, setSwitchConfirm]   = useState<string | null>(null)
+  const [ctxMenu, setCtxMenu]               = useState<BranchContextMenuState | null>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
 
   const hasChanges = fileStatus.length > 0
@@ -100,6 +110,7 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
 
   // ── Local branch actions ─────────────────────────────────────────────────
   const doCheckoutLocal = (branch: BranchInfo) => {
+    setCtxMenu(null)
     if (branch.current || busy) return
     if (hasChanges) {
       setSwitchConfirm(branch.name)
@@ -157,6 +168,7 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
 
   // ── Remote branch actions ────────────────────────────────────────────────
   const doCheckoutRemote = (branch: BranchInfo) => {
+    setCtxMenu(null)
     if (!repoPath || busy) return
     if (hasChanges) {
       setSwitchConfirm(branch.displayName)
@@ -166,6 +178,7 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
   }
 
   const doDeleteRemote = async (branch: BranchInfo) => {
+    setCtxMenu(null)
     if (!repoPath || !branch.remoteName) return
     const ok = await dialog.confirm({ title: 'Delete remote branch', message: `Delete "${branch.name}" from remote?`, detail: 'This cannot be undone.', confirmLabel: 'Delete Remote', danger: true })
     if (!ok) return
@@ -201,6 +214,43 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
   }
 
   const ghSlug = remoteUrl ? parseGitHubSlug(remoteUrl) : null
+
+
+  useEffect(() => {
+    if (!ctxMenu) return
+    const close = () => setCtxMenu(null)
+    window.addEventListener('click', close)
+    window.addEventListener('contextmenu', close)
+    window.addEventListener('keydown', close)
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('contextmenu', close)
+      window.removeEventListener('keydown', close)
+    }
+  }, [ctxMenu])
+
+  const openBranchMenu = (e: React.MouseEvent, branch: BranchInfo, isLocal: boolean) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setCtxMenu({ x: e.clientX, y: e.clientY, branch, isLocal })
+  }
+
+  const openBranchOnGitHub = (branchName: string) => {
+    if (!ghSlug) return
+    ipc.openExternal(`https://github.com/${ghSlug}/tree/${encodeURIComponent(branchName)}`)
+    setCtxMenu(null)
+  }
+
+  const openCompareOnGitHub = (branchName: string) => {
+    if (!ghSlug || !currentBranch) return
+    ipc.openExternal(`https://github.com/${ghSlug}/compare/${encodeURIComponent(currentBranch)}...${encodeURIComponent(branchName)}`)
+    setCtxMenu(null)
+  }
+
+  const handleContextCreatePR = (branchName: string) => {
+    openPR(branchName)
+    setCtxMenu(null)
+  }
 
   const localBranches  = branches.filter(b => !b.isRemote)
     .sort((a, b) => (a.current ? -1 : b.current ? 1 : a.name.localeCompare(b.name)))
@@ -267,6 +317,7 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
           return (
             <React.Fragment key={branch.name}>
               <div
+                onContextMenu={e => openBranchMenu(e, branch, true)}
                 onClick={() => { if (!branch.current && !isRenaming) setPreviewBranch(isPreviewed ? null : branch.name) }}
                 className={cn(
                   'group flex items-center gap-1.5 px-3 py-2 border-b border-lg-border/40 transition-colors min-w-0',
@@ -367,6 +418,7 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
               return (
                 <div
                   key={branch.name}
+                  onContextMenu={e => openBranchMenu(e, branch, false)}
                   className="group flex items-center gap-1.5 px-3 py-2 border-b border-lg-border/40 hover:bg-lg-bg-elevated/40 transition-colors min-w-0"
                 >
                   {/* Remote indicator */}
@@ -447,6 +499,23 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
         )}
 
       </div>
+
+
+      {ctxMenu && (
+        <div
+          className="fixed z-50 min-w-56 rounded-md border border-lg-border bg-lg-bg-elevated shadow-2xl py-1 text-xs font-mono"
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          onClick={e => e.stopPropagation()}
+        >
+          <button className="w-full text-left px-3 py-1.5 hover:bg-lg-bg-secondary" onClick={() => { setPreviewBranch(ctxMenu.branch.displayName); setCtxMenu(null) }}>Compare to branch</button>
+          {ctxMenu.isLocal && !ctxMenu.branch.current && (
+            <button className="w-full text-left px-3 py-1.5 hover:bg-lg-bg-secondary" onClick={() => onMergePreview(ctxMenu.branch.name)}>Merge into current branch…</button>
+          )}
+          <button className="w-full text-left px-3 py-1.5 hover:bg-lg-bg-secondary" onClick={() => openCompareOnGitHub(ctxMenu.branch.displayName)}>Compare on GitHub</button>
+          <button className="w-full text-left px-3 py-1.5 hover:bg-lg-bg-secondary" onClick={() => openBranchOnGitHub(ctxMenu.branch.displayName)}>View branch on GitHub</button>
+          <button className="w-full text-left px-3 py-1.5 hover:bg-lg-bg-secondary" onClick={() => handleContextCreatePR(ctxMenu.branch.displayName)}>Create pull request</button>
+        </div>
+      )}
 
       {/* ── Footer ─────────────────────────────────────────────────────── */}
       <div className="px-3 py-2 border-t border-lg-border shrink-0">
