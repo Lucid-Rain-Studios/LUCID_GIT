@@ -10,8 +10,17 @@ echo   Lucid Git Builder
 echo  ============================================
 echo.
 
+:: ── Install dependencies (including devDependencies) ────────────────────────
+echo [1/4] Installing dependencies...
+call npm ci --include=dev
+if %errorlevel% neq 0 (
+    echo  ERROR: Dependency install failed.
+    pause & exit /b 1
+)
+echo.
+
 :: ── Bump patch version in package.json ──────────────────────────────────────
-echo [1/3] Incrementing version...
+echo [2/4] Incrementing version...
 call npm version patch --no-git-tag-version >nul 2>&1
 if %errorlevel% neq 0 (
     echo  ERROR: Failed to increment version.
@@ -24,7 +33,7 @@ echo        Version: %VERSION%
 echo.
 
 :: ── Compile TypeScript + Vite renderer ───────────────────────────────────────
-echo [2/3] Building...
+echo [3/4] Building...
 call npm run build
 if %errorlevel% neq 0 (
     echo  ERROR: Build failed.
@@ -33,7 +42,7 @@ if %errorlevel% neq 0 (
 echo.
 
 :: ── Package with electron-builder ────────────────────────────────────────────
-echo [3/3] Packaging...
+echo [4/4] Packaging...
 set CSC_IDENTITY_AUTO_DISCOVERY=false
 set OUT_DIR=%~dp0Build-exe\Build_v%VERSION%
 call npx electron-builder --win --x64 --config.directories.output="%OUT_DIR%"

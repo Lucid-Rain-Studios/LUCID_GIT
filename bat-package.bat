@@ -17,7 +17,7 @@ if errorlevel 1 (
 )
 
 echo [1/4] Installing dependencies...
-call npm ci
+call npm ci --include=dev
 if errorlevel 1 (
   echo ERROR: npm ci failed.
   exit /b 1
