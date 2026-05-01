@@ -33,8 +33,6 @@ win:
   target:
     - target: nsis
       arch: [x64]
-    - target: portable
-      arch: [x64]
   requestedExecutionLevel: asInvoker   # install to AppData, no UAC prompt
   # signAndEditExecutable is true by default; set false until a cert is configured
   # to avoid needing winCodeSign tool extraction on Windows hosts without Developer Mode

@@ -129,8 +129,13 @@ function registerUpdaterHandlers() {
   const { ipcMain } = require('electron')
 
   ipcMain.handle(CHANNELS.UPDATE_CHECK, async () => {
-    if (isDev) return
-    await autoUpdater.checkForUpdates()
+    if (isDev) return { available: false, version: null as string | null, source: 'dev' as const }
+    const result = await autoUpdater.checkForUpdates()
+    return {
+      available: !!result?.updateInfo?.version,
+      version: result?.updateInfo?.version ?? null,
+      source: 'release' as const,
+    }
   })
 
   ipcMain.handle(CHANNELS.UPDATE_DOWNLOAD, async () => {

@@ -260,6 +260,12 @@ export interface UpdateInfo {
   releaseNotes?: string
 }
 
+export interface UpdateCheckResult {
+  available: boolean
+  version: string | null
+  source: 'dev' | 'release'
+}
+
 export interface AppSettings {
   autoFetchIntervalMinutes: number
   defaultCloneDepth: number
@@ -537,7 +543,7 @@ export interface LucidGitAPI {
   webhookSave: (repoPath: string, config: WebhookConfig) => Promise<void>
 
   // Auto-updater
-  updateCheck: () => Promise<void>
+  updateCheck: () => Promise<UpdateCheckResult>
   updateDownload: () => Promise<void>
   updateInstall: () => Promise<void>
   onUpdateReady: (cb: () => void) => () => void
