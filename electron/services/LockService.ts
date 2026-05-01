@@ -74,7 +74,8 @@ class LockService {
       const locks = await this.listLocks(repoPath)
       resolvedLockId = locks.find(l => l.path === normalized)?.id
     }
-    const pathArgs = resolvedLockId ? ['--id', resolvedLockId] : [normalized]
+    // Use --id=<id> form for maximum CLI compatibility across Git LFS versions.
+    const pathArgs = resolvedLockId ? [`--id=${resolvedLockId}`] : [normalized]
     const unlockOpts: string[] = []
     // Deleted (ghost) files can still be locked in LFS; force-unlock avoids local path checks.
     if (force || !fs.existsSync(fullPath)) unlockOpts.push('--force')
