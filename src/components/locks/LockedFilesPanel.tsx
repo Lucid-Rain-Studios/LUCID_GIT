@@ -167,10 +167,13 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
     }
     setUnlocking('__bulk__')
     try {
-      for (const lock of selectedLocks) {
+      const jobs = selectedLocks.map(async lock => {
         const force = !currentLogin || lock.owner.login !== currentLogin
-        await unlockFile(repoPath, lock.path, force)
-      }
+        await unlockFile(repoPath, lock.path, force, lock.id)
+      })
+      const results = await Promise.allSettled(jobs)
+      const failed = results.filter(r => r.status === 'rejected') as PromiseRejectedResult[]
+      if (failed.length > 0) throw failed[0].reason
       setSelectedLockIds(new Set())
     } catch (e) {
       await dialog.alert({ title: 'Error', message: String(e) })
@@ -192,7 +195,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
     }
     setUnlocking(lock.path)
     try {
-      await unlockFile(repoPath, lock.path, force)
+      await unlockFile(repoPath, lock.path, force, lock.id)
     } catch (e) {
       await dialog.alert({ title: 'Error', message: String(e) })
     } finally {
