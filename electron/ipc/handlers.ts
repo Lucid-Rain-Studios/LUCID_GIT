@@ -279,6 +279,19 @@ export function registerHandlers(): void {
     heatmapService.markConflictsResolved(repoPath, ourBranch, targetBranch)
   })
 
+  ipcMain.handle(
+    CHANNELS.GIT_MERGE_RESOLVE,
+    async (
+      _event,
+      repoPath: string,
+      targetBranch: string,
+      baseBranch: string,
+      fileChoices: Record<string, 'ours' | 'theirs'>
+    ) => {
+      await runGitOp('Resolve merge', () => gitService.resolveMergeIntoBranch(repoPath, targetBranch, baseBranch, fileChoices))
+    }
+  )
+
   // ── Locks — Phase 5 ───────────────────────────────────────────────────────
   ipcMain.handle(CHANNELS.LOCK_LIST, async (_event, repoPath: string) => {
     return lockService.listLocks(repoPath)

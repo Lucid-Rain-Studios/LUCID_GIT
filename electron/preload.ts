@@ -310,6 +310,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GITHUB_PR_FILES, args),
   githubMergePR: (args: { owner: string; repo: string; prNumber: number; repoPath: string }) =>
     ipcRenderer.invoke(CHANNELS.GITHUB_MERGE_PR, args),
+  mergeResolve: (repoPath: string, targetBranch: string, baseBranch: string, fileChoices: Record<string, 'ours' | 'theirs'>) =>
+    ipcRenderer.invoke(CHANNELS.GIT_MERGE_RESOLVE, repoPath, targetBranch, baseBranch, fileChoices),
   githubClosePR: (args: { owner: string; repo: string; prNumber: number }) =>
     ipcRenderer.invoke(CHANNELS.GITHUB_CLOSE_PR, args),
 
