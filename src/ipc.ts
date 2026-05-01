@@ -512,6 +512,7 @@ export interface LucidGitAPI {
   branchDiff: (repoPath: string, base: string, compare: string) => Promise<BranchDiffSummary>
   mergePreview: (repoPath: string, targetBranch: string) => Promise<ConflictPreviewFile[]>
   merge: (repoPath: string, targetBranch: string) => Promise<void>
+  mergeResolve: (repoPath: string, targetBranch: string, baseBranch: string, fileChoices: Record<string, 'ours' | 'theirs'>) => Promise<void>
 
   // Locks
   listLocks: (repoPath: string) => Promise<Lock[]>

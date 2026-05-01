@@ -623,6 +623,32 @@ class GitService {
     await exec(['merge', targetRef], repoPath)
   }
 
+  async resolveMergeIntoBranch(
+    repoPath: string,
+    targetBranch: string,
+    baseBranch: string,
+    fileChoices: Record<string, 'ours' | 'theirs'>,
+  ): Promise<void> {
+    const startBranch = await this.currentBranch(repoPath)
+    const targetRef = await this.resolveBranchRef(repoPath, targetBranch)
+    const baseRef = await this.resolveBranchRef(repoPath, baseBranch)
+
+    await exec(['checkout', targetRef.replace(/^origin\//, '')], repoPath)
+    await execSafe(['merge', '--abort'], repoPath)
+    await exec(['merge', '--no-ff', '--no-commit', baseRef], repoPath).catch(async () => {
+      // expected when conflicts are present
+    })
+
+    for (const [file, side] of Object.entries(fileChoices)) {
+      await exec(['checkout', side === 'theirs' ? '--theirs' : '--ours', '--', file], repoPath)
+      await exec(['add', '--', file], repoPath)
+    }
+
+    await exec(['commit', '-m', `Resolve merge conflicts: ${baseBranch} -> ${targetBranch}`], repoPath)
+    await exec(['push', 'origin', targetRef.replace(/^origin\//, '')], repoPath)
+    await exec(['checkout', startBranch], repoPath)
+  }
+
   private async resolveBranchRef(repoPath: string, targetBranch: string): Promise<string> {
     const candidates = [targetBranch, `origin/${targetBranch}`]
     for (const ref of candidates) {

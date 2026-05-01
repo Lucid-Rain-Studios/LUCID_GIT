@@ -483,6 +483,17 @@ function ResolveDialog({
     setBusy(true)
     try {
       if (choice === 'accept') {
+        if (conflicts.length > 0) {
+          const resolveMap: Record<string, 'ours' | 'theirs'> = {}
+          for (const f of conflicts) {
+            const selected = fileChoices[f.path] ?? 'branch'
+            // merge order is base -> head; "branch" means keep head changes (ours)
+            resolveMap[f.path] = selected === 'branch' ? 'ours' : 'theirs'
+          }
+          await opRun(`Resolving PR #${pr.number} conflicts…`, () =>
+            ipc.mergeResolve(repoPath, pr.headBranch, pr.baseBranch, resolveMap)
+          )
+        }
         await opRun(`Merging PR #${pr.number}…`, () => ipc.githubMergePR({ owner, repo, prNumber: pr.number, repoPath }))
         bumpHistoryTick()
         bumpPrTick()
