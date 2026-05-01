@@ -167,6 +167,11 @@ pre,
   to   { opacity: 1; transform: scale(1); }
 }
 
+@keyframes top-toast-slide {
+  from { opacity: 0; transform: translateY(-18px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 @keyframes glow-pulse {
   0%, 100% { box-shadow: 0 0 8px rgba(232,98,47,0.15); }
   50%       { box-shadow: 0 0 18px rgba(232,98,47,0.35); }
