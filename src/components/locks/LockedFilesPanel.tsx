@@ -48,39 +48,52 @@ export function LockedFilesPanel({ repoPath }: LockedFilesPanelProps) {
   const [selectedLockIds, setSelectedLockIds] = useState<Set<string>>(new Set())
   const lastSelectedIndexRef = useRef<number | null>(null)
 
-  const myLocks   = locks.filter(l => currentLogin && l.owner.login === currentLogin)
-  const teamLocks = locks.filter(l => !currentLogin || l.owner.login !== currentLogin)
-  const source    = tab === 'mine' ? myLocks : teamLocks
+  const myLocks = useMemo(
+    () => locks.filter(l => currentLogin && l.owner.login === currentLogin),
+    [locks, currentLogin]
+  )
+  const teamLocks = useMemo(
+    () => locks.filter(l => !currentLogin || l.owner.login !== currentLogin),
+    [locks, currentLogin]
+  )
+  const source = tab === 'mine' ? myLocks : teamLocks
+  const normalizedSearch = search.trim().toLowerCase()
 
-  const filtered = search.trim()
-    ? source.filter(l =>
-        l.path.toLowerCase().includes(search.toLowerCase()) ||
-        l.owner.login.toLowerCase().includes(search.toLowerCase()) ||
-        l.owner.name.toLowerCase().includes(search.toLowerCase())
-      )
-    : source
+  const filtered = useMemo(() => {
+    if (!normalizedSearch) return source
+    return source.filter(l =>
+      l.path.toLowerCase().includes(normalizedSearch) ||
+      l.owner.login.toLowerCase().includes(normalizedSearch) ||
+      l.owner.name.toLowerCase().includes(normalizedSearch)
+    )
+  }, [source, normalizedSearch])
 
-  const selectableLocks = filtered.filter(lock => {
+  const selectableLocks = useMemo(() => filtered.filter(lock => {
     const isOwn = currentLogin && lock.owner.login === currentLogin
     return Boolean(isOwn || isAdmin)
-  })
-  const selectedLocks = selectableLocks.filter(lock => selectedLockIds.has(lock.id))
+  }), [filtered, currentLogin, isAdmin])
+  const selectedLocks = useMemo(
+    () => selectableLocks.filter(lock => selectedLockIds.has(lock.id)),
+    [selectableLocks, selectedLockIds]
+  )
 
   const selectableLockIds = useMemo(() => new Set(selectableLocks.map(lock => lock.id)), [selectableLocks])
 
   // Group team locks by owner
-  const ownerGroups: { login: string; name: string; locks: typeof teamLocks }[] = []
-  if (tab === 'team') {
-    const seen = new Map<string, typeof ownerGroups[0]>()
+  const ownerGroups = useMemo(() => {
+    const groups: { login: string; name: string; locks: typeof teamLocks }[] = []
+    if (tab !== 'team') return groups
+    const seen = new Map<string, typeof groups[0]>()
     for (const l of filtered) {
       if (!seen.has(l.owner.login)) {
         const group = { login: l.owner.login, name: l.owner.name, locks: [] as typeof teamLocks }
         seen.set(l.owner.login, group)
-        ownerGroups.push(group)
+        groups.push(group)
       }
       seen.get(l.owner.login)!.locks.push(l)
     }
-  }
+    return groups
+  }, [tab, filtered, teamLocks])
 
 
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)

@@ -16,6 +16,7 @@ export interface AppSettings {
   fontSize: number
   uiDensity: 'compact' | 'normal' | 'relaxed'
   theme: 'dark' | 'darker' | 'midnight'
+  defaultBranchName?: string
 }
 
 const DEFAULTS: AppSettings = {
@@ -32,6 +33,7 @@ const DEFAULTS: AppSettings = {
   fontSize: 13,
   uiDensity: 'normal',
   theme: 'dark',
+  defaultBranchName: 'main',
 }
 
 class SettingsService {
@@ -49,7 +51,12 @@ class SettingsService {
   }
 
   save(settings: AppSettings): void {
-    fs.writeFileSync(this.filePath(), JSON.stringify(settings, null, 2), 'utf8')
+    const normalized: AppSettings = {
+      ...DEFAULTS,
+      ...settings,
+      defaultBranchName: (settings.defaultBranchName ?? 'main').trim() || 'main',
+    }
+    fs.writeFileSync(this.filePath(), JSON.stringify(normalized, null, 2), 'utf8')
   }
 }
 

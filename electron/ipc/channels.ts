@@ -66,6 +66,7 @@ export const CHANNELS = {
   NOTIFICATION_LIST:      'notification:list',
   NOTIFICATION_MARK_READ: 'notification:mark-read',
   WEBHOOK_TEST:           'webhook:test',
+  WEBHOOK_LOAD:           'webhook:load',
   WEBHOOK_SAVE:           'webhook:save',
 
   // Auto-updater

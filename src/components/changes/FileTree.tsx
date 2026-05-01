@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { FileStatus, Lock, ipc } from '@/ipc'
 import { useOperationStore } from '@/stores/operationStore'
 import { FileRow } from './FileRow'
@@ -157,8 +157,8 @@ function SectionCheckbox({ allChecked, onToggle, color }: {
 export function FileTree({
   files, repoPath, selectedPath, locks, currentUserName, isLoading, onSelect, onRefresh, onBlameDeps,
 }: FileTreeProps) {
-  const staged   = files.filter(f => f.staged)
-  const unstaged = files.filter(f => !f.staged)
+  const staged = useMemo(() => files.filter(f => f.staged), [files])
+  const unstaged = useMemo(() => files.filter(f => !f.staged), [files])
   const [busy, setBusy] = useState(false)
   const dialog = useDialogStore()
   const [treeMode, setTreeMode] = useState(false)
@@ -194,7 +194,7 @@ export function FileTree({
   const pathKey = (file: FileStatus) => `${file.staged ? 's' : 'u'}:${file.path}`
 
   // Flat ordered list for range selection (staged first, then unstaged)
-  const allFlatFiles = useCallback(() => [...staged, ...unstaged], [staged, unstaged])
+  const allFlatFiles = useMemo(() => [...staged, ...unstaged], [staged, unstaged])
 
   const handleFileClick = useCallback((file: FileStatus, e: React.MouseEvent) => {
     const key = pathKey(file)
@@ -206,8 +206,7 @@ export function FileTree({
       setLastClickedKey(key)
     } else if (e.shiftKey && lastClickedKey) {
       e.preventDefault()
-      const flat = allFlatFiles()
-      const keys = flat.map(pathKey)
+      const keys = allFlatFiles.map(pathKey)
       const i1 = keys.indexOf(lastClickedKey)
       const i2 = keys.indexOf(key)
       if (i1 >= 0 && i2 >= 0) {
@@ -222,8 +221,18 @@ export function FileTree({
     }
   }, [multiPaths, lastClickedKey, allFlatFiles, onSelect])
 
-  const lockFor = (file: FileStatus): Lock | null =>
-    locks.find(l => l.path.replace(/\\/g, '/') === file.path.replace(/\\/g, '/')) ?? null
+  const lockMap = useMemo(() => {
+    const map = new Map<string, Lock>()
+    for (const lock of locks) map.set(lock.path.replace(/\\/g, '/'), lock)
+    return map
+  }, [locks])
+
+  const lockFor = (file: FileStatus): Lock | null => lockMap.get(file.path.replace(/\\/g, '/')) ?? null
+  const treeRows = useMemo(() => {
+    if (!treeMode) return [] as FlatRow[]
+    const tree = buildTree(files)
+    return flattenTree(tree, 0, collapsedFolders)
+  }, [treeMode, files, collapsedFolders])
 
   const toggleFolder = (path: string) =>
     setCollapsedFolders(prev => {
@@ -239,7 +248,7 @@ export function FileTree({
   }
 
   // Bulk action helpers
-  const multiSelected = allFlatFiles().filter(f => multiPaths.has(pathKey(f)))
+  const multiSelected = allFlatFiles.filter(f => multiPaths.has(pathKey(f)))
   const multiUnstaged = multiSelected.filter(f => !f.staged)
   const multiStaged   = multiSelected.filter(f => f.staged)
   const multiUntrackedPaths = multiUnstaged.filter(f => f.workingStatus === '?').map(f => f.path)
@@ -336,10 +345,10 @@ export function FileTree({
             if (!ok) return
             // Capture files locked by me before discarding so they can be unlocked after reset.
             const myLockedFiles = currentLogin
-              ? unstaged.filter(f => locks.some(
-                  l => l.path.replace(/\\/g, '/') === f.path.replace(/\\/g, '/') &&
-                       l.owner.login === currentLogin
-                ))
+              ? unstaged.filter(f => {
+                  const lock = lockFor(f)
+                  return lock?.owner.login === currentLogin
+                })
               : []
             run('Discarding changes…', async () => {
               await ipc.discardAll(repoPath)
@@ -381,10 +390,7 @@ export function FileTree({
       <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
 
         {/* ── Content Browser (tree) mode ── */}
-        {treeMode && (() => {
-          const tree = buildTree(files)
-          const rows = flattenTree(tree, 0, collapsedFolders)
-          return rows.map((row, _i) =>
+        {treeMode && treeRows.map((row, _i) =>
             row.type === 'folder'
               ? <FolderRow
                   key={`folder-${row.fullPath}`}
@@ -405,8 +411,7 @@ export function FileTree({
                       : undefined}
                   />
                 </div>
-          )
-        })()}
+          )}
 
         {/* ── Flat list mode ── */}
         {!treeMode && <>

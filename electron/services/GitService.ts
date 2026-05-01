@@ -455,7 +455,12 @@ class GitService {
   async discard(repoPath: string, paths: string[], isUntracked: boolean): Promise<void> {
     if (isUntracked) {
       for (const p of paths) {
-        try { fs.unlinkSync(path.join(repoPath, p)) } catch { /* ignore */ }
+        try {
+          const fullPath = path.join(repoPath, p)
+          const stat = fs.lstatSync(fullPath)
+          if (stat.isDirectory()) fs.rmSync(fullPath, { recursive: true, force: true })
+          else fs.unlinkSync(fullPath)
+        } catch { /* ignore */ }
       }
     } else {
       // Unstage first (no-op if not staged), then restore working tree
@@ -873,6 +878,11 @@ class GitService {
       exec(['config', '--global', 'user.name', name],  home),
       exec(['config', '--global', 'user.email', email], home),
     ])
+  }
+
+  async setGlobalDefaultBranch(defaultBranchName: string): Promise<void> {
+    const home = require('os').homedir()
+    await exec(['config', '--global', 'init.defaultBranch', defaultBranchName], home)
   }
 
   /** Read the repo-local git identity (user.name + user.email). */
