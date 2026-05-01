@@ -153,7 +153,10 @@ class PRMonitorService {
         dirty = true
 
         const htmlUrl     = `https://github.com/${slug.owner}/${slug.repo}/pull/${prNumber}`
-        const stillLocked = await this.stillLockedFiles(repoPath, tracked.lockedFiles)
+        const tokenLogin     = await authService.getCurrentLogin()
+        const currentChanges = await this.currentChangedFileSet(repoPath)
+        const resolvedLocks  = await this.resolveMergedPRLockState(repoPath, tracked.lockedFiles, tokenLogin, currentChanges)
+        const stillLocked    = resolvedLocks.containsLocalChanges
 
         let n: AppNotification
         if (status.merged) {
@@ -168,7 +171,9 @@ class PRMonitorService {
               prNumber,
               owner:       slug.owner,
               repo:        slug.repo,
-              lockedFiles: stillLocked,
+              lockedFiles: [...resolvedLocks.containsLocalChanges, ...resolvedLocks.availableToUnlock],
+              containsLocalChanges: resolvedLocks.containsLocalChanges,
+              availableToUnlock:   resolvedLocks.availableToUnlock,
               prTitle:     status.title,
               htmlUrl,
             },
@@ -199,13 +204,50 @@ class PRMonitorService {
     if (dirty) saveState(repoPath, state)
   }
 
-  private async stillLockedFiles(repoPath: string, filePaths: string[]): Promise<string[]> {
+  private async resolveMergedPRLockState(
+    repoPath: string,
+    filePaths: string[],
+    currentLogin: string,
+    currentChanges: Set<string>,
+  ): Promise<{ containsLocalChanges: string[]; availableToUnlock: string[] }> {
     try {
       const currentLocks = await lockService.listLocks(repoPath)
-      const lockedSet    = new Set(currentLocks.map(l => l.path))
-      return filePaths.filter(p => lockedSet.has(p))
+      const mine = filePaths
+        .map(filePath => currentLocks.find(lock => lock.path === filePath))
+        .filter((lock): lock is (typeof currentLocks)[number] => Boolean(lock) && lock.owner.login === currentLogin)
+
+      const containsLocalChanges: string[] = []
+      const availableToUnlock: string[] = []
+      for (const lock of mine) {
+        if (currentChanges.has(lock.path)) containsLocalChanges.push(lock.path)
+        else availableToUnlock.push(lock.path)
+      }
+
+      return { containsLocalChanges, availableToUnlock }
     } catch {
-      return filePaths  // best-effort: if we can't check, show all
+      return { containsLocalChanges: filePaths, availableToUnlock: [] }
+    }
+  }
+
+  private async currentChangedFileSet(repoPath: string): Promise<Set<string>> {
+    try {
+      const { exitCode, stdout } = await execSafe(['status', '--porcelain=v1', '-z'], repoPath)
+      if (exitCode !== 0) return new Set()
+      const changed = new Set<string>()
+      const entries = stdout.split('\0')
+      let i = 0
+
+      while (i < entries.length) {
+        const entry = entries[i]
+        if (!entry || entry.length < 3) { i++; continue }
+        const indexStatus = entry[0]
+        const filePath = entry.slice(3)
+        if (filePath) changed.add(filePath)
+        i += (indexStatus === 'R' || indexStatus === 'C') ? 2 : 1
+      }
+      return changed
+    } catch {
+      return new Set()
     }
   }
 

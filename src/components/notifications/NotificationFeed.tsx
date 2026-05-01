@@ -125,6 +125,7 @@ function PRMergedItem({
   onRead: () => void
 }) {
   const { unlockFile } = useLockStore()
+  const requestResolve = useNotificationStore(s => s.requestResolve)
   const [unlocking, setUnlocking] = useState<Set<string>>(new Set())
   const [unlocked,  setUnlocked]  = useState<Set<string>>(new Set())
 
@@ -132,6 +133,8 @@ function PRMergedItem({
   const prNumber    = meta.prNumber as number | undefined
   const htmlUrl     = meta.htmlUrl  as string | undefined
   const lockedFiles = (meta.lockedFiles as string[] | undefined) ?? []
+  const containsLocalChanges = (meta.containsLocalChanges as string[] | undefined) ?? []
+  const availableToUnlock = (meta.availableToUnlock as string[] | undefined) ?? []
 
   const handleUnlock = async (filePath: string) => {
     if (unlocking.has(filePath) || unlocked.has(filePath)) return
@@ -167,6 +170,15 @@ function PRMergedItem({
           </div>
           <div className="text-[9px] font-mono text-lg-text-secondary/60 mt-0.5">
             {timeAgo(n.createdAt)}
+            <button
+              onClick={e => {
+                e.stopPropagation()
+                requestResolve({ repoPath: n.repoPath, containsLocalChanges, availableToUnlock })
+              }}
+              className="ml-2 text-lg-accent hover:underline"
+            >
+              Resolve
+            </button>
             {htmlUrl && (
               <button
                 onClick={e => { e.stopPropagation(); ipc.openExternal(htmlUrl) }}
