@@ -541,15 +541,16 @@ class GitService {
 
   /** Dry-run merge: returns files that would conflict. Does not modify the working tree. */
   async mergePreview(repoPath: string, targetBranch: string): Promise<ConflictPreviewFile[]> {
+    const targetRef = await this.resolveBranchRef(repoPath, targetBranch)
     // 1. Find the common ancestor
-    const baseRes = await execSafe(['merge-base', 'HEAD', targetBranch], repoPath)
+    const baseRes = await execSafe(['merge-base', 'HEAD', targetRef], repoPath)
     if (baseRes.exitCode !== 0) throw new Error(`Could not find merge base with "${targetBranch}"`)
     const base = baseRes.stdout.trim()
 
     // 2. Files changed on each side since the merge base
     const [oursRes, theirsRes] = await Promise.all([
       execSafe(['diff', '--name-status', base, 'HEAD'], repoPath),
-      execSafe(['diff', '--name-status', base, targetBranch], repoPath),
+      execSafe(['diff', '--name-status', base, targetRef], repoPath),
     ])
 
     const parseNameStatus = (out: string): Map<string, string> => {
@@ -589,7 +590,7 @@ class GitService {
 
       const [oursInfo, theirsInfo] = await Promise.all([
         this._contributorInfo(repoPath, filePath, 'HEAD', currentBranch),
-        this._contributorInfo(repoPath, filePath, targetBranch, targetBranch),
+        this._contributorInfo(repoPath, filePath, targetRef, targetBranch),
       ])
 
       conflicts.push({ path: filePath, type, conflictType, ours: oursInfo, theirs: theirsInfo })
@@ -618,7 +619,53 @@ class GitService {
 
   /** Merge targetBranch into HEAD. Throws if there are conflicts. */
   async merge(repoPath: string, targetBranch: string): Promise<void> {
-    await exec(['merge', targetBranch], repoPath)
+    const targetRef = await this.resolveBranchRef(repoPath, targetBranch)
+    await exec(['merge', targetRef], repoPath)
+  }
+
+  async resolveMergeIntoBranch(
+    repoPath: string,
+    targetBranch: string,
+    baseBranch: string,
+    fileChoices: Record<string, 'ours' | 'theirs'>,
+  ): Promise<void> {
+    const startBranch = await this.currentBranch(repoPath)
+    const targetRef = await this.resolveBranchRef(repoPath, targetBranch)
+    const baseRef = await this.resolveBranchRef(repoPath, baseBranch)
+    const targetLocal = targetRef.replace(/^origin\//, '')
+    const localBranchExists = (await execSafe(['rev-parse', '--verify', `refs/heads/${targetLocal}`], repoPath)).exitCode === 0
+    const temporaryLocalBranch = !localBranchExists && targetRef.startsWith('origin/')
+
+    try {
+      if (localBranchExists) await exec(['checkout', targetLocal], repoPath)
+      else await exec(['checkout', '-b', targetLocal, '--track', targetRef], repoPath)
+
+      await execSafe(['merge', '--abort'], repoPath)
+      await exec(['merge', '--no-ff', '--no-commit', baseRef], repoPath).catch(async () => {
+        // expected when conflicts are present
+      })
+
+      for (const [file, side] of Object.entries(fileChoices)) {
+        await exec(['checkout', side === 'theirs' ? '--theirs' : '--ours', '--', file], repoPath)
+        await exec(['add', '--', file], repoPath)
+      }
+
+      await exec(['commit', '-m', `Resolve merge conflicts: ${baseBranch} -> ${targetBranch}`], repoPath)
+      await exec(['push', 'origin', targetLocal], repoPath)
+    } finally {
+      await execSafe(['merge', '--abort'], repoPath)
+      await execSafe(['checkout', startBranch], repoPath)
+      if (temporaryLocalBranch) await execSafe(['branch', '-D', targetLocal], repoPath)
+    }
+  }
+
+  private async resolveBranchRef(repoPath: string, targetBranch: string): Promise<string> {
+    const candidates = [targetBranch, `origin/${targetBranch}`]
+    for (const ref of candidates) {
+      const res = await execSafe(['rev-parse', '--verify', ref], repoPath)
+      if (res.exitCode === 0) return ref
+    }
+    return targetBranch
   }
 
   // ── Cleanup ───────────────────────────────────────────────────────────────
