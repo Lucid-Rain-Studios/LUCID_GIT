@@ -1,12 +1,12 @@
 @echo off
-setlocal
-title Lucid Git - Package Installer
+setlocal EnableDelayedExpansion
+title Lucid Git - One-Click Package Installer
 
 cd /d "%~dp0"
 
 echo.
 echo ============================================
-echo  Lucid Git - Package (Installer)
+echo  Lucid Git - Package (Installer Artifacts)
 echo ============================================
 echo.
 
@@ -16,7 +16,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [1/3] Installing dependencies...
+echo [1/4] Installing dependencies...
 call npm ci
 if errorlevel 1 (
   echo ERROR: npm ci failed.
@@ -24,7 +24,7 @@ if errorlevel 1 (
 )
 echo.
 
-echo [2/3] Building app...
+echo [2/4] Building app...
 call npm run build
 if errorlevel 1 (
   echo ERROR: Build failed.
@@ -32,13 +32,18 @@ if errorlevel 1 (
 )
 echo.
 
-echo [3/3] Packaging installer artifacts...
+echo [3/4] Packaging installer artifacts...
 call npm run package
 if errorlevel 1 (
   echo ERROR: Packaging failed.
   exit /b 1
 )
+for /f "tokens=*" %%v in ('node -e "process.stdout.write(require('./package.json').version)"') do set VERSION=%%v
 echo.
-
-echo Done. Installer artifacts are available in the Build\ folder.
+echo [4/4] Build complete for version: v!VERSION!
+echo.
+echo Done. Upload these files from Build\ to a GitHub release if doing manual release:
+echo   - latest.yml
+echo   - Lucid Git-!VERSION!-win-x64.exe
+echo   - Lucid Git-!VERSION!-win-x64.exe.blockmap
 exit /b 0

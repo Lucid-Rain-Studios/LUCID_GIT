@@ -6,6 +6,8 @@ import { useOperationStore } from '@/stores/operationStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useLockStore } from '@/stores/lockStore'
 import { useNotificationStore } from '@/stores/notificationStore'
+import { useStatusToastStore } from '@/stores/statusToastStore'
+import { StatusToastStack } from '@/components/notifications/StatusToastStack'
 import { useErrorStore } from '@/stores/errorStore'
 import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
@@ -173,7 +175,10 @@ export function AppShell() {
   const { updateStep } = useOperationStore()
   const { loadAccounts, accounts, currentAccountId } = useAuthStore()
   const { locks, loadLocks, setLocks } = useLockStore()
+
   const { notifications, push: pushNotification, resolveRequest, clearResolveRequest } = useNotificationStore()
+  const showStatusToast = useStatusToastStore(s => s.show)
+
   const pushError = useErrorStore(s => s.pushRaw)
   const { conflicts: forecastConflicts, enabled: forecastEnabled, lastPolledAt, setConflicts: setForecastConflicts, setEnabled: setForecastEnabled, setLastPolledAt } = useForecastStore()
 
@@ -232,9 +237,12 @@ export function AppShell() {
   }, [setLocks])
 
   useEffect(() => {
-    const unsub = ipc.onNotification((n: AppNotification) => pushNotification(n))
+    const unsub = ipc.onNotification((n: AppNotification) => {
+      pushNotification(n)
+      if (n.type === 'pr-merged') showStatusToast('PR has been approved.')
+    })
     return unsub
-  }, [pushNotification])
+  }, [pushNotification, showStatusToast])
 
   useEffect(() => {
     if (!resolveRequest) return
@@ -613,6 +621,7 @@ export function AppShell() {
         onClone={handleCloneRepo}
         onAddAccount={() => setShowLoginDialog(true)}
       />
+      <StatusToastStack />
     </div>
   )
 }

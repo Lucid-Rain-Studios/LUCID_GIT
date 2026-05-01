@@ -9,6 +9,7 @@ import { usePRStore } from '@/stores/prStore'
 import { NotificationBell } from '@/components/notifications/NotificationBell'
 import { markFetchPerformed } from '@/lib/fetchState'
 import { canCreatePR, canPull, canPush, fetchButtonLabel, pullButtonLabel, pushButtonLabel } from '@/lib/syncButtonLogic'
+import { useStatusToastStore } from '@/stores/statusToastStore'
 
 interface TopBarProps {
   onOpen:       () => void
@@ -34,6 +35,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
   const opRun   = useOperationStore(s => s.run)
   const pushErr = useErrorStore(s => s.pushRaw)
   const openPRDialog = usePRStore(s => s.openDialog)
+  const showStatusToast = useStatusToastStore(s => s.show)
 
   const [sync, setSync]       = useState<SyncStatus | null>(null)
   const [syncOp, setSyncOp]   = useState<'idle' | 'fetching' | 'pulling' | 'pushing'>('idle')
@@ -103,8 +105,16 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
   const doPush = async () => {
     if (!repoPath || syncOp !== 'idle') return
     setSyncOp('pushing'); setSyncErr(null)
-    try { await opRun('Pushing…', () => ipc.push(repoPath)); await loadSync() }
-    catch (e) { const s = String(e); setSyncErr(s); pushErr(s) }
+    try { await opRun('Pushing…', () => ipc.push(repoPath)); await loadSync(); showStatusToast('Push successful.') }
+    catch (e) {
+      const s = String(e)
+      if (s.toLowerCase().includes('everything up-to-date') || s.toLowerCase().includes('up to date')) {
+        showStatusToast('No files to push.')
+        return
+      }
+      showStatusToast('Push failed.')
+      setSyncErr(s); pushErr(s)
+    }
     finally { setSyncOp('idle') }
   }
 
@@ -118,8 +128,11 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
       })
       await loadSync()
       await refreshStatus()
+      showStatusToast(`Update from ${defaultBranch} successful.`)
     } catch (e) {
-      const s = String(e); pushErr(s)
+      const s = String(e)
+      showStatusToast(`Update from ${defaultBranch} failed.`)
+      pushErr(s)
     } finally {
       setUpdatingFromMain(false)
     }
@@ -143,7 +156,12 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
       sessionTopBarFetched.add(repoPath)
       setHasFetched(true)
       onSynced?.()
-    } catch (e) { const s = String(e); setSyncErr(s); pushErr(s) }
+      showStatusToast('Fetch successful.')
+    } catch (e) {
+      const s = String(e)
+      showStatusToast('Fetch failed.')
+      setSyncErr(s); pushErr(s)
+    }
     finally { setSyncOp('idle') }
   }
 
@@ -155,7 +173,16 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
       await loadSync()
       await refreshStatus()
       onSynced?.()
-    } catch (e) { const s = String(e); setSyncErr(s); pushErr(s) }
+      showStatusToast('Pull successful.')
+    } catch (e) {
+      const s = String(e)
+      if (s.toLowerCase().includes('please commit') || s.toLowerCase().includes('local changes')) {
+        showStatusToast('Please commit your local changes before pulling.')
+        return
+      }
+      showStatusToast('Pull failed.')
+      setSyncErr(s); pushErr(s)
+    }
     finally { setSyncOp('idle') }
   }
 
