@@ -266,6 +266,36 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
     .sort((a, b) => (a.current ? -1 : b.current ? 1 : a.name.localeCompare(b.name)))
   const remoteBranches = branches.filter(b => b.isRemote)
     .sort((a, b) => a.displayName.localeCompare(b.displayName))
+  const selectedBranch = previewBranch ? localBranches.find(b => b.name === previewBranch) ?? null : null
+
+  useEffect(() => {
+    const selected = previewBranch
+    if (!repoPath || !selected || insights[selected]) return
+    ;(async () => {
+      const [activityAll, locks, presenceFile, prs, diff] = await Promise.all([
+        ipc.gitBranchActivity(repoPath).catch(() => []),
+        ipc.listLocks(repoPath).catch(() => []),
+        ipc.presenceRead(repoPath).catch(() => ({ version: 1, entries: {} })),
+        (async () => {
+          if (!ghSlug) return []
+          const [owner, repo] = ghSlug.split('/')
+          return ipc.githubListPRs({ owner, repo }).catch(() => [])
+        })(),
+        ipc.branchDiff(repoPath, 'main', selected).catch(() => null),
+      ])
+      const activity = (activityAll as BranchActivity[]).find(a => a.ref === selected) ?? null
+      const branchPresence = Object.values(presenceFile.entries).filter(e => e.branch === selected)
+      const branchPrs = (prs as PullRequest[]).filter(pr => pr.headBranch === selected)
+      const touchedFiles = new Set((diff?.files ?? []).map(f => f.path))
+      const overlapWarnings = Object.values(presenceFile.entries)
+        .filter(e => e.branch !== selected)
+        .flatMap(e => e.modifiedFiles.filter(f => touchedFiles.has(f)).map(f => `⚠️ ${f} also modified on ${e.branch} (${e.name})`))
+      setInsights(prev => ({
+        ...prev,
+        [selected]: { activity, locks: (locks as Lock[]).filter(l => touchedFiles.has(l.path)), presence: branchPresence, prs: branchPrs, overlapWarnings },
+      }))
+    })()
+  }, [previewBranch, repoPath, ghSlug, insights])
 
   useEffect(() => {
     const selected = previewBranch
@@ -340,10 +370,10 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
       )}
 
       {/* ── Scrollable branch lists ─────────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto">
-
-        {/* ── LOCAL ──────────────────────────────────────────────────────── */}
-        <SectionHeader label="Local" count={localBranches.length} />
+      <div className="flex-1 min-h-0 flex">
+        <div className="w-[52%] min-w-[320px] border-r border-lg-border overflow-y-auto">
+          {/* ── LOCAL ──────────────────────────────────────────────────────── */}
+          <SectionHeader label="Local" count={localBranches.length} />
 
         {localBranches.length === 0 && (
           <div className="px-3 py-3 text-[10px] font-mono text-lg-text-secondary">No local branches</div>
@@ -433,19 +463,6 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
                 )}
               </div>
 
-              {/* Inline diff preview */}
-              {isPreviewed && (
-                <>
-                  <BranchStatusPanel branch={branch} insights={insights[branch.name]} />
-                  <BranchDiffPreview
-                    repoPath={repoPath!}
-                    base={currentBranch}
-                    compare={branch.name}
-                    onSwitch={() => doCheckoutLocal(branch)}
-                    onClose={() => setPreviewBranch(null)}
-                  />
-                </>
-              )}
             </React.Fragment>
           )
         })}
@@ -540,6 +557,29 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
           </>
         )}
 
+        </div>
+        <div className="flex-1 min-w-[360px] overflow-y-auto bg-lg-bg-primary/40">
+          {!selectedBranch && (
+            <div className="px-5 py-6 text-[11px] font-mono text-lg-text-secondary">
+              Select a local branch to view health, lock activity, presence, risk, and divergence details.
+            </div>
+          )}
+          {selectedBranch && (
+            <div className="min-h-full">
+              <div className="px-4 py-2 border-b border-lg-border text-[10px] font-mono uppercase tracking-wider text-lg-text-secondary">
+                Branch Insights · {selectedBranch.name}
+              </div>
+              <BranchStatusPanel branch={selectedBranch} insights={insights[selectedBranch.name]} />
+              <BranchDiffPreview
+                repoPath={repoPath!}
+                base={currentBranch}
+                compare={selectedBranch.name}
+                onSwitch={() => doCheckoutLocal(selectedBranch)}
+                onClose={() => setPreviewBranch(null)}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
 
