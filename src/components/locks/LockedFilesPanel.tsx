@@ -4,6 +4,7 @@ import { useLockStore } from '@/stores/lockStore'
 import { useAuthStore } from '@/stores/authStore'
 import { AppCheckbox } from '@/components/ui/AppCheckbox'
 import { useDialogStore } from '@/stores/dialogStore'
+import { useOperationStore } from '@/stores/operationStore'
 
 interface LockedFilesPanelProps {
   repoPath: string
@@ -39,6 +40,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
   const { accounts, currentAccountId } = useAuthStore()
   const isAdmin = useAuthStore(s => s.isAdmin(repoPath))
   const dialog  = useDialogStore()
+  const op = useOperationStore()
 
   const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login ?? null
 
@@ -99,6 +101,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
 
 
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
+  const isAnyUnlocking = unlocking !== null
 
   const clearContextMenu = () => setCtxMenu(null)
 
@@ -167,14 +170,21 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
     }
     setUnlocking('__bulk__')
     try {
-      for (const lock of selectedLocks) {
+      op.start(`Unlocking ${selectedLocks.length} file${selectedLocks.length === 1 ? '' : 's'}`)
+      const total = selectedLocks.length
+      const jobs = selectedLocks.map(async (lock, idx) => {
         const force = !currentLogin || lock.owner.login !== currentLogin
-        await unlockFile(repoPath, lock.path, force)
-      }
+        op.updateStep({ id: `unlock-${lock.id}`, label: 'Unlocking files', status: 'running', detail: lock.path, progress: Math.round(((idx + 1) / total) * 100) })
+        await unlockFile(repoPath, lock.path, force, lock.id)
+      })
+      const results = await Promise.allSettled(jobs)
+      const failed = results.filter(r => r.status === 'rejected') as PromiseRejectedResult[]
+      if (failed.length > 0) throw failed[0].reason
       setSelectedLockIds(new Set())
     } catch (e) {
       await dialog.alert({ title: 'Error', message: String(e) })
     } finally {
+      op.finish()
       setUnlocking(null)
     }
   }
@@ -192,10 +202,14 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
     }
     setUnlocking(lock.path)
     try {
-      await unlockFile(repoPath, lock.path, force)
+      op.start('Unlocking file')
+      op.updateStep({ id: `unlock-${lock.id}`, label: 'Unlocking file', status: 'running', detail: lock.path, progress: 25 })
+      await unlockFile(repoPath, lock.path, force, lock.id)
+      op.updateStep({ id: `unlock-${lock.id}`, label: 'Unlocking file', status: 'done', detail: lock.path, progress: 100 })
     } catch (e) {
       await dialog.alert({ title: 'Error', message: String(e) })
     } finally {
+      op.finish()
       setUnlocking(null)
     }
   }
@@ -347,13 +361,13 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
         </div>
         <button
           onClick={doBulkUnlock}
-          disabled={selectedLocks.length === 0 || unlocking === '__bulk__'}
+          disabled={selectedLocks.length === 0 || isAnyUnlocking}
           style={{
             height: 26, padding: '0 12px', borderRadius: 5, flexShrink: 0,
             background: 'transparent', border: '1px solid rgba(74,158,255,0.3)', color: '#4a9eff',
             fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, fontWeight: 600,
-            cursor: selectedLocks.length === 0 || unlocking === '__bulk__' ? 'default' : 'pointer',
-            opacity: selectedLocks.length === 0 || unlocking === '__bulk__' ? 0.45 : 1,
+            cursor: selectedLocks.length === 0 || isAnyUnlocking ? 'default' : 'pointer',
+            opacity: selectedLocks.length === 0 || isAnyUnlocking ? 0.45 : 1,
           }}
         >
           {unlocking === '__bulk__' ? 'Unlocking…' : 'Unlock Selected'}
@@ -383,7 +397,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
           />
         ) : tab === 'mine' ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }} onContextMenu={e => { e.preventDefault(); if (selectedLocks.length > 0) setCtxMenu({ x: e.clientX, y: e.clientY }) }}>
-            {filtered.map((lock, index) => (
+            {filtered.map((lock) => (
               <LockRow
                 key={lock.id}
                 lock={lock}
@@ -393,7 +407,11 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
                 unlocking={unlocking}
                 selected={selectedLockIds.has(lock.id)}
                 onUnlock={doUnlock}
-                onSelect={(mods) => toggleLockSelection(lock, index, mods)}
+                disableActions={isAnyUnlocking}
+                onSelect={(mods) => {
+                  const index = selectableLocks.findIndex(item => item.id === lock.id)
+                  if (index >= 0) toggleLockSelection(lock, index, mods)
+                }}
                 onCopyPath={doCopyPath}
                 onShowInExplorer={doShowInExplorer}
               />
@@ -478,6 +496,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
                           unlocking={unlocking}
                           selected={selectedLockIds.has(lock.id)}
                           onUnlock={doUnlock}
+                          disableActions={isAnyUnlocking}
                           onSelect={(mods) => {
                             const index = selectableLocks.findIndex(item => item.id === lock.id)
                             if (index >= 0) toggleLockSelection(lock, index, mods)
@@ -502,7 +521,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
         >
           <button
             onClick={() => { clearContextMenu(); void doBulkUnlock() }}
-            disabled={unlocking === '__bulk__'}
+            disabled={isAnyUnlocking}
             style={{ display: 'block', width: '100%', textAlign: 'left', background: 'transparent', border: 'none', color: '#c8d0e8', padding: '6px 10px', cursor: 'pointer' }}
           >Force Unlock Selected</button>
         </div>
@@ -515,7 +534,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
 
 function LockRow({
   lock, repoPath, currentLogin, isAdmin, unlocking,
-  selected, onUnlock, onSelect, onCopyPath, onShowInExplorer,
+  selected, disableActions, onUnlock, onSelect, onCopyPath, onShowInExplorer,
 }: {
   lock: Lock
   repoPath: string
@@ -523,6 +542,7 @@ function LockRow({
   isAdmin: boolean
   unlocking: string | null
   selected: boolean
+  disableActions: boolean
   onUnlock: (lock: Lock, force: boolean) => void
   onSelect: (mods: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => void
   onCopyPath: (lock: Lock) => void
@@ -532,7 +552,7 @@ function LockRow({
 
   const isOwn     = currentLogin && lock.owner.login === currentLogin
   const isBusy    = unlocking === lock.path
-  const canUnlock = isOwn || isAdmin
+  const canUnlock = (isOwn || isAdmin) && !disableActions
   const force     = !isOwn
   const color     = authorColor(lock.owner.name)
 

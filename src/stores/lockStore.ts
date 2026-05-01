@@ -16,7 +16,7 @@ interface LockState {
 
   loadLocks:   (repoPath: string) => Promise<void>
   lockFile:    (repoPath: string, filePath: string) => Promise<void>
-  unlockFile:  (repoPath: string, filePath: string, force?: boolean) => Promise<void>
+  unlockFile:  (repoPath: string, filePath: string, force?: boolean, lockId?: string) => Promise<void>
   watchFile:   (repoPath: string, filePath: string) => Promise<void>
   setLocks:    (locks: Lock[]) => void
   clearLocks:  () => void
@@ -91,13 +91,18 @@ export const useLockStore = create<LockState>((set, get) => ({
     }
   },
 
-  unlockFile: async (repoPath, filePath, force) => {
-    const lockId = get().locks.find(l => l.path === filePath)?.id
+  unlockFile: async (repoPath, filePath, force, lockId) => {
+    const normalizedPath = filePath.replace(/\\/g, '/')
+    const resolvedLockId = lockId ?? get().locks.find(l => l.path.replace(/\\/g, '/') === normalizedPath)?.id
     set({ error: null })
+    // PR-ghost locks are synthetic client overlays and have no backing LFS lock to release.
+    if (resolvedLockId?.startsWith('ghost-pr-')) {
+      return
+    }
     // Optimistic remove — badge disappears before the network call returns
-    set(state => ({ locks: state.locks.filter(l => l.path !== filePath) }))
+    set(state => ({ locks: state.locks.filter(l => l.path.replace(/\\/g, '/') !== normalizedPath) }))
     try {
-      await ipc.unlockFile(repoPath, filePath, force, lockId)
+      await ipc.unlockFile(repoPath, normalizedPath, force, resolvedLockId)
     } catch (e) {
       // Roll back on failure by reloading authoritative list
       const locks = await ipc.listLocks(repoPath).catch(() => [])
