@@ -108,7 +108,7 @@ function loadVisibility(): Record<string, string[]> {
 }
 
 export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthChange, repoPath, onOpenTerminal, onOpenRepo, onOpenExplorer }: SidebarProps) {
-  const { fileStatus } = useRepoStore()
+  const { fileStatus, currentBranch, syncTick } = useRepoStore()
   const { accounts, currentAccountId } = useAuthStore()
   const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login?.toLowerCase() ?? null
   const lockedFileCount = useLockStore(s =>
@@ -118,7 +118,30 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
   )
   const isAdmin = useAuthStore(s => s.isAdmin(repoPath ?? ''))
   const totalChanges = fileStatus.length
+  const [syncCounts, setSyncCounts] = useState<{ ahead: number; behind: number }>({ ahead: 0, behind: 0 })
   const [openPrCount, setOpenPrCount] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    const loadSync = async () => {
+      if (!repoPath) {
+        if (!cancelled) setSyncCounts({ ahead: 0, behind: 0 })
+        return
+      }
+      try {
+        const sync = await ipc.getSyncStatus(repoPath)
+        if (!cancelled) setSyncCounts({ ahead: sync.ahead, behind: sync.behind })
+      } catch {
+        if (!cancelled) setSyncCounts({ ahead: 0, behind: 0 })
+      }
+    }
+    loadSync()
+    const id = window.setInterval(loadSync, 15000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [repoPath, currentBranch, syncTick])
 
   useEffect(() => {
     let cancelled = false
@@ -350,6 +373,8 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
                               : 0
                       }
                       showBadge={item.id === 'timeline' || item.id === 'locks' || item.id === 'overview'}
+                      timelineAhead={item.id === 'timeline' ? syncCounts.ahead : 0}
+                      timelineBehind={item.id === 'timeline' ? syncCounts.behind : 0}
                       disabled={item.id !== 'settings' && item.id !== 'logs' && !repoPath}
                       onClick={() => { if (repoPath || item.id === 'settings' || item.id === 'logs') onChange(item.id) }}
                     />
@@ -490,9 +515,9 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
 
 // ── Nav button ─────────────────────────────────────────────────────────────────
 
-function NavBtn({ item, isActive, collapsed, badge, showBadge, disabled, onClick }: {
+function NavBtn({ item, isActive, collapsed, badge, showBadge, timelineAhead, timelineBehind, disabled, onClick }: {
   item: NavItem; isActive: boolean; collapsed: boolean
-  badge: number; showBadge: boolean; disabled: boolean; onClick: () => void
+  badge: number; showBadge: boolean; timelineAhead: number; timelineBehind: number; disabled: boolean; onClick: () => void
 }) {
   const [hover, setHover] = React.useState(false)
   const { Icon } = item
@@ -538,15 +563,43 @@ function NavBtn({ item, isActive, collapsed, badge, showBadge, disabled, onClick
       )}
 
       {!collapsed && showBadge && (
-        <span style={{
-          background: isActive ? 'rgba(var(--lg-accent-rgb), 0.25)' : 'rgba(255,255,255,0.07)',
-          color: isActive ? 'var(--lg-accent)' : 'var(--lg-text-secondary)',
-          fontFamily: 'var(--lg-font-mono)', fontSize: 10, fontWeight: 700,
-          borderRadius: 9, minWidth: 17, height: 17,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          paddingLeft: 4, paddingRight: 4,
-          border: isActive ? '1px solid rgba(var(--lg-accent-rgb), 0.3)' : '1px solid rgba(255,255,255,0.07)',
-        }}>{badge}</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          {timelineAhead > 0 && (
+            <span
+              title="Needs push"
+              style={{
+                width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                background: 'rgba(125, 211, 252, 0.14)',
+                border: '1px solid rgba(125, 211, 252, 0.5)',
+                color: '#c4eeff', fontSize: 11, fontWeight: 700, lineHeight: 1,
+                boxShadow: '0 0 0 1px rgba(9, 12, 19, 0.35) inset',
+              }}
+            >↑</span>
+          )}
+          {timelineBehind > 0 && (
+            <span
+              title="Needs pull"
+              style={{
+                width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                background: 'rgba(252, 165, 165, 0.14)',
+                border: '1px solid rgba(252, 165, 165, 0.5)',
+                color: '#ffd1d1', fontSize: 11, fontWeight: 700, lineHeight: 1,
+                boxShadow: '0 0 0 1px rgba(9, 12, 19, 0.35) inset',
+              }}
+            >↓</span>
+          )}
+          <span style={{
+            background: isActive ? 'rgba(var(--lg-accent-rgb), 0.25)' : 'rgba(255,255,255,0.07)',
+            color: isActive ? 'var(--lg-accent)' : 'var(--lg-text-secondary)',
+            fontFamily: 'var(--lg-font-mono)', fontSize: 10, fontWeight: 700,
+            borderRadius: 9, minWidth: 17, height: 17,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            paddingLeft: 4, paddingRight: 4,
+            border: isActive ? '1px solid rgba(var(--lg-accent-rgb), 0.3)' : '1px solid rgba(255,255,255,0.07)',
+          }}>{badge}</span>
+        </span>
       )}
 
       {collapsed && showBadge && (
