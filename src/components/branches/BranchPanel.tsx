@@ -68,7 +68,7 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
   const [error, setError]                   = useState<string | null>(null)
   const [updatingMain, setUpdatingMain]     = useState(false)
   const [remoteUrl, setRemoteUrl]           = useState<string | null>(null)
-  const [previewBranch, setPreviewBranch]   = useState<string | null>(null)
+  const [selectedBranchName, setSelectedBranchName] = useState<string | null>(null)
   const [switchConfirm, setSwitchConfirm]   = useState<string | null>(null)
   const [ctxMenu, setCtxMenu]               = useState<BranchContextMenuState | null>(null)
   const [insights, setInsights]             = useState<Record<string, BranchInsights>>({})
@@ -133,7 +133,7 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
       if (stash && repoPath) await ipc.stashSave(repoPath, `Auto-stash before switching to ${branchName}`)
       await checkout(branchName)
     })
-    setPreviewBranch(null)
+    setSelectedBranchName(null)
     onRefresh()
   }
 
@@ -266,13 +266,17 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
     .sort((a, b) => (a.current ? -1 : b.current ? 1 : a.name.localeCompare(b.name)))
   const remoteBranches = branches.filter(b => b.isRemote)
     .sort((a, b) => a.displayName.localeCompare(b.displayName))
-  const selectedBranch = previewBranch ? localBranches.find(b => b.name === previewBranch) ?? null : null
+  const selectedBranch = selectedBranchName
+    ? (localBranches.find(b => b.name === selectedBranchName)
+      ?? remoteBranches.find(b => b.displayName === selectedBranchName || b.name === selectedBranchName)
+      ?? null)
+    : null
 
   useEffect(() => {
-    const selected = previewBranch
+    const selected = selectedBranchName
     if (!repoPath || !selected || insights[selected]) return
     ;(async () => {
-      const [activityAll, locks, presenceFile, prs, diff] = await Promise.all([
+      const [activityAll, locks, presenceFile, prs, diff] = await opRun(`Loading branch insights for ${selected}…`, () => Promise.all([
         ipc.gitBranchActivity(repoPath).catch(() => []),
         ipc.listLocks(repoPath).catch(() => []),
         ipc.presenceRead(repoPath).catch(() => ({ version: 1, entries: {} })),
@@ -282,7 +286,7 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
           return ipc.githubListPRs({ owner, repo }).catch(() => [])
         })(),
         ipc.branchDiff(repoPath, 'main', selected).catch(() => null),
-      ])
+      ]))
       const activity = (activityAll as BranchActivity[]).find(a => a.ref === selected) ?? null
       const branchPresence = Object.values(presenceFile.entries).filter(e => e.branch === selected)
       const branchPrs = (prs as PullRequest[]).filter(pr => pr.headBranch === selected)
@@ -295,36 +299,7 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
         [selected]: { activity, locks: (locks as Lock[]).filter(l => touchedFiles.has(l.path)), presence: branchPresence, prs: branchPrs, overlapWarnings },
       }))
     })()
-  }, [previewBranch, repoPath, ghSlug, insights])
-
-  useEffect(() => {
-    const selected = previewBranch
-    if (!repoPath || !selected || insights[selected]) return
-    ;(async () => {
-      const [activityAll, locks, presenceFile, prs, diff] = await Promise.all([
-        ipc.gitBranchActivity(repoPath).catch(() => []),
-        ipc.listLocks(repoPath).catch(() => []),
-        ipc.presenceRead(repoPath).catch(() => ({ version: 1, entries: {} })),
-        (async () => {
-          if (!ghSlug) return []
-          const [owner, repo] = ghSlug.split('/')
-          return ipc.githubListPRs({ owner, repo }).catch(() => [])
-        })(),
-        ipc.branchDiff(repoPath, 'main', selected).catch(() => null),
-      ])
-      const activity = (activityAll as BranchActivity[]).find(a => a.ref === selected) ?? null
-      const branchPresence = Object.values(presenceFile.entries).filter(e => e.branch === selected)
-      const branchPrs = (prs as PullRequest[]).filter(pr => pr.headBranch === selected)
-      const touchedFiles = new Set((diff?.files ?? []).map(f => f.path))
-      const overlapWarnings = Object.values(presenceFile.entries)
-        .filter(e => e.branch !== selected)
-        .flatMap(e => e.modifiedFiles.filter(f => touchedFiles.has(f)).map(f => `⚠️ ${f} also modified on ${e.branch} (${e.name})`))
-      setInsights(prev => ({
-        ...prev,
-        [selected]: { activity, locks: (locks as Lock[]).filter(l => touchedFiles.has(l.path)), presence: branchPresence, prs: branchPrs, overlapWarnings },
-      }))
-    })()
-  }, [previewBranch, repoPath, ghSlug, insights])
+  }, [selectedBranchName, repoPath, ghSlug, insights, opRun])
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -382,12 +357,12 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
         {localBranches.map(branch => {
           const isRenaming  = renamingBranch === branch.name
           const isBusy      = busy === branch.name
-          const isPreviewed = previewBranch === branch.name
+          const isPreviewed = selectedBranchName === branch.name
           return (
             <React.Fragment key={branch.name}>
               <div
                 onContextMenu={e => openBranchMenu(e, branch, true)}
-                onClick={() => { if (!branch.current && !isRenaming) setPreviewBranch(isPreviewed ? null : branch.name) }}
+                onClick={() => { if (!isRenaming) setSelectedBranchName(branch.name) }}
                 className={cn(
                   'group flex items-center gap-1.5 px-3 py-2 border-b border-lg-border/40 transition-colors min-w-0',
                   branch.current   ? 'bg-lg-bg-elevated cursor-default' :
@@ -419,7 +394,7 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
                     <button
                       onClick={() => {
                         if (branch.current) return
-                        setPreviewBranch(isPreviewed ? null : branch.name)
+                        setSelectedBranchName(branch.name)
                       }}
                       className={cn(
                         'w-full text-left text-xs font-mono truncate transition-colors',
@@ -478,6 +453,7 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
                 <div
                   key={branch.name}
                   onContextMenu={e => openBranchMenu(e, branch, false)}
+                  onClick={() => setSelectedBranchName(branch.displayName)}
                   className="group flex items-center gap-1.5 px-3 py-2 border-b border-lg-border/40 hover:bg-lg-bg-elevated/40 transition-colors min-w-0"
                 >
                   {/* Remote indicator */}
@@ -561,7 +537,7 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
         <div className="flex-1 min-w-[360px] overflow-y-auto bg-lg-bg-primary/40">
           {!selectedBranch && (
             <div className="px-5 py-6 text-[11px] font-mono text-lg-text-secondary">
-              Select a local branch to view health, lock activity, presence, risk, and divergence details.
+              Select any local or remote branch to view health, lock activity, presence, risk, and divergence details.
             </div>
           )}
           {selectedBranch && (
@@ -575,7 +551,7 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
                 base={currentBranch}
                 compare={selectedBranch.name}
                 onSwitch={() => doCheckoutLocal(selectedBranch)}
-                onClose={() => setPreviewBranch(null)}
+                onClose={() => setSelectedBranchName(null)}
               />
             </div>
           )}
@@ -589,7 +565,7 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
           style={{ left: ctxMenu.x, top: ctxMenu.y }}
           onClick={e => e.stopPropagation()}
         >
-          <button className="w-full text-left px-3 py-1.5 hover:bg-lg-bg-secondary" onClick={() => { setPreviewBranch(ctxMenu.branch.displayName); setCtxMenu(null) }}>Compare to branch</button>
+          <button className="w-full text-left px-3 py-1.5 hover:bg-lg-bg-secondary" onClick={() => { setSelectedBranchName(ctxMenu.branch.displayName); setCtxMenu(null) }}>Compare to branch</button>
           {ctxMenu.isLocal && !ctxMenu.branch.current && (
             <button className="w-full text-left px-3 py-1.5 hover:bg-lg-bg-secondary" onClick={() => onMergePreview(ctxMenu.branch.name)}>Merge into current branch…</button>
           )}
