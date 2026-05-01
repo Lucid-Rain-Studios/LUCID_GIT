@@ -153,7 +153,9 @@ class PRMonitorService {
         dirty = true
 
         const htmlUrl     = `https://github.com/${slug.owner}/${slug.repo}/pull/${prNumber}`
-        const tokenLogin     = await authService.getCurrentLogin()
+        const { accounts, currentAccountId } = authService.listAccounts()
+        const tokenLogin = accounts.find(account => account.userId === currentAccountId)?.login
+        if (!tokenLogin) continue
         const currentChanges = await this.currentChangedFileSet(repoPath)
         const resolvedLocks  = await this.resolveMergedPRLockState(repoPath, tracked.lockedFiles, tokenLogin, currentChanges)
         const stillLocked    = resolvedLocks.containsLocalChanges
@@ -214,7 +216,8 @@ class PRMonitorService {
       const currentLocks = await lockService.listLocks(repoPath)
       const mine = filePaths
         .map(filePath => currentLocks.find(lock => lock.path === filePath))
-        .filter((lock): lock is (typeof currentLocks)[number] => Boolean(lock) && lock.owner.login === currentLogin)
+        .filter((lock): lock is NonNullable<(typeof currentLocks)[number]> => lock != null)
+        .filter(lock => lock.owner.login === currentLogin)
 
       const containsLocalChanges: string[] = []
       const availableToUnlock: string[] = []
