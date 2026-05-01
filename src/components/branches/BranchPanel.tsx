@@ -207,7 +207,9 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
       await loadBranches()
       onRefresh()
     } catch (e) {
-      setError(String(e))
+      const msg = String(e)
+      setError(msg)
+      if (msg.toLowerCase().includes('conflict')) onMergePreview('main')
     } finally {
       setUpdatingMain(false)
     }

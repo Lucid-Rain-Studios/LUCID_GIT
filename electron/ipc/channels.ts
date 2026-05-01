@@ -26,6 +26,7 @@ export const CHANNELS = {
   GIT_CHECKOUT:      'git:checkout',
   GIT_MERGE_PREVIEW: 'git:merge-preview',
   GIT_MERGE:         'git:merge',
+  GIT_MERGE_RESOLVE: 'git:merge-resolve',
   GIT_REMOTE_URL:    'git:remote-url',
   GIT_SYNC_STATUS:   'git:sync-status',
   GIT_UPDATE_FROM_MAIN: 'git:update-from-main',

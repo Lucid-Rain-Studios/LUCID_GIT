@@ -456,12 +456,14 @@ function ResolveDialog({
   const [choice, setChoice] = useState<'accept' | 'decline'>('accept')
   const [conflicts, setConflicts] = useState<ConflictPreviewFile[]>([])
   const [conflictLoading, setConflictLoading] = useState(false)
+  const [conflictError, setConflictError] = useState<string | null>(null)
   const [fileChoices, setFileChoices] = useState<Record<string, ConflictChoice>>({})
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     if (choice !== 'accept') return
     setConflictLoading(true)
+    setConflictError(null)
     ipc.mergePreview(repoPath, pr.headBranch)
       .then(files => {
         setConflicts(files)
@@ -469,7 +471,10 @@ function ResolveDialog({
         files.forEach(f => { defaults[f.path] = 'branch' })
         setFileChoices(defaults)
       })
-      .catch(() => setConflicts([]))
+      .catch((e) => {
+        setConflicts([])
+        setConflictError(String(e))
+      })
       .finally(() => setConflictLoading(false))
   }, [choice, repoPath, pr.headBranch])
 
@@ -478,6 +483,17 @@ function ResolveDialog({
     setBusy(true)
     try {
       if (choice === 'accept') {
+        if (conflicts.length > 0) {
+          const resolveMap: Record<string, 'ours' | 'theirs'> = {}
+          for (const f of conflicts) {
+            const selected = fileChoices[f.path] ?? 'branch'
+            // merge order is base -> head; "branch" means keep head changes (ours)
+            resolveMap[f.path] = selected === 'branch' ? 'ours' : 'theirs'
+          }
+          await opRun(`Resolving PR #${pr.number} conflicts…`, () =>
+            ipc.mergeResolve(repoPath, pr.headBranch, pr.baseBranch, resolveMap)
+          )
+        }
         await opRun(`Merging PR #${pr.number}…`, () => ipc.githubMergePR({ owner, repo, prNumber: pr.number, repoPath }))
         bumpHistoryTick()
         bumpPrTick()
@@ -573,6 +589,10 @@ function ResolveDialog({
             {conflictLoading ? (
               <div style={{ padding: '16px 18px', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>
                 Checking for conflicts…
+              </div>
+            ) : conflictError ? (
+              <div style={{ padding: '16px 18px', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#e84545' }}>
+                {conflictError}
               </div>
             ) : conflicts.length === 0 ? (
               <div style={{ padding: '16px 18px', display: 'flex', alignItems: 'center', gap: 8 }}>
