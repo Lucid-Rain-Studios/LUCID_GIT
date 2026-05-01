@@ -151,11 +151,22 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): 
 
 // ── gitAuthArgs — injects token via git http extraheader (avoids credential manager) ──
 
-export function gitAuthArgs(token: string | null): string[] {
+export function gitAuthArgs(token: string | null, remoteUrl?: string | null): string[] {
   if (!token) return []
   const b64 = Buffer.from(`x-access-token:${token}`).toString('base64')
-  // Apply auth header generically so it works for GitHub.com, GitHub Enterprise,
-  // and any HTTPS remote URL that requires token auth.
+
+  // Scope auth header to the git remote host so it is not forwarded to signed
+  // LFS storage URLs (for example github-cloud.s3.amazonaws.com).
+  if (remoteUrl && /^https?:\/\//i.test(remoteUrl)) {
+    try {
+      const u = new URL(remoteUrl)
+      const origin = `${u.protocol}//${u.host}/`
+      return ['-c', `http.${origin}.extraheader=AUTHORIZATION: basic ${b64}`]
+    } catch {
+      // fall through to global header as compatibility fallback
+    }
+  }
+
   return ['-c', `http.extraheader=AUTHORIZATION: basic ${b64}`]
 }
 

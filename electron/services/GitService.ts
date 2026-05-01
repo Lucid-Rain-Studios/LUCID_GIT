@@ -96,7 +96,7 @@ class GitService {
     onProgress?: ProgressCallback
   ): Promise<void> {
     const token = await authService.getCurrentToken()
-    const cmdArgs = [...gitAuthArgs(token), 'clone', '--progress']
+    const cmdArgs = [...gitAuthArgs(token, args.url), 'clone', '--progress']
     if (args.depth) cmdArgs.push('--depth', String(args.depth))
     cmdArgs.push(args.url, args.dir)
     await execWithProgress(cmdArgs, process.cwd(), onProgress)
@@ -141,18 +141,21 @@ class GitService {
   /** Push current branch to its upstream. Streams progress. */
   async push(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
     const token = await authService.getCurrentToken()
-    await execWithProgress([...gitAuthArgs(token), 'push', '--progress'], repoPath, onProgress)
+    const remoteUrl = await this.getRemoteUrl(repoPath)
+    await execWithProgress([...gitAuthArgs(token, remoteUrl), 'push', '--progress'], repoPath, onProgress)
   }
 
   /** Pull current branch. Streams progress. */
   async pull(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
     const token = await authService.getCurrentToken()
     try {
-      await execWithProgress([...gitAuthArgs(token), 'pull', '--progress'], repoPath, onProgress)
+      const remoteUrl = await this.getRemoteUrl(repoPath)
+      await execWithProgress([...gitAuthArgs(token, remoteUrl), 'pull', '--progress'], repoPath, onProgress)
     } catch (error) {
       if (!this.shouldRunLfsRecovery(error)) throw error
       await this.recoverLfsAndMergeState(repoPath)
-      await execWithProgress([...gitAuthArgs(token), 'pull', '--progress'], repoPath, onProgress)
+      const remoteUrl = await this.getRemoteUrl(repoPath)
+      await execWithProgress([...gitAuthArgs(token, remoteUrl), 'pull', '--progress'], repoPath, onProgress)
     }
   }
 
@@ -185,7 +188,8 @@ class GitService {
   /** Fetch all remotes. Streams progress. */
   async fetch(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
     const token = await authService.getCurrentToken()
-    await execWithProgress([...gitAuthArgs(token), 'fetch', '--all', '--progress'], repoPath, onProgress)
+    const remoteUrl = await this.getRemoteUrl(repoPath)
+    await execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', '--all', '--progress'], repoPath, onProgress)
   }
 
   /** List local AND remote-tracking branches with upstream tracking info. */
@@ -251,10 +255,11 @@ class GitService {
   /** Delete a remote branch via `git push <remote> --delete <branch>`. */
   async deleteRemoteBranch(repoPath: string, remoteName: string, branch: string): Promise<void> {
     const token = await authService.getCurrentToken()
-    await exec([...gitAuthArgs(token), 'push', remoteName, '--delete', branch], repoPath)
+    const remoteUrl = await this.getRemoteUrl(repoPath)
+    await exec([...gitAuthArgs(token, remoteUrl), 'push', remoteName, '--delete', branch], repoPath)
     // Ensure local remote-tracking refs are pruned immediately so branch lists
     // reflect the deletion without requiring a manual fetch.
-    await execSafe([...gitAuthArgs(token), 'fetch', remoteName, '--prune'], repoPath)
+    await execSafe([...gitAuthArgs(token, remoteUrl), 'fetch', remoteName, '--prune'], repoPath)
   }
 
   /** Create a new branch (and optionally check it out). */
@@ -310,7 +315,8 @@ class GitService {
   /** Fetch origin then merge origin/main into HEAD. */
   async updateFromMain(repoPath: string): Promise<void> {
     const token = await authService.getCurrentToken()
-    await execSafe([...gitAuthArgs(token), 'fetch', 'origin'], repoPath)
+    const remoteUrl = await this.getRemoteUrl(repoPath)
+    await execSafe([...gitAuthArgs(token, remoteUrl), 'fetch', 'origin'], repoPath)
 
     const check = await execSafe(['rev-parse', '--verify', 'origin/main'], repoPath)
     if (check.exitCode !== 0) {
@@ -714,12 +720,14 @@ class GitService {
 
   async cleanupShallow(repoPath: string, depth: number, onProgress?: ProgressCallback): Promise<void> {
     const token = await authService.getCurrentToken()
-    await execWithProgress([...gitAuthArgs(token), 'fetch', '--depth', String(depth), '--progress'], repoPath, onProgress)
+    const remoteUrl = await this.getRemoteUrl(repoPath)
+    await execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', '--depth', String(depth), '--progress'], repoPath, onProgress)
   }
 
   async cleanupUnshallow(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
     const token = await authService.getCurrentToken()
-    await execWithProgress([...gitAuthArgs(token), 'fetch', '--unshallow', '--progress'], repoPath, onProgress)
+    const remoteUrl = await this.getRemoteUrl(repoPath)
+    await execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', '--unshallow', '--progress'], repoPath, onProgress)
   }
 
   // ── LFS ───────────────────────────────────────────────────────────────────
@@ -850,7 +858,8 @@ class GitService {
 
   async setUpstream(repoPath: string, branch: string): Promise<void> {
     const token = await authService.getCurrentToken()
-    await execWithProgress([...gitAuthArgs(token), 'push', '--set-upstream', 'origin', branch], repoPath)
+    const remoteUrl = await this.getRemoteUrl(repoPath)
+    await execWithProgress([...gitAuthArgs(token, remoteUrl), 'push', '--set-upstream', 'origin', branch], repoPath)
   }
 
   async setGitConfig(repoPath: string, key: string, value: string): Promise<void> {
