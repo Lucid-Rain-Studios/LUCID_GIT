@@ -632,21 +632,31 @@ class GitService {
     const startBranch = await this.currentBranch(repoPath)
     const targetRef = await this.resolveBranchRef(repoPath, targetBranch)
     const baseRef = await this.resolveBranchRef(repoPath, baseBranch)
+    const targetLocal = targetRef.replace(/^origin\//, '')
+    const localBranchExists = (await execSafe(['rev-parse', '--verify', `refs/heads/${targetLocal}`], repoPath)).exitCode === 0
+    const temporaryLocalBranch = !localBranchExists && targetRef.startsWith('origin/')
 
-    await exec(['checkout', targetRef.replace(/^origin\//, '')], repoPath)
-    await execSafe(['merge', '--abort'], repoPath)
-    await exec(['merge', '--no-ff', '--no-commit', baseRef], repoPath).catch(async () => {
-      // expected when conflicts are present
-    })
+    try {
+      if (localBranchExists) await exec(['checkout', targetLocal], repoPath)
+      else await exec(['checkout', '-b', targetLocal, '--track', targetRef], repoPath)
 
-    for (const [file, side] of Object.entries(fileChoices)) {
-      await exec(['checkout', side === 'theirs' ? '--theirs' : '--ours', '--', file], repoPath)
-      await exec(['add', '--', file], repoPath)
+      await execSafe(['merge', '--abort'], repoPath)
+      await exec(['merge', '--no-ff', '--no-commit', baseRef], repoPath).catch(async () => {
+        // expected when conflicts are present
+      })
+
+      for (const [file, side] of Object.entries(fileChoices)) {
+        await exec(['checkout', side === 'theirs' ? '--theirs' : '--ours', '--', file], repoPath)
+        await exec(['add', '--', file], repoPath)
+      }
+
+      await exec(['commit', '-m', `Resolve merge conflicts: ${baseBranch} -> ${targetBranch}`], repoPath)
+      await exec(['push', 'origin', targetLocal], repoPath)
+    } finally {
+      await execSafe(['merge', '--abort'], repoPath)
+      await execSafe(['checkout', startBranch], repoPath)
+      if (temporaryLocalBranch) await execSafe(['branch', '-D', targetLocal], repoPath)
     }
-
-    await exec(['commit', '-m', `Resolve merge conflicts: ${baseBranch} -> ${targetBranch}`], repoPath)
-    await exec(['push', 'origin', targetRef.replace(/^origin\//, '')], repoPath)
-    await exec(['checkout', startBranch], repoPath)
   }
 
   private async resolveBranchRef(repoPath: string, targetBranch: string): Promise<string> {
