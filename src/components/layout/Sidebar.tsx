@@ -51,11 +51,11 @@ const NAV_GROUPS: NavGroup[] = [
   {
     key: 'admin', label: 'Admin', adminOnly: true,
     items: [
+      { id: 'overview', label: 'Overview', Icon: OverviewIcon },
       { id: 'lfs',      label: 'LFS',      Icon: LFSIcon },
       { id: 'cleanup',  label: 'Cleanup',  Icon: CleanupIcon },
       { id: 'unreal',   label: 'Unreal',   Icon: UnrealIcon },
       { id: 'hooks',    label: 'Hooks',    Icon: HooksIcon },
-      { id: 'overview', label: 'Overview', Icon: OverviewIcon },
     ],
   },
 ]
@@ -66,7 +66,7 @@ const VISIBILITY_KEY  = 'lucid-git:sidebar-visibility'
 const VISIBILITY_DEFAULTS: Record<string, string[]> = {
   workspace: ['dashboard', 'timeline', 'branches'],
   tools:     ['tools', 'locks', 'content', 'logs'],
-  admin:     ['lfs', 'cleanup', 'unreal', 'hooks', 'overview'],
+  admin:     ['overview', 'lfs', 'cleanup', 'unreal', 'hooks'],
 }
 
 function loadCollapsed(): Record<string, boolean> {
