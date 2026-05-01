@@ -570,7 +570,7 @@ function TLBranchDropdown({ open, onToggleOpen, branches, selectedBranches, defa
 // ── Left commit row ───────────────────────────────────────────────────────────
 
 function LeftCommitRow({ node, selected, repoPath, remoteUrl, onRefresh, onClick,
-  graphColW, branchTips, branchColors, defaultBranch, lineColorLabels }: {
+  graphColW, branchTips, branchColors, defaultBranch, lineColorLabels, needsPush, needsPull }: {
   node: GraphNode; selected: boolean
   repoPath: string; remoteUrl: string | null
   onRefresh: () => void; onClick: () => void
@@ -579,6 +579,8 @@ function LeftCommitRow({ node, selected, repoPath, remoteUrl, onRefresh, onClick
   branchColors: Map<string, string>
   defaultBranch: string
   lineColorLabels: Map<string, string>
+  needsPush: boolean
+  needsPull: boolean
 }) {
   const [hover, setHover] = useState(false)
   const [ctx, setCtx]     = useState<{ x: number; y: number } | null>(null)
@@ -739,6 +741,32 @@ function LeftCommitRow({ node, selected, repoPath, remoteUrl, onRefresh, onClick
               fontWeight: selected ? 600 : 400, color: '#c8cdd8',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
             }}>{commit.message}</span>
+            {needsPush && (
+              <span
+                title="Needs push"
+                style={{
+                  width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'rgba(125, 211, 252, 0.14)',
+                  border: '1px solid rgba(125, 211, 252, 0.5)',
+                  color: '#c4eeff', fontSize: 11, fontWeight: 700, lineHeight: 1,
+                  boxShadow: '0 0 0 1px rgba(9, 12, 19, 0.35) inset',
+                }}
+              >↑</span>
+            )}
+            {needsPull && (
+              <span
+                title="Needs pull"
+                style={{
+                  width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'rgba(252, 165, 165, 0.14)',
+                  border: '1px solid rgba(252, 165, 165, 0.5)',
+                  color: '#ffd1d1', fontSize: 11, fontWeight: 700, lineHeight: 1,
+                  boxShadow: '0 0 0 1px rgba(9, 12, 19, 0.35) inset',
+                }}
+              >↓</span>
+            )}
             {isMerge && (
               <span style={{
                 background: 'rgba(162,126,240,0.12)', color: '#a27ef0',
@@ -1451,6 +1479,8 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   })
   const [syncStatus,  setSyncStatus]  = useState<{ ahead: number; behind: number } | null>(null)
   const [prReadyCommits, setPrReadyCommits] = useState<CommitEntry[]>([])
+  const [needsPushHashes, setNeedsPushHashes] = useState<Set<string>>(new Set())
+  const [needsPullHashes, setNeedsPullHashes] = useState<Set<string>>(new Set())
 
   // ── Center column — commit files ───────────────────────────────────────────
   const [commitFiles,   setCommitFiles]   = useState<CommitFileChange[]>([])
@@ -1542,8 +1572,35 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   useEffect(() => {
     let cancelled = false
     ipc.getSyncStatus(repoPath)
-      .then(st => { if (!cancelled) setSyncStatus({ ahead: st.ahead, behind: st.behind }) })
-      .catch(() => { if (!cancelled) setSyncStatus(null) })
+      .then(async st => {
+        if (cancelled) return
+        setSyncStatus({ ahead: st.ahead, behind: st.behind })
+        if (!st.hasUpstream || !st.remoteBranch) {
+          setNeedsPushHashes(new Set())
+          setNeedsPullHashes(new Set())
+          return
+        }
+        try {
+          const [aheadCommits, behindCommits] = await Promise.all([
+            ipc.log(repoPath, { limit: 200, all: false, refs: [`${st.remoteBranch}..HEAD`] }),
+            ipc.log(repoPath, { limit: 200, all: false, refs: [`HEAD..${st.remoteBranch}`] }),
+          ])
+          if (cancelled) return
+          setNeedsPushHashes(new Set(aheadCommits.map(c => c.hash)))
+          setNeedsPullHashes(new Set(behindCommits.map(c => c.hash)))
+        } catch {
+          if (cancelled) return
+          setNeedsPushHashes(new Set())
+          setNeedsPullHashes(new Set())
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSyncStatus(null)
+          setNeedsPushHashes(new Set())
+          setNeedsPullHashes(new Set())
+        }
+      })
     return () => { cancelled = true }
   }, [repoPath, historyTick])
 
@@ -1776,6 +1833,8 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
               branchColors={branchColors}
               defaultBranch={defaultBranch}
               lineColorLabels={lineColorLabels}
+              needsPush={needsPushHashes.has(node.commit.hash)}
+              needsPull={needsPullHashes.has(node.commit.hash)}
             />
           ))}
           {!histLoading && totalLoaded >= limitRef.current && (
