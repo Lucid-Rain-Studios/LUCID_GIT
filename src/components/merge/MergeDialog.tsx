@@ -47,6 +47,7 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
   const [inConflictResolution, setInConflictResolution] = useState(false)
   const [textByFile, setTextByFile] = useState<Record<string, MergeConflictText>>({})
   const [resolvedFiles, setResolvedFiles] = useState<Record<string, 'ours' | 'theirs'>>({})
+  const [preselectedChoices, setPreselectedChoices] = useState<Record<string, 'ours' | 'theirs'>>({})
   const opRun = useOperationStore(s => s.run)
 
   useEffect(() => {
@@ -101,6 +102,14 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
         }))
         setTextByFile(loaded)
         setError(null)
+
+        const selectedEntries = Object.entries(preselectedChoices)
+        if (selectedEntries.length > 0) {
+          for (const [filePath, choice] of selectedEntries) {
+            await opRun(`Resolving ${filePath}…`, () => ipc.mergeResolveText(repoPath, filePath, choice))
+          }
+          setResolvedFiles(prev => ({ ...prev, ...preselectedChoices }))
+        }
       } else {
         setError(msg)
       }
@@ -257,6 +266,32 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
                         </div>
                       </div>
                     ))}
+                  </div>
+
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-[10px] font-mono text-lg-text-secondary">Preferred resolution:</span>
+                    <button
+                      onClick={() => setPreselectedChoices(prev => ({ ...prev, [file.path]: 'ours' }))}
+                      className={cn(
+                        'px-2 h-6 text-[10px] font-mono border rounded',
+                        preselectedChoices[file.path] === 'ours'
+                          ? 'border-lg-success text-lg-success bg-lg-success/10'
+                          : 'border-lg-border text-lg-text-secondary'
+                      )}
+                    >
+                      Keep {currentBranch}
+                    </button>
+                    <button
+                      onClick={() => setPreselectedChoices(prev => ({ ...prev, [file.path]: 'theirs' }))}
+                      className={cn(
+                        'px-2 h-6 text-[10px] font-mono border rounded',
+                        preselectedChoices[file.path] === 'theirs'
+                          ? 'border-lg-accent text-lg-accent bg-lg-accent/10'
+                          : 'border-lg-border text-lg-text-secondary'
+                      )}
+                    >
+                      Keep {targetBranch}
+                    </button>
                   </div>
                 </div>
               ))}
