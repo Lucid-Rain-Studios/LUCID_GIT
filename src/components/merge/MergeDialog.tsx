@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { ipc, BranchDiffSummary, ConflictPreviewFile } from '@/ipc'
+import { ipc, BranchDiffSummary, ConflictPreviewFile, MergeConflictText } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useOperationStore } from '@/stores/operationStore'
 import { cn } from '@/lib/utils'
@@ -44,6 +44,9 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
   const [diffSummary, setDiffSummary] = useState<BranchDiffSummary | null>(null)
   const [error, setError]       = useState<string | null>(null)
   const [merging, setMerging]   = useState(false)
+  const [inConflictResolution, setInConflictResolution] = useState(false)
+  const [textByFile, setTextByFile] = useState<Record<string, MergeConflictText>>({})
+  const [resolvedFiles, setResolvedFiles] = useState<Record<string, 'ours' | 'theirs'>>({})
   const opRun = useOperationStore(s => s.run)
 
   useEffect(() => {
@@ -75,9 +78,33 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
       onMerged()
       onClose()
     } catch (e) {
-      setError(String(e))
+      const msg = String(e)
+      if (msg.toLowerCase().includes('conflict')) {
+        const textConflicts = conflicts.filter(c => c.conflictType === 'content')
+        const loaded: Record<string, MergeConflictText> = {}
+        for (const c of textConflicts) loaded[c.path] = await ipc.mergeGetConflictText(repoPath, c.path)
+        setTextByFile(loaded)
+        setInConflictResolution(true)
+        setError(null)
+      } else {
+        setError(msg)
+      }
       setMerging(false)
     }
+  }
+
+  const resolveFile = async (filePath: string, choice: 'ours' | 'theirs') => {
+    if (!repoPath) return
+    await opRun(`Resolving ${filePath}…`, () => ipc.mergeResolveText(repoPath, filePath, choice))
+    setResolvedFiles(prev => ({ ...prev, [filePath]: choice }))
+  }
+
+  const finalizeMerge = async () => {
+    if (!repoPath) return
+    await opRun('Finalizing merge…', () => ipc.mergeContinue(repoPath, targetBranch))
+    await refreshStatus()
+    onMerged()
+    onClose()
   }
 
   return (
@@ -218,7 +245,33 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
           )}
         </div>
 
+        {inConflictResolution && (
+          <div className="border-t border-lg-border bg-lg-bg-secondary/50 px-4 py-3 space-y-3">
+            <div className="text-[11px] font-mono text-lg-warning">Resolve text conflicts</div>
+            {conflicts.filter(c => c.conflictType === 'content').map(c => {
+              const done = resolvedFiles[c.path]
+              const text = textByFile[c.path]
+              return (
+                <div key={c.path} className="border border-lg-border rounded p-2 space-y-2">
+                  <div className="text-[10px] font-mono text-lg-text-primary">{c.path}</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <pre className="text-[9px] font-mono bg-lg-bg-primary rounded p-2 max-h-28 overflow-auto whitespace-pre-wrap">{text?.ours || ''}</pre>
+                    <pre className="text-[9px] font-mono bg-lg-bg-primary rounded p-2 max-h-28 overflow-auto whitespace-pre-wrap">{text?.theirs || ''}</pre>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => resolveFile(c.path, 'ours')} className="px-2 h-6 text-[10px] font-mono border rounded border-lg-border">Accept ours</button>
+                    <button onClick={() => resolveFile(c.path, 'theirs')} className="px-2 h-6 text-[10px] font-mono border rounded border-lg-border">Accept theirs</button>
+                    {done && <span className="text-[10px] font-mono text-lg-success">Resolved with {done}</span>}
+                  </div>
+                </div>
+              )
+            })}
+            <button onClick={finalizeMerge} disabled={Object.keys(resolvedFiles).length < conflicts.filter(c => c.conflictType === 'content').length} className="px-3 h-7 rounded text-[11px] font-mono bg-lg-success/20 border border-lg-success/60 text-lg-success disabled:opacity-40">Finalize merge</button>
+          </div>
+        )}
+
         {/* Footer */}
+
         {!loading && !error && (
           <div className="flex items-center justify-between px-4 py-3 border-t border-lg-border shrink-0 gap-3">
             {conflicts.length > 0 && (
