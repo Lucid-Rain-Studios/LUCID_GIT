@@ -341,13 +341,13 @@ function DailyFlowStrip({
   const s1Btns: FlowStepBtn[] = [
     {
       label:    fetchButtonLabel(busy),
-      color:    undefined,
+      color:    '#4a9eff',
       disabled: isBusy,
       onClick:  onFetch,
     },
     {
       label:    pullButtonLabel(busy),
-      color:    behind > 0 && hasFetched ? '#f5a832' : undefined,
+      color:    '#f5a832',
       disabled: !canPull(hasFetched, busy),
       onClick:  onPull,
     },
@@ -599,8 +599,8 @@ function LocalStatusCard({ sync, busy, hasFetched, files, staged, unstaged, onFe
         )}
 
         <div style={{ display: 'flex', gap: 6 }}>
-          <SmallBtn label={fetchButtonLabel(busy)} disabled={busy !== 'idle'} onClick={onFetch} />
-          <SmallBtn label={pullButtonLabel(busy)} color={behind > 0 && hasFetched ? '#f5a832' : undefined} disabled={!canPull(hasFetched, busy)} onClick={onPull} />
+          <SmallBtn label={fetchButtonLabel(busy)} color="#4a9eff" disabled={busy !== 'idle'} onClick={onFetch} />
+          <SmallBtn label={pullButtonLabel(busy)} color="#f5a832" disabled={!canPull(hasFetched, busy)} onClick={onPull} />
           <SmallBtn label={pushButtonLabel(busy)} color={pushEnabled ? '#2dbd6e' : undefined} disabled={!pushEnabled} onClick={onPush} />
         </div>
 
@@ -935,7 +935,12 @@ function SmallBtn({ label, color, disabled, onClick }: {
   label: string; color?: string; disabled: boolean; onClick: () => void
 }) {
   const [hover, setHover] = useState(false)
-  const c = color ?? '#5a6880'
+  const c = color ?? '#7b8499'
+  const active = !!color
+  const borderColor = active ? c : '#1a2030'
+  const bgColor = active ? `${c}14` : 'transparent'
+  const textColor = active ? c : '#7b8499'
+
   return (
     <button
       onClick={disabled ? undefined : onClick}
@@ -943,12 +948,13 @@ function SmallBtn({ label, color, disabled, onClick }: {
       onMouseLeave={() => setHover(false)}
       style={{
         height: 24, paddingLeft: 12, paddingRight: 12, borderRadius: 5,
-        background: hover ? `${c}14` : 'rgba(255,255,255,0.025)',
-        border: `1px solid ${hover ? `${c}55` : '#1a2030'}`,
-        color: disabled ? '#2a3348' : hover ? c : '#4a566a',
+        background: hover && !disabled ? `${c}1b` : bgColor,
+        border: `1px solid ${hover && !disabled ? `${borderColor}cc` : borderColor}`,
+        color: disabled ? '#2a3348' : textColor,
         fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11.5, fontWeight: 500,
-        cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.5 : 1,
-        boxShadow: hover && !disabled ? `0 0 10px ${c}18` : 'none',
+        cursor: disabled ? 'default' : 'pointer', opacity: disabled && !active ? 0.5 : 1,
+        boxShadow: active && !disabled ? `0 0 12px ${c}25` : 'none',
+        transition: 'border-color 0.12s, background 0.12s',
         whiteSpace: 'nowrap',
       }}
     >{label}</button>
