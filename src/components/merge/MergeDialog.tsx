@@ -56,10 +56,20 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
     Promise.all([
       opRun(`Analyzing merge with ${targetBranch}…`, () => ipc.mergePreview(repoPath, targetBranch)),
       ipc.branchDiff(repoPath, currentBranch, targetBranch),
+      ipc.branchDiff(repoPath, targetBranch, currentBranch),
     ])
-      .then(([preview, diff]) => {
+      .then(([preview, forwardDiff, reverseDiff]) => {
         setConflicts(preview)
-        setDiffSummary(diff)
+        const forwardIncoming = forwardDiff.aheadCommits.length
+        const reverseIncoming = reverseDiff.behindCommits.length
+        const chosen = reverseIncoming > forwardIncoming
+          ? {
+              ...reverseDiff,
+              aheadCommits: reverseDiff.behindCommits,
+              behindCommits: reverseDiff.aheadCommits,
+            }
+          : forwardDiff
+        setDiffSummary(chosen)
       })
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false))

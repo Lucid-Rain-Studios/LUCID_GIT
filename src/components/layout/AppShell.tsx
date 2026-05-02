@@ -47,6 +47,7 @@ import { useForecastStore } from '@/stores/forecastStore'
 import { AssetViewerPanel } from '@/components/viewer/AssetViewerPanel'
 import { PanelErrorBoundary } from '@/components/ui/PanelErrorBoundary'
 import { BugLogsPanel } from '@/components/logs/BugLogsPanel'
+import { GlobalLoadingCursor } from '@/components/ui/GlobalLoadingCursor'
 
 type TabId = 'timeline' | 'branches' | 'lfs' | 'cleanup' | 'unreal' | 'hooks' | 'settings' | 'tools' | 'presence' | 'overview' | 'map' | 'content' | 'heatmap' | 'forecast' | 'dashboard' | 'locks' | 'logs'
 
@@ -605,6 +606,7 @@ export function AppShell() {
       </div>
 
       <StatusBar />
+      <GlobalLoadingCursor />
 
       {showCloneDialog && <CloneDialog onClose={() => setShowCloneDialog(false)} />}
       {showLoginDialog && <DeviceFlowLogin onClose={() => setShowLoginDialog(false)} />}

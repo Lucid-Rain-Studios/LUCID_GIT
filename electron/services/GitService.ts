@@ -369,11 +369,16 @@ class GitService {
 
   /** Diff summary between two branches: commits ahead/behind + changed files with line counts. */
   async branchDiff(repoPath: string, base: string, compare: string): Promise<BranchDiffSummary> {
+    const [baseRef, compareRef] = await Promise.all([
+      this.resolveBranchRef(repoPath, base),
+      this.resolveBranchRef(repoPath, compare),
+    ])
+
     const [aheadR, behindR, numstatR, namestatR] = await Promise.all([
-      execSafe(['log', '--format=%H\t%s\t%an\t%ai', `${base}..${compare}`], repoPath),
-      execSafe(['log', '--format=%H\t%s\t%an\t%ai', `${compare}..${base}`], repoPath),
-      execSafe(['diff', '--numstat', `${base}...${compare}`], repoPath),
-      execSafe(['diff', '--name-status', `${base}...${compare}`], repoPath),
+      execSafe(['log', '--format=%H\t%s\t%an\t%ai', `${baseRef}..${compareRef}`], repoPath),
+      execSafe(['log', '--format=%H\t%s\t%an\t%ai', `${compareRef}..${baseRef}`], repoPath),
+      execSafe(['diff', '--numstat', `${baseRef}...${compareRef}`], repoPath),
+      execSafe(['diff', '--name-status', `${baseRef}...${compareRef}`], repoPath),
     ])
 
     const parseLog = (out: string) =>
