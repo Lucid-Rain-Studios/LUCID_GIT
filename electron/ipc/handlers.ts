@@ -129,9 +129,34 @@ export function registerHandlers(): void {
   })
 
   ipcMain.handle(CHANNELS.GIT_PUSH, async (event, repoPath: string) => {
-    return gitService.push(repoPath, (step) => {
+    const [branch, filesAhead] = await Promise.all([
+      gitService.currentBranch(repoPath),
+      gitService.aheadFilePaths(repoPath),
+    ])
+
+    const result = await gitService.push(repoPath, (step) => {
       if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
     })
+
+    if (branch.trim().toLowerCase() === 'main' && filesAhead.length > 0) {
+      try {
+        const { accounts, currentAccountId } = authService.listAccounts()
+        const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login
+        if (currentLogin) {
+          const locks = await lockService.listLocks(repoPath)
+          const pushedFiles = new Set(filesAhead)
+          await Promise.allSettled(
+            locks
+              .filter(lock => lock.owner.login === currentLogin && pushedFiles.has(lock.path))
+              .map(lock => lockService.unlockFile(repoPath, lock.path, false, lock.id, currentLogin, currentLogin))
+          )
+        }
+      } catch {
+        // Best-effort lock cleanup — do not fail successful push
+      }
+    }
+
+    return result
   })
 
   ipcMain.handle(CHANNELS.GIT_PULL, async (event, repoPath: string) => {

@@ -197,7 +197,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
   const behind    = effectiveSync?.behind ?? 0
   const ahead     = effectiveSync?.ahead ?? 0
   const busyState = effectiveBusy
-  const canCreatePRNow = canCreatePR(!!ghSlug, !!currentBranch, ahead, busyState)
+  const canCreatePRNow = canCreatePR(!!ghSlug, currentBranch, ahead, busyState)
   const stalePull = behind > 0 && (lastPull === null || Date.now() - lastPull > TWO_DAYS)
   void topBarTick
 

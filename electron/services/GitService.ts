@@ -145,6 +145,20 @@ class GitService {
     await execWithProgress([...gitAuthArgs(token, remoteUrl), 'push', '--progress'], repoPath, onProgress)
   }
 
+  /** Files changed in commits that are ahead of upstream (what push would publish). */
+  async aheadFilePaths(repoPath: string): Promise<string[]> {
+    const upstreamRes = await execSafe(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], repoPath)
+    if (upstreamRes.exitCode !== 0) return []
+    const upstream = upstreamRes.stdout.trim()
+    if (!upstream) return []
+    const diffRes = await execSafe(['diff', '--name-only', `${upstream}..HEAD`], repoPath)
+    if (diffRes.exitCode !== 0) return []
+    return diffRes.stdout
+      .split('\n')
+      .map(line => line.trim().replace(/\\/g, '/'))
+      .filter(Boolean)
+  }
+
   /** Pull current branch. Streams progress. */
   async pull(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
     const token = await authService.getCurrentToken()

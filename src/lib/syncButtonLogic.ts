@@ -20,6 +20,8 @@ export function canPush(hasFetched: boolean, behind: number, ahead: number, busy
   return busy === 'idle' && hasFetched && behind === 0 && ahead > 0
 }
 
-export function canCreatePR(hasRemote: boolean, hasBranch: boolean, ahead: number, busy: SyncBusyState): boolean {
-  return hasRemote && hasBranch && busy === 'idle' && ahead > 0
+export function canCreatePR(hasRemote: boolean, branchName: string | null | undefined, ahead: number, busy: SyncBusyState): boolean {
+  const normalized = (branchName ?? '').trim().toLowerCase()
+  const isMainBranch = normalized === 'main'
+  return hasRemote && !!normalized && !isMainBranch && busy === 'idle' && ahead > 0
 }
