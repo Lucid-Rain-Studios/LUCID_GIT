@@ -278,6 +278,15 @@ export function registerHandlers(): void {
     const ourBranch = await gitService.currentBranch(repoPath)
     heatmapService.markConflictsResolved(repoPath, ourBranch, targetBranch)
   })
+  ipcMain.handle(CHANNELS.GIT_MERGE_CONFLICT_DETAILS, async (_event, repoPath: string) => {
+    return gitService.mergeConflictDetails(repoPath)
+  })
+  ipcMain.handle(CHANNELS.GIT_MERGE_CONFLICT_RESOLVE_TEXT, async (_event, repoPath: string, filePath: string, resolvedContent: string) => {
+    await runGitOp('Resolve conflict text', () => gitService.mergeConflictResolveText(repoPath, filePath, resolvedContent))
+  })
+  ipcMain.handle(CHANNELS.GIT_MERGE_CONFLICT_FINALIZE, async (_event, repoPath: string, targetBranch: string) => {
+    await runGitOp('Finalize merge conflict resolution', () => gitService.mergeConflictFinalize(repoPath, targetBranch))
+  })
 
   ipcMain.handle(
     CHANNELS.GIT_MERGE_RESOLVE,

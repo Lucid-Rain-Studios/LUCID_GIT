@@ -623,6 +623,34 @@ class GitService {
     await exec(['merge', targetRef], repoPath)
   }
 
+  async mergeConflictDetails(repoPath: string): Promise<Array<{ path: string; content: string; hunks: Array<{ index: number; ours: string; theirs: string }> }>> {
+    const filesRes = await execSafe(['diff', '--name-only', '--diff-filter=U'], repoPath)
+    const files = filesRes.stdout.split('\n').map(s => s.trim()).filter(Boolean)
+    const out: Array<{ path: string; content: string; hunks: Array<{ index: number; ours: string; theirs: string }> }> = []
+    for (const file of files) {
+      const fullPath = path.join(repoPath, file)
+      const text = await fs.promises.readFile(fullPath, 'utf8')
+      const hunks: Array<{ index: number; ours: string; theirs: string }> = []
+      const re = /<<<<<<<[\s\S]*?\n([\s\S]*?)\n=======\n([\s\S]*?)\n>>>>>>>[^\n]*\n?/g
+      let m: RegExpExecArray | null
+      let idx = 0
+      while ((m = re.exec(text)) !== null) {
+        hunks.push({ index: idx++, ours: m[1] ?? '', theirs: m[2] ?? '' })
+      }
+      if (hunks.length > 0) out.push({ path: file, content: text, hunks })
+    }
+    return out
+  }
+
+  async mergeConflictResolveText(repoPath: string, filePath: string, resolvedContent: string): Promise<void> {
+    await fs.promises.writeFile(path.join(repoPath, filePath), resolvedContent, 'utf8')
+    await exec(['add', '--', filePath], repoPath)
+  }
+
+  async mergeConflictFinalize(repoPath: string, targetBranch: string): Promise<void> {
+    await exec(['commit', '-m', `Merge ${targetBranch} with conflict resolution`], repoPath)
+  }
+
   async resolveMergeIntoBranch(
     repoPath: string,
     targetBranch: string,

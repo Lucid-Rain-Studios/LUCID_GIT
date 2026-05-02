@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { ipc, ConflictPreviewFile } from '@/ipc'
+import { ipc, ConflictPreviewFile, MergeConflictFileDetails } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useOperationStore } from '@/stores/operationStore'
 import { cn } from '@/lib/utils'
@@ -43,6 +43,8 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
   const [conflicts, setConflicts] = useState<ConflictPreviewFile[]>([])
   const [error, setError]       = useState<string | null>(null)
   const [merging, setMerging]   = useState(false)
+  const [conflictDetails, setConflictDetails] = useState<MergeConflictFileDetails[]>([])
+  const [choices, setChoices] = useState<Record<string, Record<number, 'ours' | 'theirs' | 'both'>>>({})
   const opRun = useOperationStore(s => s.run)
 
   useEffect(() => {
@@ -65,9 +67,34 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
       onMerged()
       onClose()
     } catch (e) {
-      setError(String(e))
+      const msg = String(e)
+      setError(msg)
+      if (msg.toLowerCase().includes('conflict')) {
+        const details = await ipc.mergeConflictDetails(repoPath)
+        setConflictDetails(details)
+      }
       setMerging(false)
     }
+  }
+
+
+  const resolveAll = async () => {
+    if (!repoPath) return
+    for (const file of conflictDetails) {
+      let src = file.content
+      let i = 0
+      src = src.replace(/<<<<<<<[\s\S]*?\n([\s\S]*?)\n=======\n([\s\S]*?)\n>>>>>>>[^\n]*\n?/g, (_m, ours, theirs) => {
+        const pick = choices[file.path]?.[i] ?? 'ours'
+        i += 1
+        if (pick === 'theirs') return theirs + '\n'
+        if (pick === 'both') return ours + '\n' + theirs + '\n'
+        return ours + '\n'
+      })
+      await ipc.mergeConflictResolveText(repoPath, file.path, src)
+    }
+    await ipc.mergeConflictFinalize(repoPath, targetBranch)
+    await refreshStatus()
+    onMerged(); onClose()
   }
 
   return (
@@ -121,6 +148,27 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
               <div className="text-[10px] font-mono text-lg-text-secondary">
                 This merge can be applied cleanly.
               </div>
+            </div>
+          )}
+
+          {conflictDetails.length > 0 && (
+            <div className="px-4 py-3 space-y-3">
+              <div className="text-xs font-mono text-lg-warning">Resolve text conflicts in dialog</div>
+              {conflictDetails.map(file => (
+                <div key={file.path} className="border border-lg-border rounded p-2">
+                  <div className="text-[10px] font-mono mb-2">{file.path}</div>
+                  {file.hunks.map(h => (
+                    <div key={h.index} className="mb-2 text-[10px] font-mono">
+                      <div className="flex gap-1 mb-1">
+                        {(['ours','theirs','both'] as const).map(opt => (
+                          <button key={opt} onClick={() => setChoices(prev => ({...prev, [file.path]: { ...(prev[file.path] || {}), [h.index]: opt }}))} className="px-1 border border-lg-border rounded">{opt}</button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+              <button onClick={resolveAll} className="px-3 h-7 rounded text-[11px] font-mono bg-lg-success/20 border border-lg-success/60 text-lg-success">Resolve & Complete Merge</button>
             </div>
           )}
 

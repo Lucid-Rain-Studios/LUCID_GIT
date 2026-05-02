@@ -67,6 +67,16 @@ export interface ConflictPreviewFile {
   ours: ContributorInfo
   theirs: ContributorInfo
 }
+export interface MergeConflictHunk {
+  index: number
+  ours: string
+  theirs: string
+}
+export interface MergeConflictFileDetails {
+  path: string
+  content: string
+  hunks: MergeConflictHunk[]
+}
 
 export interface SyncStatus {
   ahead: number
@@ -512,6 +522,9 @@ export interface LucidGitAPI {
   branchDiff: (repoPath: string, base: string, compare: string) => Promise<BranchDiffSummary>
   mergePreview: (repoPath: string, targetBranch: string) => Promise<ConflictPreviewFile[]>
   merge: (repoPath: string, targetBranch: string) => Promise<void>
+  mergeConflictDetails: (repoPath: string) => Promise<MergeConflictFileDetails[]>
+  mergeConflictResolveText: (repoPath: string, filePath: string, resolvedContent: string) => Promise<void>
+  mergeConflictFinalize: (repoPath: string, targetBranch: string) => Promise<void>
   mergeResolve: (repoPath: string, targetBranch: string, baseBranch: string, fileChoices: Record<string, 'ours' | 'theirs'>) => Promise<void>
 
   // Locks
