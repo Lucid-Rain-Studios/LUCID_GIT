@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  ipc, SyncStatus, LFSStatus,
+  ipc, SyncStatus,
   CommitEntry, BranchActivity, SizeBreakdown, PullRequest, ConflictPreviewFile,
 } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
@@ -170,71 +170,6 @@ function Metric({ label, value, color, sub }: { label: string; value: string | n
       <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 21, fontWeight: 700, color, lineHeight: 1, textShadow: `0 0 20px ${color}40` }}>{value}</span>
       {sub && <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#344057', marginTop: 1 }}>{sub}</span>}
     </div>
-  )
-}
-
-// ── LFS health card ───────────────────────────────────────────────────────────
-
-function LfsCard({ lfs, onNavigate }: { lfs: LFSStatus | null; onNavigate: (t: string) => void }) {
-  const warnCount = lfs?.untracked.length ?? 0
-  return (
-    <Card
-      title="LFS Health"
-      icon={<LFSCardIcon />}
-      accentColor="#4d9dff"
-      actionLabel="Manage"
-      onAction={() => onNavigate('lfs')}
-    >
-      <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {lfs ? (
-          <>
-            <div style={{ display: 'flex', gap: 20 }}>
-              <Metric label="Objects" value={lfs.objects}                color="#4d9dff"  sub="tracked files" />
-              <Metric label="Size"    value={fmtBytes(lfs.totalBytes)}   color="#dde1f0"  sub="LFS stored"    />
-            </div>
-
-            <div>
-              <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, fontWeight: 600, color: '#344057', letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 6 }}>
-                {lfs.tracked.length} tracked pattern{lfs.tracked.length !== 1 ? 's' : ''}
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                {lfs.tracked.slice(0, 8).map((p, i) => (
-                  <span key={i} style={{
-                    fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
-                    background: 'rgba(255,255,255,0.04)', color: '#5a6880', borderRadius: 4, padding: '2px 7px',
-                  }}>{p}</span>
-                ))}
-                {lfs.tracked.length > 8 && (
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#344057', padding: '2px 0' }}>+{lfs.tracked.length - 8}</span>
-                )}
-                {lfs.tracked.length === 0 && (
-                  <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 11, color: '#344057' }}>No patterns — LFS not configured</span>
-                )}
-              </div>
-            </div>
-
-            {warnCount > 0 && (
-              <div style={{
-                background: 'rgba(245,168,50,0.08)', border: '1px solid rgba(245,168,50,0.3)',
-                borderRadius: 7, padding: '9px 12px',
-              }}>
-                <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#f5a832', fontWeight: 600, marginBottom: 5 }}>
-                  ⚠ {warnCount} large file{warnCount !== 1 ? 's' : ''} not in LFS
-                </div>
-                {lfs!.untracked.slice(0, 4).map((f, i) => (
-                  <div key={i} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#5a6880', padding: '1px 0' }}>{f}</div>
-                ))}
-                {warnCount > 4 && (
-                  <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#344057', marginTop: 2 }}>+{warnCount - 4} more</div>
-                )}
-              </div>
-            )}
-          </>
-        ) : (
-          <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>LFS data unavailable</span>
-        )}
-      </div>
-    </Card>
   )
 }
 
@@ -821,16 +756,6 @@ function AdminPRsCard({ prs, ghSlug, repoPath, loading, error, onRefresh }: {
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 
-function LFSCardIcon() {
-  return <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-    <ellipse cx="8" cy="4.5" rx="5" ry="2" stroke="currentColor" strokeWidth="1.3" />
-    <path d="M3 4.5V11.5" stroke="currentColor" strokeWidth="1.3" />
-    <path d="M13 4.5V11.5" stroke="currentColor" strokeWidth="1.3" />
-    <ellipse cx="8" cy="11.5" rx="5" ry="2" stroke="currentColor" strokeWidth="1.3" />
-    <ellipse cx="8" cy="8" rx="5" ry="2" stroke="currentColor" strokeWidth="1.3" />
-  </svg>
-}
-
 function SizeCardIcon() {
   return <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
     <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.3" />
@@ -1086,11 +1011,8 @@ export function OverviewPanel({ repoPath, onNavigate, onRefresh }: OverviewPanel
           onRefresh={loadAll}
         />
 
-        {/* ── Row 1: LFS Health | Repository Size ──────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-          <LfsCard lfs={lfs} onNavigate={onNavigate} />
-          <SizeCard size={size} sizeLoading={sizeLoading} onNavigate={onNavigate} />
-        </div>
+        {/* ── Row 1: Repository Size ───────────────────────────────────────── */}
+        <SizeCard size={size} sizeLoading={sizeLoading} onNavigate={onNavigate} />
 
         {/* ── Row 2: Recent Commits | Branch Activity ───────────────────────── */}
         <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 14, alignItems: 'start' }}>
