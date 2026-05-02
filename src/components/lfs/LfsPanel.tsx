@@ -108,16 +108,41 @@ export function LfsPanel({ repoPath }: LfsPanelProps) {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
 
-      {/* ── Stats ─────────────────────────────────────────────────── */}
-      <div className="px-3 py-2 border-b border-lg-border shrink-0">
+      {/* ── LFS health summary ────────────────────────────────────── */}
+      <div className="px-3 py-3 border-b border-lg-border shrink-0 space-y-3">
         {loading && (
           <span className="text-[10px] font-mono text-lg-text-secondary animate-pulse">Scanning…</span>
         )}
         {!loading && status && (
-          <div className="flex items-center gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
             <Stat label="Tracked patterns" value={status.tracked.length} />
             <Stat label="LFS objects"      value={status.objects} />
             <Stat label="Storage"          value={formatBytes(status.totalBytes)} />
+            <Stat
+              label="Coverage"
+              value={status.untracked.length > 0 ? `⚠ ${status.untracked.length} uncovered` : 'OK'}
+              warn={status.untracked.length > 0}
+            />
+          </div>
+        )}
+        {!loading && status && (
+          <div className="space-y-2">
+            <div className="text-[10px] font-mono uppercase tracking-widest text-lg-text-secondary">
+              Tracked patterns preview
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {status.tracked.length === 0 && (
+                <span className="text-[10px] font-mono text-lg-text-secondary">No patterns tracked yet.</span>
+              )}
+              {status.tracked.slice(0, 10).map((p, i) => (
+                <span key={`${p}-${i}`} className="px-1.5 py-0.5 rounded border border-lg-border bg-lg-bg-elevated text-[10px] font-mono text-lg-text-primary">
+                  {p}
+                </span>
+              ))}
+              {status.tracked.length > 10 && (
+                <span className="text-[10px] font-mono text-lg-text-secondary">+{status.tracked.length - 10} more</span>
+              )}
+            </div>
           </div>
         )}
         {error && (
@@ -247,11 +272,11 @@ export function LfsPanel({ repoPath }: LfsPanelProps) {
   )
 }
 
-function Stat({ label, value }: { label: string; value: string | number }) {
+function Stat({ label, value, warn = false }: { label: string; value: string | number; warn?: boolean }) {
   return (
-    <div className="flex flex-col">
+    <div className={cn('flex flex-col rounded border px-2 py-1.5 bg-lg-bg-secondary/50', warn ? 'border-lg-warning/40' : 'border-lg-border')}>
       <span className="text-[9px] font-mono uppercase tracking-widest text-lg-text-secondary">{label}</span>
-      <span className="text-xs font-mono text-lg-text-primary font-semibold">{value}</span>
+      <span className={cn('text-xs font-mono font-semibold', warn ? 'text-lg-warning' : 'text-lg-text-primary')}>{value}</span>
     </div>
   )
 }
