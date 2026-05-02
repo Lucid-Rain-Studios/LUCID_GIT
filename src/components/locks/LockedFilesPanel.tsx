@@ -50,7 +50,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
   const [refreshing, setRefreshing] = useState(false)
   const [expandedOwners, setExpandedOwners] = useState<Set<string>>(new Set())
   const [selectedLockIds, setSelectedLockIds] = useState<Set<string>>(new Set())
-  const lastSelectedIndexRef = useRef<number | null>(null)
+  const lastSelectedIdRef = useRef<string | null>(null)
 
   const myLocks = useMemo(
     () => locks.filter(l => currentLogin && l.owner.login === currentLogin),
@@ -82,6 +82,18 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
   )
 
   const selectableLockIds = useMemo(() => new Set(selectableLocks.map(lock => lock.id)), [selectableLocks])
+
+
+  React.useEffect(() => {
+    if (lastSelectedIdRef.current && !selectableLockIds.has(lastSelectedIdRef.current)) {
+      lastSelectedIdRef.current = null
+    }
+    setSelectedLockIds(prev => {
+      const next = new Set<string>()
+      for (const id of prev) if (selectableLockIds.has(id)) next.add(id)
+      return next.size === prev.size ? prev : next
+    })
+  }, [selectableLockIds])
 
   // Group team locks by owner
   const ownerGroups = useMemo(() => {
@@ -139,9 +151,12 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
     const isToggle = ctrlKey || metaKey
     setSelectedLockIds(prev => {
       const next = new Set(prev)
-      if (shiftKey && lastSelectedIndexRef.current !== null) {
-        const start = Math.min(lastSelectedIndexRef.current, index)
-        const end = Math.max(lastSelectedIndexRef.current, index)
+      const anchorId = lastSelectedIdRef.current
+      const anchorIndex = anchorId ? selectableLocks.findIndex(item => item.id === anchorId) : -1
+
+      if (shiftKey && anchorIndex >= 0) {
+        const start = Math.min(anchorIndex, index)
+        const end = Math.max(anchorIndex, index)
         const inRange = selectableLocks.slice(start, end + 1)
         for (const item of inRange) next.add(item.id)
       } else if (isToggle) {
@@ -152,7 +167,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
       }
       return next
     })
-    lastSelectedIndexRef.current = index
+    lastSelectedIdRef.current = lock.id
   }
 
   const doBulkUnlock = async () => {
