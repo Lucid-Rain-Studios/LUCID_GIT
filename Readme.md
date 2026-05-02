@@ -1,4 +1,49 @@
-# Patching for Updates
+# LucidGit
+
+## Clone and run on a new computer
+
+### 1) Prerequisites
+- **Node.js 20+** (includes npm)
+- **Git**
+
+Optional (only needed for packaging/release):
+- Platform build tools (Xcode CLT on macOS, Visual Studio Build Tools on Windows)
+
+### 2) Clone the repository
+```bash
+git clone <YOUR_REPO_URL>
+cd LUCID_GIT
+```
+
+### 3) Install dependencies
+```bash
+npm install
+```
+
+### 4) Start the app in development mode
+```bash
+npm run dev
+```
+
+### 5) Build production artifacts (optional)
+```bash
+npm run build
+```
+
+### 6) Package desktop app installers (optional)
+```bash
+npm run dist
+```
+
+### 7) If dependencies act up
+```bash
+rm -rf node_modules package-lock.json
+npm install
+```
+
+---
+
+## Patching for Updates
 
 1) Repository must have Releases enabled/publicly accessible to your users
 Your updater is configured to read from GitHub Releases on this repo/owner, so releases must actually exist there and be published.
