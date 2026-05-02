@@ -1494,8 +1494,9 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
 
   // ── Layout ─────────────────────────────────────────────────────────────────
   const [leftWidth,   setLeftWidth]   = useState(310)
+  const [graphWidth,  setGraphWidth]  = useState<number | null>(null)
   const [centerWidth, setCenterWidth] = useState(370)
-  const dragging   = useRef<'left' | 'center' | null>(null)
+  const dragging   = useRef<'left' | 'center' | 'graph' | null>(null)
   const dragStartX = useRef(0)
   const dragStartW = useRef(0)
 
@@ -1503,7 +1504,13 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     setLeftWidth(w => Math.max(w, minLeftWidth))
   }, [minLeftWidth])
 
-  const makeDragStart = useCallback((which: 'left' | 'center', currentW: number) => (e: React.MouseEvent) => {
+  useEffect(() => {
+    setGraphWidth(w => (w == null ? graphColW : Math.max(w, graphColW)))
+  }, [graphColW])
+
+  const effectiveGraphWidth = Math.max(graphColW, graphWidth ?? graphColW)
+
+  const makeDragStart = useCallback((which: 'left' | 'center' | 'graph', currentW: number) => (e: React.MouseEvent) => {
     dragging.current   = which
     dragStartX.current = e.clientX
     dragStartW.current = currentW
@@ -1512,6 +1519,12 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     const onMove = (ev: MouseEvent) => {
       if (!dragging.current) return
       const delta = ev.clientX - dragStartX.current
+      if (which === 'graph') {
+        const maxGraphW = Math.max(graphColW, leftWidth - 180)
+        const next = Math.max(graphColW, Math.min(maxGraphW, dragStartW.current + delta))
+        setGraphWidth(next)
+        return
+      }
       const w = Math.max(240, Math.min(520, dragStartW.current + delta))
       if (which === 'left') setLeftWidth(Math.max(w, minLeftWidth))
       else setCenterWidth(w)
@@ -1525,7 +1538,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
-  }, [minLeftWidth])
+  }, [graphColW, leftWidth, minLeftWidth])
 
   // ── Load history ───────────────────────────────────────────────────────────
   const loadHistory = useCallback(async (limit: number, branches?: Set<string>) => {
@@ -1535,7 +1548,8 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
       const hasAllSelected = branchNames.length > 0 && branchNames.every(name => active.has(name))
       const refs = hasAllSelected ? undefined : [...new Set([defaultBranch, ...active])]
       const commits = await opRun('Loading history…', () => ipc.log(repoPath, { limit, all: !refs, refs }))
-      setNodes(computeGraph(commits))
+      const chronologicallySorted = [...commits].sort((a, b) => b.timestamp - a.timestamp)
+      setNodes(computeGraph(chronologicallySorted))
       setTotalLoaded(commits.length)
     } finally {
       setHistLoading(false)
@@ -1728,7 +1742,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
       <GraphDefs />
 
       {/* ── Left column ──────────────────────────────────────────────────── */}
-      <div style={{ width: leftWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: '1px solid #252d42' }}>
+      <div style={{ width: leftWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: '1px solid #252d42', position: 'relative' }}>
 
         {/* Header */}
         <div style={{
@@ -1809,7 +1823,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
         <WorkingTreeGraphRow
           selected={leftSel.kind === 'working-tree'}
           changeCount={fileStatus.length}
-          graphColW={graphColW}
+          graphColW={effectiveGraphWidth}
           lane={currentHeadLane}
           onClick={selectWorkingTree}
         />
@@ -1828,7 +1842,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
               remoteUrl={remoteUrl}
               onRefresh={() => loadHistory(limitRef.current)}
               onClick={() => selectCommit(node.commit)}
-              graphColW={graphColW}
+              graphColW={effectiveGraphWidth}
               branchTips={branchTips}
               branchColors={branchColors}
               defaultBranch={defaultBranch}
@@ -1862,6 +1876,20 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
           <span style={{ color: '#2ec573' }}>• branch</span>
           <span style={{ color: '#f5a832' }}>⌂ working tree</span>
         </div>
+        <div
+          onMouseDown={makeDragStart('graph', effectiveGraphWidth)}
+          title="Resize graph column"
+          style={{
+            position: 'absolute',
+            left: effectiveGraphWidth - 1,
+            top: 80,
+            bottom: 24,
+            width: 3,
+            cursor: 'col-resize',
+            background: 'transparent',
+            zIndex: 10,
+          }}
+        />
       </div>
 
       <DragHandle onMouseDown={makeDragStart('left', leftWidth)} />
