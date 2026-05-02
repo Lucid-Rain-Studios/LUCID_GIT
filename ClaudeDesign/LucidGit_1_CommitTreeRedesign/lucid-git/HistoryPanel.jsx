@@ -5,11 +5,11 @@ function HistoryPanel({ commits, selectedHash, onSelect, selectedFiles }) {
   const D = window.MockData
 
   // ── Graph constants ──────────────────────────────────────────────────
-  const LANE_W    = 16
-  const NODE_R    = 4.5
-  const NODE_R_M  = 5.5
-  const GRAPH_PAD = 10
-  const ROW_H     = 50
+  const LANE_W    = 13
+  const NODE_R    = 4
+  const NODE_R_M  = 5
+  const GRAPH_PAD = 7
+  const ROW_H     = 40
   const LANE_COLORS = [T.blue, T.orange, T.green, T.purple]
 
   // ── Filter state ─────────────────────────────────────────────────────
