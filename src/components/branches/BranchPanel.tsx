@@ -741,7 +741,9 @@ function BranchStatusPanel({ branch, insights }: { branch: BranchInfo; insights?
         Safe to merge: {behind === 0 ? 'up-to-date with main ✅' : `needs ${behind} main commit(s) ❌`} · {hasConflictRisk ? 'overlaps/conflicts present ❌' : 'no overlaps/conflicts ✅'} · {(insights?.locks.length ?? 0) === 0 ? 'no locks ✅' : 'locks present ❌'}
       </div>
       {insights?.overlapWarnings.slice(0, 3).map(w => <div key={w} className="text-lg-warning">{w}</div>)}
-      <div className="text-lg-text-secondary/70">main ─────●────●────● {'\\'} ●─● ({branch.name})</div>
+      <div className="text-[9px] text-lg-text-secondary/60 leading-tight truncate" title={`main → ${branch.name}`}>
+        graph: main ↘ {branch.name}
+      </div>
     </div>
   )
 }
