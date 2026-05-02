@@ -5,6 +5,7 @@ import {
 } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useOperationStore } from '@/stores/operationStore'
+import { useStatusToastStore } from '@/stores/statusToastStore'
 
 interface OverviewPanelProps {
   repoPath: string
@@ -453,12 +454,17 @@ function ResolveDialog({
   const opRun         = useOperationStore(s => s.run)
   const bumpHistoryTick = useRepoStore(s => s.bumpHistoryTick)
   const bumpPrTick      = useRepoStore(s => s.bumpPrTick)
+  const bumpSyncTick    = useRepoStore(s => s.bumpSyncTick)
   const [choice, setChoice] = useState<'accept' | 'decline'>('accept')
+  const showStatusToast = useStatusToastStore(s => s.show)
   const [conflicts, setConflicts] = useState<ConflictPreviewFile[]>([])
   const [conflictLoading, setConflictLoading] = useState(false)
   const [conflictError, setConflictError] = useState<string | null>(null)
   const [fileChoices, setFileChoices] = useState<Record<string, ConflictChoice>>({})
   const [busy, setBusy] = useState(false)
+  const [branchDiff, setBranchDiff] = useState<BranchDiffSummary | null>(null)
+  const [branchDiffLoading, setBranchDiffLoading] = useState(false)
+  const [branchDiffError, setBranchDiffError] = useState<string | null>(null)
 
   useEffect(() => {
     if (choice !== 'accept') return
@@ -477,6 +483,19 @@ function ResolveDialog({
       })
       .finally(() => setConflictLoading(false))
   }, [choice, repoPath, pr.headBranch])
+
+  useEffect(() => {
+    if (choice !== 'accept') return
+    setBranchDiffLoading(true)
+    setBranchDiffError(null)
+    ipc.branchDiff(repoPath, pr.baseBranch, pr.headBranch)
+      .then(setBranchDiff)
+      .catch((e) => {
+        setBranchDiff(null)
+        setBranchDiffError(String(e))
+      })
+      .finally(() => setBranchDiffLoading(false))
+  }, [choice, repoPath, pr.baseBranch, pr.headBranch])
 
   const handleConfirm = async () => {
     const [owner, repo] = ghSlug.split('/')
@@ -497,14 +516,21 @@ function ResolveDialog({
         await opRun(`Merging PR #${pr.number}…`, () => ipc.githubMergePR({ owner, repo, prNumber: pr.number, repoPath }))
         bumpHistoryTick()
         bumpPrTick()
+        bumpSyncTick()
       } else {
         await opRun(`Closing PR #${pr.number}…`, () => ipc.githubClosePR({ owner, repo, prNumber: pr.number }))
         bumpPrTick()
       }
       onDone({ prNumber: pr.number, action: choice })
       onClose()
-    } catch { /* surfaced via operationStore */ }
-    finally { setBusy(false) }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      const mergeBlocked = /not up to date|update branch|head branch was modified|pull first|fetch first|failed to merge/i.test(msg)
+      if (choice === 'accept' && mergeBlocked) {
+        showStatusToast('Merge aborted, please fetch and pull first.')
+      }
+      console.error('PR merge/close failed', e)
+    } finally { setBusy(false) }
   }
 
   return (
@@ -586,6 +612,38 @@ function ResolveDialog({
         {/* Conflict preview — only when accepting */}
         {choice === 'accept' && (
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+            <div style={{ padding: '12px 18px', borderBottom: '1px solid #18202e' }}>
+              <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10.5, fontWeight: 700, color: '#344057', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>
+                Commits and file changes
+              </div>
+              {branchDiffLoading ? (
+                <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>Loading commit details…</div>
+              ) : branchDiffError ? (
+                <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#e84545' }}>{branchDiffError}</div>
+              ) : branchDiff ? (
+                <>
+                  <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#5a6880', marginBottom: 8 }}>
+                    {branchDiff.aheadCommits.length} commit{branchDiff.aheadCommits.length !== 1 ? 's' : ''} · +{branchDiff.totalAdditions} / -{branchDiff.totalDeletions}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+                    {branchDiff.aheadCommits.map(c => (
+                      <div key={c.hash} style={{ border: '1px solid #1a2030', borderRadius: 6, padding: '7px 8px', background: 'rgba(255,255,255,0.02)' }}>
+                        <div style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#c8d0e8' }}>{c.message}</div>
+                        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#4a566a', marginTop: 3 }}>{c.hash.slice(0,7)} · {c.author}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {branchDiff.files.map(f => (
+                      <div key={f.path} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: '#5a6880' }}>
+                        <span style={{ color: '#c8d0e8' }}>{f.status} {f.path}</span>
+                        <span>+{f.additions} / -{f.deletions}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+            </div>
             {conflictLoading ? (
               <div style={{ padding: '16px 18px', fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12, color: '#344057' }}>
                 Checking for conflicts…

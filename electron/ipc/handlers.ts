@@ -699,26 +699,32 @@ export function registerHandlers(): void {
   ipcMain.handle(CHANNELS.GITHUB_MERGE_PR, async (_event, args: PRActionArgs & { repoPath: string }) => {
     const token = await authService.getCurrentToken()
     if (!token) throw new Error('Not authenticated with GitHub')
-    await gitHubService.mergePR(token, args)
-    // Auto-unlock only our own locks for files that were part of this accepted PR
-    if (args.repoPath) {
-      try {
-        const { accounts, currentAccountId } = authService.listAccounts()
-        const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login
-        if (!currentLogin) return
-        const [prFiles, currentLocks] = await Promise.all([
-          gitHubService.getPRFiles(token, args),
-          lockService.listLocks(args.repoPath),
-        ])
-        const prFileSet = new Set(prFiles)
-        await Promise.allSettled(
-          currentLocks
-            .filter(lock => prFileSet.has(lock.path) && lock.owner.login === currentLogin)
-            .map(lock => lockService.unlockFile(args.repoPath, lock.path, false, lock.id))
-        )
-      } catch {
-        // Best-effort — don't fail the merge if lock cleanup errors
+    try {
+      await gitHubService.mergePR(token, args)
+      // Auto-unlock only our own locks for files that were part of this accepted PR
+      if (args.repoPath) {
+        try {
+          const { accounts, currentAccountId } = authService.listAccounts()
+          const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login
+          if (!currentLogin) return
+          const [prFiles, currentLocks] = await Promise.all([
+            gitHubService.getPRFiles(token, args),
+            lockService.listLocks(args.repoPath),
+          ])
+          const prFileSet = new Set(prFiles)
+          await Promise.allSettled(
+            currentLocks
+              .filter(lock => prFileSet.has(lock.path) && lock.owner.login === currentLogin)
+              .map(lock => lockService.unlockFile(args.repoPath, lock.path, false, lock.id))
+          )
+        } catch {
+          // Best-effort — don't fail the merge if lock cleanup errors
+        }
       }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      logService.error('github', `PR merge failed for #${args.prNumber}: ${msg}`)
+      throw error
     }
   })
 
