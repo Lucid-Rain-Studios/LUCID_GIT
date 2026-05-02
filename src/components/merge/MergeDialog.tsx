@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { ipc, ConflictPreviewFile } from '@/ipc'
+import { ipc, BranchDiffSummary, ConflictPreviewFile } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useOperationStore } from '@/stores/operationStore'
 import { cn } from '@/lib/utils'
@@ -41,6 +41,7 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
 
   const [loading, setLoading]   = useState(true)
   const [conflicts, setConflicts] = useState<ConflictPreviewFile[]>([])
+  const [diffSummary, setDiffSummary] = useState<BranchDiffSummary | null>(null)
   const [error, setError]       = useState<string | null>(null)
   const [merging, setMerging]   = useState(false)
   const opRun = useOperationStore(s => s.run)
@@ -49,11 +50,20 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
     if (!repoPath) return
     setLoading(true)
     setError(null)
-    opRun(`Analyzing merge with ${targetBranch}…`, () => ipc.mergePreview(repoPath, targetBranch))
-      .then(setConflicts)
+    Promise.all([
+      opRun(`Analyzing merge with ${targetBranch}…`, () => ipc.mergePreview(repoPath, targetBranch)),
+      ipc.branchDiff(repoPath, currentBranch, targetBranch),
+    ])
+      .then(([preview, diff]) => {
+        setConflicts(preview)
+        setDiffSummary(diff)
+      })
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false))
-  }, [repoPath, targetBranch])
+  }, [repoPath, targetBranch, currentBranch, opRun])
+
+  const mergeCommitCount = diffSummary?.aheadCommits.length ?? 0
+  const mergeFileCount = diffSummary?.files.length ?? 0
 
   const doMerge = async () => {
     if (!repoPath) return
@@ -121,6 +131,34 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
               <div className="text-[10px] font-mono text-lg-text-secondary">
                 This merge can be applied cleanly.
               </div>
+            </div>
+          )}
+
+          {!loading && !error && diffSummary && (
+            <div className="border-y border-lg-border bg-lg-bg-primary/40">
+              <div className="px-4 py-2 border-b border-lg-border/60 flex items-center justify-between gap-3">
+                <div className="text-[10px] font-mono text-lg-text-secondary">Incoming changes from <span className="text-lg-accent">{targetBranch}</span></div>
+                <div className="text-[10px] font-mono text-lg-text-primary">
+                  {mergeCommitCount} commit{mergeCommitCount !== 1 ? 's' : ''} · {mergeFileCount} file{mergeFileCount !== 1 ? 's' : ''}
+                </div>
+              </div>
+
+              {mergeCommitCount === 0 && mergeFileCount === 0 ? (
+                <div className="px-4 py-3 text-[10px] font-mono text-lg-text-secondary">
+                  No changes to merge. Current branch already contains all commits from {targetBranch}.
+                </div>
+              ) : (
+                <div className="max-h-44 overflow-y-auto">
+                  {diffSummary.files.map(file => (
+                    <div key={file.path} className="px-4 py-1.5 border-b border-lg-border/40 flex items-center gap-3 text-[10px] font-mono">
+                      <span className="w-4 shrink-0 text-lg-text-secondary">{file.status}</span>
+                      <span className="flex-1 text-lg-text-primary truncate" title={file.path}>{file.path}</span>
+                      <span className="shrink-0 text-lg-success">+{file.additions}</span>
+                      <span className="shrink-0 text-lg-error">-{file.deletions}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
