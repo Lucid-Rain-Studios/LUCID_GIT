@@ -97,6 +97,12 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GIT_MERGE_PREVIEW, repoPath, targetBranch),
   merge: (repoPath: string, targetBranch: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_MERGE, repoPath, targetBranch),
+  mergeGetConflictText: (repoPath: string, filePath: string) =>
+    ipcRenderer.invoke(CHANNELS.GIT_MERGE_GET_CONFLICT_TEXT, repoPath, filePath),
+  mergeResolveText: (repoPath: string, filePath: string, choice: 'ours' | 'theirs') =>
+    ipcRenderer.invoke(CHANNELS.GIT_MERGE_RESOLVE_TEXT, repoPath, filePath, choice),
+  mergeContinue: (repoPath: string, targetBranch: string) =>
+    ipcRenderer.invoke(CHANNELS.GIT_MERGE_CONTINUE, repoPath, targetBranch),
 
   // ── Locks ─────────────────────────────────────────────────────────────────
   listLocks: (repoPath: string) =>

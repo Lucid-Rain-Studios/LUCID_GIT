@@ -623,6 +623,24 @@ class GitService {
     await exec(['merge', targetRef], repoPath)
   }
 
+
+  async getMergeConflictText(repoPath: string, filePath: string): Promise<{ ours: string; theirs: string }> {
+    const oursRes = await execSafe(['show', `:2:${filePath}`], repoPath)
+    const theirsRes = await execSafe(['show', `:3:${filePath}`], repoPath)
+    return { ours: oursRes.stdout ?? '', theirs: theirsRes.stdout ?? '' }
+  }
+
+  async resolveMergeConflictText(repoPath: string, filePath: string, choice: 'ours' | 'theirs'): Promise<void> {
+    await exec(['checkout', choice === 'theirs' ? '--theirs' : '--ours', '--', filePath], repoPath)
+    await exec(['add', '--', filePath], repoPath)
+  }
+
+  async continueMerge(repoPath: string, targetBranch: string): Promise<void> {
+    await exec(['commit', '--no-edit'], repoPath).catch(async () => {
+      await exec(['commit', '-m', `Merge branch ${targetBranch}`], repoPath)
+    })
+  }
+
   async resolveMergeIntoBranch(
     repoPath: string,
     targetBranch: string,
