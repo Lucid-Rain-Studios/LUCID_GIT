@@ -1,6 +1,6 @@
 {
   "name": "lucid-git",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "description": "Git client for game development teams",
   "author": "Lucid Rain Studios",
   "main": "dist-electron/main.js",
