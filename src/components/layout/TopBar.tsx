@@ -8,7 +8,18 @@ import { useErrorStore } from '@/stores/errorStore'
 import { usePRStore } from '@/stores/prStore'
 import { NotificationBell } from '@/components/notifications/NotificationBell'
 import { markFetchPerformed } from '@/lib/fetchState'
-import { canCreatePR, canPull, canPush, fetchButtonLabel, pullButtonLabel, pushButtonLabel } from '@/lib/syncButtonLogic'
+import {
+  canCreatePR,
+  canPull,
+  canPush,
+  createPRDisabledReason,
+  fetchButtonLabel,
+  fetchDisabledReason,
+  pullButtonLabel,
+  pullDisabledReason,
+  pushButtonLabel,
+  pushDisabledReason,
+} from '@/lib/syncButtonLogic'
 import { useStatusToastStore } from '@/stores/statusToastStore'
 import { setTopBarSyncHandlers, updateTopBarSyncSnapshot } from '@/lib/topBarSyncBridge'
 
@@ -141,11 +152,12 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
 
   const isIdle    = syncOp === 'idle'
   const hasBehind = (sync?.behind ?? 0) > 0
-  const hasAhead  = (sync?.ahead  ?? 0) > 0
   const ghSlug = remoteUrl ? parseGitHubSlug(remoteUrl) : null
   const busyState = syncOp === 'idle' ? 'idle' : syncOp === 'fetching' ? 'fetch' : syncOp === 'pulling' ? 'pull' : 'push'
   const canPushNow = canPush(hasFetched, sync?.behind ?? 0, sync?.ahead ?? 0, busyState)
   const canCreatePRNow = canCreatePR(!!ghSlug, currentBranch, sync?.ahead ?? 0, busyState)
+  const pushReason = pushDisabledReason(hasFetched, sync?.behind ?? 0, sync?.ahead ?? 0, busyState)
+  const createPRReason = createPRDisabledReason(!!ghSlug, currentBranch, sync?.ahead ?? 0, busyState)
 
   const doFetch = async () => {
     if (!repoPath || syncOp !== 'idle') return
@@ -205,7 +217,9 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
       fetch: doFetch,
       pull: doTopBarPull,
       push: doPush,
-      createPR: () => remoteUrl && canCreatePRNow && openPRDialog(repoPath, currentBranch, remoteUrl),
+      createPR: () => {
+        if (remoteUrl && canCreatePRNow) openPRDialog(repoPath, currentBranch, remoteUrl)
+      },
     } : null)
     return () => setTopBarSyncHandlers(null)
   }, [repoPath, remoteUrl, canCreatePRNow, currentBranch, doFetch, doTopBarPull, doPush, openPRDialog])
@@ -559,6 +573,8 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
               hasFetched={hasFetched}
               error={!!syncErr}
               disabled={!isIdle}
+              fetchDisabledReason={fetchDisabledReason(busyState)}
+              pullDisabledReason={pullDisabledReason(hasFetched, sync?.behind ?? 0, busyState)}
               onFetch={doFetch}
               onPull={doTopBarPull}
             />
@@ -569,11 +585,12 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
             <SyncBtn
               label={pushButtonLabel(busyState)}
               icon={<ArrowUp />}
-              count={hasAhead && isIdle ? (sync?.ahead ?? 0) : 0}
+              count={canPushNow ? (sync?.ahead ?? 0) : 0}
               countColor="#2dbd6e"
-              active={hasAhead}
+              active={canPushNow}
               error={false}
               disabled={!canPushNow}
+              disabledReason={pushReason}
               onClick={doPush}
             />
           )}
@@ -587,6 +604,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
               active={canCreatePRNow}
               error={false}
               disabled={!canCreatePRNow}
+              disabledReason={createPRReason}
               onClick={() => {
                 if (!repoPath || !remoteUrl || !currentBranch || !canCreatePRNow) return
                 openPRDialog(repoPath, currentBranch, remoteUrl)
@@ -1133,21 +1151,22 @@ function MergeDownIcon({ color = 'currentColor' }: { color?: string }) {
 // ── Sync button (Fetch & Pull / Push) ─────────────────────────────────────────
 
 function SyncBtn({
-  label, icon, count, countColor, active, error, disabled, onClick,
+  label, icon, count, countColor, active, error, disabled, disabledReason, onClick,
 }: {
   label: string; icon: React.ReactNode; count: number; countColor: string
-  active: boolean; error: boolean; disabled: boolean; onClick: () => void
+  active: boolean; error: boolean; disabled: boolean; disabledReason?: string | null; onClick: () => void
 }) {
   const [hover, setHover] = React.useState(false)
   const borderColor = error ? '#e84040' : active ? countColor : 'var(--lg-border)'
   const bgColor     = error ? 'rgba(232,64,64,0.1)' : active ? `${countColor}18` : 'transparent'
   const textColor   = error ? '#e84040' : active ? countColor : '#7b8499'
-  return (
+  const button = (
     <button
       onClick={disabled ? undefined : onClick}
       onMouseEnter={() => !disabled && setHover(true)}
       onMouseLeave={() => setHover(false)}
       disabled={disabled}
+      data-disabled-reason={disabled ? disabledReason ?? undefined : undefined}
       style={{
         display: 'flex', alignItems: 'center', gap: 6,
         height: 28, paddingLeft: 10, paddingRight: 10,
@@ -1174,6 +1193,8 @@ function SyncBtn({
       )}
     </button>
   )
+
+  return button
 }
 
 // ── Account menu (avatar + dropdown: git config + sign out) ───────────────────
@@ -1424,17 +1445,71 @@ function CloneIcon() {
 // ── Split Fetch | Pull button ─────────────────────────────────────────────────
 
 function FetchPullSplitBtn({
-  fetchLabel, pullLabel, behindCount, hasFetched, error, disabled, onFetch, onPull,
+  fetchLabel, pullLabel, behindCount, hasFetched, error, disabled, fetchDisabledReason, pullDisabledReason, onFetch, onPull,
 }: {
   fetchLabel: string; pullLabel: string; behindCount: number
   hasFetched: boolean; error: boolean; disabled: boolean
+  fetchDisabledReason?: string | null; pullDisabledReason?: string | null
   onFetch: () => void; onPull: () => void
 }) {
   const [hoverFetch, setHoverFetch] = React.useState(false)
   const [hoverPull,  setHoverPull]  = React.useState(false)
-  const pullDisabled = disabled || !hasFetched
+  const pullDisabled = disabled || !hasFetched || behindCount === 0
   const hasBehind   = behindCount > 0
   const borderColor = error ? '#e84040' : hasBehind ? '#f5a832' : '#1d2535'
+  const fetchButton = (
+    <button
+      onClick={disabled ? undefined : onFetch}
+      disabled={disabled}
+      data-disabled-reason={disabled ? fetchDisabledReason ?? undefined : undefined}
+      onMouseEnter={() => !disabled && setHoverFetch(true)}
+      onMouseLeave={() => setHoverFetch(false)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 5,
+        paddingLeft: 10, paddingRight: 10,
+        background: hoverFetch && !disabled ? 'rgba(74,158,255,0.08)' : 'transparent',
+        border: 'none',
+        color: disabled ? '#344057' : hoverFetch ? '#4a9eff' : '#6b7590',
+        fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5, fontWeight: 500,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        transition: 'background 0.12s, color 0.12s', whiteSpace: 'nowrap',
+      }}
+    >
+      <FetchIcon />
+      {fetchLabel}
+    </button>
+  )
+  const pullButton = (
+    <button
+      onClick={pullDisabled ? undefined : onPull}
+      disabled={pullDisabled}
+      data-disabled-reason={pullDisabled ? pullDisabledReason ?? undefined : undefined}
+      onMouseEnter={() => !pullDisabled && setHoverPull(true)}
+      onMouseLeave={() => setHoverPull(false)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 5,
+        paddingLeft: 10, paddingRight: hasBehind ? 7 : 10,
+        background: hoverPull && !pullDisabled ? (hasBehind ? 'rgba(245,168,50,0.08)' : 'rgba(74,158,255,0.08)') : 'transparent',
+        border: 'none',
+        color: pullDisabled ? '#283047' : hasBehind ? '#f5a832' : hoverPull ? '#4a9eff' : '#6b7590',
+        fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5, fontWeight: 500,
+        cursor: pullDisabled ? 'not-allowed' : 'pointer',
+        opacity: pullDisabled && !hasBehind ? 0.5 : 1,
+        transition: 'background 0.12s, color 0.12s', whiteSpace: 'nowrap',
+      }}
+    >
+      <ArrowDown />
+      {pullLabel}
+      {hasBehind && (
+        <span style={{
+          background: 'rgba(245,168,50,0.2)', color: '#f5a832',
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 700,
+          borderRadius: 8, paddingLeft: 5, paddingRight: 5, lineHeight: '15px',
+          border: '1px solid rgba(245,168,50,0.4)',
+        }}>{behindCount}</span>
+      )}
+    </button>
+  )
 
   return (
     <div style={{
@@ -1444,56 +1519,11 @@ function FetchPullSplitBtn({
       boxShadow: hasBehind ? '0 0 10px rgba(245,168,50,0.15)' : 'none',
       animation: hasBehind ? 'glow-pulse 2.5s ease-in-out infinite' : 'none',
     }}>
-      <button
-        onClick={disabled ? undefined : onFetch}
-        disabled={disabled}
-        onMouseEnter={() => !disabled && setHoverFetch(true)}
-        onMouseLeave={() => setHoverFetch(false)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 5,
-          paddingLeft: 10, paddingRight: 10,
-          background: hoverFetch && !disabled ? 'rgba(74,158,255,0.08)' : 'transparent',
-          border: 'none',
-          color: disabled ? '#344057' : hoverFetch ? '#4a9eff' : '#6b7590',
-          fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5, fontWeight: 500,
-          cursor: disabled ? 'not-allowed' : 'pointer',
-          transition: 'background 0.12s, color 0.12s', whiteSpace: 'nowrap',
-        }}
-      >
-        <FetchIcon />
-        {fetchLabel}
-      </button>
+      {fetchButton}
 
       <div style={{ width: 1, background: borderColor, flexShrink: 0 }} />
 
-      <button
-        onClick={pullDisabled ? undefined : onPull}
-        disabled={pullDisabled}
-        onMouseEnter={() => !pullDisabled && setHoverPull(true)}
-        onMouseLeave={() => setHoverPull(false)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 5,
-          paddingLeft: 10, paddingRight: hasBehind ? 7 : 10,
-          background: hoverPull && !pullDisabled ? (hasBehind ? 'rgba(245,168,50,0.08)' : 'rgba(74,158,255,0.08)') : 'transparent',
-          border: 'none',
-          color: pullDisabled ? '#283047' : hasBehind ? '#f5a832' : hoverPull ? '#4a9eff' : '#6b7590',
-          fontFamily: "'IBM Plex Sans', system-ui", fontSize: 12.5, fontWeight: 500,
-          cursor: pullDisabled ? 'not-allowed' : 'pointer',
-          opacity: pullDisabled && !hasBehind ? 0.5 : 1,
-          transition: 'background 0.12s, color 0.12s', whiteSpace: 'nowrap',
-        }}
-      >
-        <ArrowDown />
-        {pullLabel}
-        {hasBehind && (
-          <span style={{
-            background: 'rgba(245,168,50,0.2)', color: '#f5a832',
-            fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 700,
-            borderRadius: 8, paddingLeft: 5, paddingRight: 5, lineHeight: '15px',
-            border: '1px solid rgba(245,168,50,0.4)',
-          }}>{behindCount}</span>
-        )}
-      </button>
+      {pullButton}
     </div>
   )
 }

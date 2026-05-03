@@ -160,6 +160,25 @@ function remapGraphWithMainLeft(graph: GraphNode[], mainHashes: Set<string>): Gr
   })
 }
 
+function pruneGraphToBranchKeys(graph: GraphNode[], allowedBranchKeys: Set<string>): GraphNode[] {
+  if (allowedBranchKeys.size === 0) return graph.filter(node => node.isMain)
+
+  return graph
+    .filter(node => node.isMain || allowedBranchKeys.has(node.color))
+    .map(node => {
+      const keepSegment = (seg: LineSegment) => seg.isMain || allowedBranchKeys.has(seg.branchKey ?? seg.color)
+      const topLines = node.topLines.filter(keepSegment)
+      const bottomLines = node.bottomLines.filter(keepSegment)
+      const maxLane = Math.max(
+        node.lane,
+        ...topLines.flatMap(l => [l.from, l.to]),
+        ...bottomLines.flatMap(l => [l.from, l.to]),
+        0,
+      )
+      return { ...node, topLines, bottomLines, maxLane }
+    })
+}
+
 function GraphCell({ node, graphColW, hoveredBranchKey, branchHoverLabels, onHoverBranch }: {
   node: GraphNode
   graphColW: number
@@ -478,43 +497,17 @@ function WorkingTreeGraphRow({ selected, changeCount, graphColW, lane = 0, onCli
 
 const TL_BRANCH_COLORS = ['#4d9dff', '#e8622f', '#2ec573', '#a27ef0', '#f5a832', '#1abc9c', '#e91e63', '#00bcd4']
 
+function isLiveOriginBranch(branch: BranchInfo): boolean {
+  return branch.isRemote && (branch.remoteName === 'origin' || branch.name.startsWith('origin/'))
+}
+
 function tlBranchShortName(name: string): string {
   const last = name.split('/').pop() ?? name
   return last.length > 10 ? last.slice(0, 10) + '…' : last
 }
 
-function CollapseBtn({ isCollapsed, onClick }: { isCollapsed: boolean; onClick: () => void }) {
-  const [hover, setHover] = useState(false)
-  return (
-    <button
-      onClick={onClick}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      title={isCollapsed ? 'Show all branches' : 'Collapse to main + HEAD'}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 4,
-        height: 22, paddingLeft: 6, paddingRight: 6, borderRadius: 4,
-        background: isCollapsed ? 'rgba(232,98,47,0.15)' : hover ? '#1e2436' : 'transparent',
-        border: `1px solid ${isCollapsed ? 'rgba(232,98,47,0.55)' : '#252d42'}`,
-        color: isCollapsed ? '#e8622f' : '#4e5870',
-        fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10.5,
-        cursor: 'pointer', transition: 'all 0.15s', flexShrink: 0,
-      }}
-    >
-      <svg width="11" height="12" viewBox="0 0 12 13" fill="none">
-        <circle cx="2.5" cy="2.5" r="2" stroke="currentColor" strokeWidth="1.3" />
-        <circle cx="2.5" cy="10.5" r="2" stroke="currentColor" strokeWidth="1.3" />
-        <circle cx="9.5" cy="6.5" r="2" stroke="currentColor" strokeWidth="1.3" opacity={isCollapsed ? 0.35 : 1} />
-        <line x1="2.5" y1="4.5" x2="2.5" y2="8.5" stroke="currentColor" strokeWidth="1.3" />
-        <path d="M2.5 4.5 Q2.5 6.5 9.5 6.5" stroke="currentColor" strokeWidth="1.3" fill="none" opacity={isCollapsed ? 0.35 : 1} />
-      </svg>
-      {isCollapsed ? 'Core' : 'All'}
-    </button>
-  )
-}
-
-function TLBranchDropdownRow({ branch, checked, locked, isDefault, bCol, onToggle }: {
-  branch: BranchInfo; checked: boolean; locked?: boolean; isDefault?: boolean; bCol: string; onToggle: () => void
+function TLBranchDropdownRow({ branch, checked, isDefault, bCol, onToggle }: {
+  branch: BranchInfo; checked: boolean; isDefault?: boolean; bCol: string; onToggle: () => void
 }) {
   const [hover, setHover] = useState(false)
   return (
@@ -524,19 +517,18 @@ function TLBranchDropdownRow({ branch, checked, locked, isDefault, bCol, onToggl
       style={{
         display: 'flex', alignItems: 'center', gap: 9,
         padding: '6px 12px', borderBottom: '1px solid #1a1f2e',
-        cursor: locked ? 'default' : 'pointer',
-        background: hover && !locked ? '#1e2436' : 'transparent',
-        opacity: !checked && !locked ? 0.5 : 1,
+        cursor: 'pointer',
+        background: hover ? '#1e2436' : 'transparent',
+        opacity: checked ? 1 : 0.5,
         transition: 'opacity 0.12s, background 0.1s',
       }}
     >
       <label
-        style={{ width: 13, height: 13, position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: locked ? 'default' : 'pointer' }}
+        style={{ width: 13, height: 13, position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
       >
         <input
           type="checkbox"
           checked={checked}
-          disabled={locked}
           onClick={e => e.stopPropagation()}
           onChange={e => {
             e.stopPropagation()
@@ -551,7 +543,7 @@ function TLBranchDropdownRow({ branch, checked, locked, isDefault, bCol, onToggl
             border: `1.5px solid ${checked ? bCol : '#2f3a54'}`,
             background: checked ? bCol : 'transparent',
             transition: 'all 0.12s',
-            cursor: locked ? 'default' : 'pointer',
+            cursor: 'pointer',
           }}
         />
         {checked && (
@@ -563,15 +555,15 @@ function TLBranchDropdownRow({ branch, checked, locked, isDefault, bCol, onToggl
       <span style={{ width: 3, height: 14, borderRadius: 2, background: bCol, flexShrink: 0 }} />
       <button
         type="button"
-        onClick={locked ? undefined : onToggle}
+        onClick={onToggle}
         style={{
           all: 'unset',
           fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#c8cdd8',
           flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          cursor: locked ? 'default' : 'pointer',
+          cursor: 'pointer',
         }}
         title={branch.name}
-      >{branch.name}</button>
+      >{branch.displayName || branch.name}</button>
       <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
         {isDefault && (
           <span style={{
@@ -581,12 +573,12 @@ function TLBranchDropdownRow({ branch, checked, locked, isDefault, bCol, onToggl
             fontFamily: "'JetBrains Mono', monospace", fontSize: 9, fontWeight: 700,
           }}>main</span>
         )}
-        {branch.current && (
+        {branch.hasLocal && (
           <span style={{
             background: `${bCol}22`, color: bCol, border: `1px solid ${bCol}45`,
             borderRadius: 3, padding: '0 4px',
             fontFamily: "'JetBrains Mono', monospace", fontSize: 9, fontWeight: 700,
-          }}>HEAD</span>
+          }}>local</span>
         )}
       </div>
     </div>
@@ -599,7 +591,7 @@ function TLBranchDropdown({ open, onToggleOpen, branches, selectedBranches, defa
   branchColors: Map<string, string>; onToggleBranch: (name: string) => void; onShowAll: () => void; onHideAll: () => void
 }) {
   const allBranches = branches
-  const visibleCount = allBranches.filter(b => b.name === defaultBranch || selectedBranches.has(b.name)).length
+  const visibleCount = allBranches.filter(b => selectedBranches.has(b.name)).length
   const sorted = [
     ...allBranches.filter(b => b.name === defaultBranch),
     ...allBranches.filter(b => b.name !== defaultBranch),
@@ -658,10 +650,9 @@ function TLBranchDropdown({ open, onToggleOpen, branches, selectedBranches, defa
             </div>
             {sorted.map(b => {
               const bCol = branchColors.get(b.name) ?? '#4d9dff'
-              const isLocked = b.name === defaultBranch || !!b.current
-              const isChecked = isLocked || selectedBranches.has(b.name)
+              const isChecked = selectedBranches.has(b.name)
               return (
-                <TLBranchDropdownRow key={b.name} branch={b} checked={isChecked} locked={isLocked} isDefault={b.name === defaultBranch}
+                <TLBranchDropdownRow key={b.name} branch={b} checked={isChecked} isDefault={b.displayName === defaultBranch || b.name === defaultBranch}
                   bCol={bCol} onToggle={() => onToggleBranch(b.name)} />
               )
             })}
@@ -1536,15 +1527,26 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   const [branchTips,   setBranchTips]   = useState<Map<string, BranchInfo[]>>(new Map())
   const [hoveredBranchKey, setHoveredBranchKey] = useState<string | null>(null)
 
+  const filterBranches = React.useMemo(() => {
+    const originBranches = branches.filter(isLiveOriginBranch)
+    const remoteBranches = originBranches.length > 0 ? originBranches : branches.filter(b => b.isRemote)
+    return [...remoteBranches].sort((a, b) => {
+      const aDefault = a.displayName === defaultBranch || a.name === defaultBranch
+      const bDefault = b.displayName === defaultBranch || b.name === defaultBranch
+      if (aDefault !== bDefault) return aDefault ? -1 : 1
+      return (a.displayName || a.name).localeCompare(b.displayName || b.name)
+    })
+  }, [branches, defaultBranch])
+
   const branchColors = React.useMemo(() => {
     const sorted = [
-      ...branches.filter(b => b.name === defaultBranch),
-      ...branches.filter(b => b.name !== defaultBranch),
+      ...filterBranches.filter(b => b.displayName === defaultBranch || b.name === defaultBranch),
+      ...filterBranches.filter(b => b.displayName !== defaultBranch && b.name !== defaultBranch),
     ]
     const map = new Map<string, string>()
     sorted.forEach((b, i) => map.set(b.name, TL_BRANCH_COLORS[i % TL_BRANCH_COLORS.length]))
     return map
-  }, [branches, defaultBranch])
+  }, [filterBranches, defaultBranch])
   const graphColW = React.useMemo(() => {
     if (nodes.length === 0) return GRAPH_PAD * 2 + LANE_W
     const maxLane = nodes.reduce((m, n) => Math.max(m, n.maxLane), 0)
@@ -1555,7 +1557,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     for (const node of nodes) {
       const tips = branchTips.get(node.commit.hash) ?? []
       for (const branch of tips) {
-        const key = branch.name === defaultBranch ? 'main' : node.color
+        const key = branch.displayName === defaultBranch || branch.name === defaultBranch ? 'main' : node.color
         const existing = labels.get(key)
         if (existing && !existing.split(' / ').includes(branch.name)) {
           labels.set(key, `${existing} / ${branch.name}`)
@@ -1569,19 +1571,9 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   const minLeftWidth = React.useMemo(() => Math.max(320, graphColW + 190), [graphColW])
 
   const branchNames = React.useMemo(
-    () => branches.map(b => b.name),
-    [branches]
+    () => filterBranches.map(b => b.name),
+    [filterBranches]
   )
-  const localBranchNames = React.useMemo(
-    () => branches.filter(b => !b.isRemote).map(b => b.name),
-    [branches]
-  )
-  const areAllBranchesSelected = React.useMemo(
-    () => branchNames.length > 0 && branchNames.every(name => selBranches.has(name)),
-    [branchNames, selBranches]
-  )
-  const isCollapsed = !areAllBranchesSelected
-
   const fetchBranchTips = useCallback(async (branchList: BranchInfo[]) => {
     const tips = new Map<string, BranchInfo[]>()
     await Promise.all(branchList.map(async b => {
@@ -1670,19 +1662,43 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     try {
       const active = branches ?? selBranches
       const mainBranch = defaultBranchOverride ?? defaultBranch
-      const hasAllSelected = branchNames.length > 0 && branchNames.every(name => active.has(name))
-      const refs = hasAllSelected ? undefined : [...new Set([mainBranch, ...active])]
+      const refs = [...active].filter(Boolean)
+      if (refs.length === 0) {
+        setNodes([])
+        setTotalLoaded(0)
+        return
+      }
       const commits = await opRun('Loading history…', () => ipc.log(repoPath, { limit, all: !refs, refs }))
-      const defaultCommits = mainBranch
-        ? await ipc.log(repoPath, { limit, all: false, refs: [mainBranch] }).catch(() => [])
+      const defaultRef = filterBranches.find(b => active.has(b.name) && (b.displayName === mainBranch || b.name === mainBranch))?.name
+      const defaultCommits = defaultRef
+        ? await ipc.log(repoPath, { limit, all: false, refs: [defaultRef] }).catch(() => [])
         : []
       const defaultHashes = firstParentHashes(commits, defaultCommits[0]?.hash)
-      setNodes(remapGraphWithMainLeft(computeGraph(commits), defaultHashes))
-      setTotalLoaded(commits.length)
+      const graph = remapGraphWithMainLeft(computeGraph(commits), defaultHashes)
+      const tipCommits = await Promise.all(refs.map(async ref => {
+        try {
+          const [tip] = await ipc.log(repoPath, { limit: 1, all: false, refs: [ref] })
+          return tip ? { ref, hash: tip.hash } : null
+        } catch {
+          return null
+        }
+      }))
+      const selectedTipRefs = new Map(tipCommits.filter(tip => !!tip).map(tip => [tip!.hash, tip!.ref]))
+      const allowedKeys = new Set<string>()
+      for (const node of graph) {
+        const ref = selectedTipRefs.get(node.commit.hash)
+        if (!ref) continue
+        const branch = filterBranches.find(b => b.name === ref)
+        if (branch && (branch.displayName === mainBranch || branch.name === mainBranch)) allowedKeys.add('main')
+        else allowedKeys.add(node.color)
+      }
+      const pruned = pruneGraphToBranchKeys(graph, allowedKeys)
+      setNodes(pruned)
+      setTotalLoaded(pruned.length)
     } finally {
       setHistLoading(false)
     }
-  }, [repoPath, opRun, selBranches, defaultBranch, branchNames])
+  }, [repoPath, opRun, selBranches, defaultBranch, filterBranches])
 
   // ── Initial load ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1693,8 +1709,10 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     Promise.all([ipc.branchList(repoPath), ipc.gitDefaultBranch(repoPath)]).then(async ([bl, def]) => {
       setBranches(bl)
       setDefaultBranch(def)
-      fetchBranchTips(bl)
-      const nextSel = new Set(bl.map(b => b.name))
+      const originBranches = bl.filter(isLiveOriginBranch)
+      const liveBranches = originBranches.length > 0 ? originBranches : bl.filter(b => b.isRemote)
+      fetchBranchTips(liveBranches)
+      const nextSel = new Set(liveBranches.map(b => b.name))
       setSelBranches(nextSel)
       limitRef.current = INITIAL_LIMIT
       loadHistory(INITIAL_LIMIT, nextSel, def)
@@ -1801,8 +1819,8 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   }
 
   const toggleBranch = (name: string) => {
-    const branch = branches.find(b => b.name === name)
-    if (!branch || branch.name === defaultBranch || branch.current) return
+    const branch = filterBranches.find(b => b.name === name)
+    if (!branch) return
     const next = new Set(selBranches)
     if (next.has(name)) next.delete(name)
     else next.add(name)
@@ -1811,24 +1829,8 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     loadHistory(INITIAL_LIMIT, next)
   }
 
-  const toggleCollapse = () => {
-    if (isCollapsed) {
-      const next = new Set(localBranchNames)
-      setSelBranches(next)
-      limitRef.current = INITIAL_LIMIT
-      loadHistory(INITIAL_LIMIT, next)
-    } else {
-      const currentBranch = branches.find(b => b.current)?.name
-      const core = new Set<string>([defaultBranch])
-      if (currentBranch) core.add(currentBranch)
-      setSelBranches(core)
-      limitRef.current = INITIAL_LIMIT
-      loadHistory(INITIAL_LIMIT, core)
-    }
-  }
-
   const showAllBranches = () => {
-    const next = new Set(localBranchNames)
+    const next = new Set(branchNames)
     setSelBranches(next)
     setFilterOpen(false)
     limitRef.current = INITIAL_LIMIT
@@ -1836,9 +1838,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   }
 
   const hideAllBranches = () => {
-    const currentBranch = branches.find(b => b.current)?.name
-    const next = new Set<string>([defaultBranch])
-    if (currentBranch) next.add(currentBranch)
+    const next = new Set<string>()
     setSelBranches(next)
     setFilterOpen(false)
     limitRef.current = INITIAL_LIMIT
@@ -1854,6 +1854,12 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   }
 
   const selectedCommit = leftSel.kind === 'commit' ? leftSel.commit : null
+  const legendHasMain = nodes.some(node => node.isMain)
+  const legendHasMerge = nodes.some(node => node.commit.parentHashes.length > 1)
+  const legendHasBranchTip = nodes.some(node => (branchTips.get(node.commit.hash) ?? []).some(branch => branch.displayName !== defaultBranch && branch.name !== defaultBranch))
+  const legendHasPush = nodes.some(node => needsPushHashes.has(node.commit.hash))
+  const legendHasPull = nodes.some(node => needsPullHashes.has(node.commit.hash))
+  const legendHasWorkingTree = leftSel.kind === 'working-tree'
   const currentHeadLane = React.useMemo(() => {
     const currentBranch = branches.find(b => b.current)?.name
     if (!currentBranch) return 0
@@ -1882,11 +1888,10 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
             {totalLoaded > 0 ? `${totalLoaded} Commits` : 'Commits'}
           </span>
           <div style={{ flex: 1 }} />
-          <CollapseBtn isCollapsed={isCollapsed} onClick={toggleCollapse} />
           <TLBranchDropdown
             open={filterOpen}
             onToggleOpen={() => setFilterOpen(o => !o)}
-            branches={branches}
+            branches={filterBranches}
             selectedBranches={selBranches}
             defaultBranch={defaultBranch}
             branchColors={branchColors}
@@ -2002,14 +2007,13 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
           flexWrap: 'wrap', lineHeight: 1.3,
         }}>
           <span>Legend:</span>
-          <span style={{ color: MAIN_BRANCH_COLOR }}>━ main path</span>
-          <span style={{ color: '#a27ef0' }}>◇ merge</span>
-          <span style={{ color: '#7dd3fc' }}>↑ push</span>
-          <span style={{ color: '#fca5a5' }}>↓ pull</span>
-          <span style={{ color: '#4d9dff' }}>★ default</span>
-          <span style={{ color: '#e8622f' }}>◉ head</span>
-          <span style={{ color: '#2ec573' }}>• branch</span>
-          <span style={{ color: '#f5a832' }}>⌂ working tree</span>
+          {legendHasMain && <span style={{ color: MAIN_BRANCH_COLOR }}>━ main path</span>}
+          {legendHasMain && <span style={{ color: '#4d9dff' }}>★ default</span>}
+          {legendHasBranchTip && <span style={{ color: '#2ec573' }}>• branch</span>}
+          {legendHasMerge && <span style={{ color: '#a27ef0' }}>◇ merge</span>}
+          {legendHasPush && <span style={{ color: '#7dd3fc' }}>↑ push</span>}
+          {legendHasPull && <span style={{ color: '#fca5a5' }}>↓ pull</span>}
+          {legendHasWorkingTree && <span style={{ color: '#f5a832' }}>⌂ working tree</span>}
         </div>
         <div
           onMouseDown={makeDragStart('graph', effectiveGraphWidth)}

@@ -7,7 +7,18 @@ import { useLockStore } from '@/stores/lockStore'
 import { usePRStore } from '@/stores/prStore'
 import { ContributionGraph } from './ContributionGraph'
 import { getLastFetch, markFetchPerformed, onFetchPerformed } from '@/lib/fetchState'
-import { canCreatePR, canPull, canPush, fetchButtonLabel, pullButtonLabel, pushButtonLabel } from '@/lib/syncButtonLogic'
+import {
+  canCreatePR,
+  canPull,
+  canPush,
+  createPRDisabledReason,
+  fetchButtonLabel,
+  fetchDisabledReason,
+  pullButtonLabel,
+  pullDisabledReason,
+  pushButtonLabel,
+  pushDisabledReason,
+} from '@/lib/syncButtonLogic'
 import { getTopBarSyncHandlers, getTopBarSyncSnapshot, onTopBarSyncChanged } from '@/lib/topBarSyncBridge'
 
 const sessionFetchedRepos = new Set<string>()
@@ -86,7 +97,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
 
   const [sync,      setSync]      = useState<SyncStatus | null>(null)
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null)
-  const [busy,      setBusy]      = useState<string | null>(null)
+  const [busy,      setBusy]      = useState<'fetch' | 'pull' | 'push' | null>(null)
   const [topBarTick, setTopBarTick] = useState(0)
   const [lastPull,  setLastPull]  = useState<number | null>(null)
   const [lastFetch, setLastFetch] = useState<number | null>(null)
@@ -240,7 +251,13 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
               {lastPull === null ? "Haven't pulled yet" : `Last pulled ${timeAgo(lastPull)}`}
             </span>
           </div>
-          <SmallBtn label={pullButtonLabel(busyState)} color="#f5a832" disabled={!canPull(hasFetched, busyState)} onClick={doPull} />
+          <SmallBtn
+            label={pullButtonLabel(busyState)}
+            color="#f5a832"
+            disabled={!canPull(effectiveHasFetched, behind, busyState)}
+            disabledReason={pullDisabledReason(effectiveHasFetched, behind, busyState)}
+            onClick={doPull}
+          />
         </div>
       )}
 
@@ -262,7 +279,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
         sync={effectiveSync}
         staged={staged}
         unstaged={unstaged}
-        busy={busyState === 'idle' ? null : busyState}
+        busy={busyState}
         hasFetched={effectiveHasFetched}
         ghSlug={ghSlug}
         currentBranch={currentBranch}
@@ -271,7 +288,13 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
         onPush={doPush}
         onGoChanges={() => onNavigate('timeline')}
         canCreatePR={canCreatePRNow}
-        onOpenPR={() => usingTopBarState && topBarHandlers ? topBarHandlers.createPR() : (remoteUrl && canCreatePRNow && openPRDialog(repoPath, currentBranch, remoteUrl))}
+        onOpenPR={() => {
+          if (usingTopBarState && topBarHandlers) {
+            topBarHandlers.createPR()
+            return
+          }
+          if (remoteUrl && canCreatePRNow) openPRDialog(repoPath, currentBranch, remoteUrl)
+        }}
       />
 
       {/* ── Status grid (3 columns) ─────────────────────────────────────── */}
@@ -294,7 +317,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
 type StepState = 'done' | 'warn' | 'action' | 'neutral'
 
 interface FlowStepBtn {
-  label: string; color?: string; disabled: boolean; onClick: () => void
+  label: string; color?: string; disabled: boolean; disabledReason?: string | null; onClick: () => void
 }
 
 interface FlowStepDef {
@@ -343,12 +366,14 @@ function DailyFlowStrip({
       label:    fetchButtonLabel(busy),
       color:    '#4a9eff',
       disabled: isBusy,
+      disabledReason: fetchDisabledReason(busy),
       onClick:  onFetch,
     },
     {
       label:    pullButtonLabel(busy),
       color:    '#f5a832',
-      disabled: !canPull(hasFetched, busy),
+      disabled: !canPull(hasFetched, behind, busy),
+      disabledReason: pullDisabledReason(hasFetched, behind, busy),
       onClick:  onPull,
     },
   ]
@@ -374,7 +399,7 @@ function DailyFlowStrip({
         ? `Merge ${currentBranch} into ${sync?.remoteBranch ?? 'main'}`
         : 'No GitHub remote detected',
       state: 'neutral',
-      btns: ghSlug ? [{ label: 'Create PR', color: '#a78bfa', disabled: !canCreatePR, onClick: onOpenPR }] : undefined,
+      btns: ghSlug ? [{ label: 'Create PR', color: '#a78bfa', disabled: !canCreatePR, disabledReason: createPRDisabledReason(!!ghSlug, currentBranch, ahead, busy), onClick: onOpenPR }] : undefined,
     },
   ]
 
@@ -435,7 +460,7 @@ function FlowStep({ step }: { step: FlowStepDef }) {
       {step.btns && step.btns.length > 0 && (
         <div style={{ marginLeft: 27, display: 'flex', gap: 6 }}>
           {step.btns.map((b, i) => (
-            <SmallBtn key={i} label={b.label} color={b.color} disabled={b.disabled} onClick={b.onClick} />
+            <SmallBtn key={i} label={b.label} color={b.color} disabled={b.disabled} disabledReason={b.disabledReason} onClick={b.onClick} />
           ))}
         </div>
       )}
@@ -467,7 +492,7 @@ function SuggestionsCard({ lastFetch, lastPull, sync, fileStatus, onFetch, busy 
   sync: SyncStatus | null
   fileStatus: FileStatus[]
   onFetch: () => void
-  busy: 'idle' | 'fetch' | 'pull' | 'push'
+  busy: 'idle' | 'fetch' | 'pull' | 'push' | null
 }) {
   const h            = new Date().getHours()
   const lastSyncTime = (lastFetch !== null || lastPull !== null)
@@ -552,7 +577,7 @@ function SuggestionsCard({ lastFetch, lastPull, sync, fileStatus, onFetch, busy 
                 </p>
                 {s.action && (
                   <div style={{ marginTop: 8 }}>
-                    <SmallBtn label={s.action.label} color={uc.dot} disabled={s.action.disabled} onClick={s.action.onClick} />
+                    <SmallBtn label={s.action.label} color={uc.dot} disabled={s.action.disabled} disabledReason={s.action.disabled ? 'Operation in progress' : null} onClick={s.action.onClick} />
                   </div>
                 )}
               </div>
@@ -567,7 +592,7 @@ function SuggestionsCard({ lastFetch, lastPull, sync, fileStatus, onFetch, busy 
 // ── Local Status Card (sync + changes combined) ───────────────────────────────
 
 function LocalStatusCard({ sync, busy, hasFetched, files, staged, unstaged, onFetch, onPull, onPush, onNavigate }: {
-  sync: SyncStatus | null; busy: string | null; hasFetched: boolean
+  sync: SyncStatus | null; busy: 'idle' | 'fetch' | 'pull' | 'push'; hasFetched: boolean
   files: FileStatus[]; staged: number; unstaged: number
   onFetch: () => void; onPull: () => void; onPush: () => void
   onNavigate: (tab: string) => void
@@ -599,9 +624,9 @@ function LocalStatusCard({ sync, busy, hasFetched, files, staged, unstaged, onFe
         )}
 
         <div style={{ display: 'flex', gap: 6 }}>
-          <SmallBtn label={fetchButtonLabel(busy)} color="#4a9eff" disabled={busy !== 'idle'} onClick={onFetch} />
-          <SmallBtn label={pullButtonLabel(busy)} color="#f5a832" disabled={!canPull(hasFetched, busy)} onClick={onPull} />
-          <SmallBtn label={pushButtonLabel(busy)} color={pushEnabled ? '#2dbd6e' : undefined} disabled={!pushEnabled} onClick={onPush} />
+          <SmallBtn label={fetchButtonLabel(busy)} color="#4a9eff" disabled={busy !== 'idle'} disabledReason={fetchDisabledReason(busy)} onClick={onFetch} />
+          <SmallBtn label={pullButtonLabel(busy)} color="#f5a832" disabled={!canPull(hasFetched, behind, busy)} disabledReason={pullDisabledReason(hasFetched, behind, busy)} onClick={onPull} />
+          <SmallBtn label={pushButtonLabel(busy)} color={pushEnabled ? '#2dbd6e' : undefined} disabled={!pushEnabled} disabledReason={pushDisabledReason(hasFetched, behind, ahead, busy)} onClick={onPush} />
         </div>
 
         <div style={{ height: 1, background: '#1a2030', marginLeft: -14, marginRight: -14 }} />
@@ -931,8 +956,8 @@ function StatPill({ icon, value, label, color }: { icon: string; value: number |
   )
 }
 
-function SmallBtn({ label, color, disabled, onClick }: {
-  label: string; color?: string; disabled: boolean; onClick: () => void
+function SmallBtn({ label, color, disabled, disabledReason, onClick }: {
+  label: string; color?: string; disabled: boolean; disabledReason?: string | null; onClick: () => void
 }) {
   const [hover, setHover] = useState(false)
   const c = color ?? '#7b8499'
@@ -941,11 +966,13 @@ function SmallBtn({ label, color, disabled, onClick }: {
   const bgColor = active ? `${c}14` : 'transparent'
   const textColor = active ? c : '#7b8499'
 
-  return (
+  const button = (
     <button
       onClick={disabled ? undefined : onClick}
       onMouseEnter={() => !disabled && setHover(true)}
       onMouseLeave={() => setHover(false)}
+      disabled={disabled}
+      data-disabled-reason={disabled ? disabledReason ?? undefined : undefined}
       style={{
         height: 24, paddingLeft: 12, paddingRight: 12, borderRadius: 5,
         background: hover && !disabled ? `${c}1b` : bgColor,
@@ -959,6 +986,8 @@ function SmallBtn({ label, color, disabled, onClick }: {
       }}
     >{label}</button>
   )
+
+  return button
 }
 
 // ── SVG Icons ─────────────────────────────────────────────────────────────────

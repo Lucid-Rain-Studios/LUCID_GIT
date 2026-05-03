@@ -102,6 +102,10 @@ button {
               box-shadow 0.12s ease, opacity 0.12s ease, filter 0.12s ease;
 }
 
+button:disabled {
+  pointer-events: auto;
+}
+
 /* ── Scrollbars ─────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 11px;

@@ -2,6 +2,7 @@ import React, { useEffect } from 'react'
 import { ipc } from './ipc'
 import { applyAppearanceSettings } from './lib/appearance'
 import { AppShell } from './components/layout/AppShell'
+import { DisabledButtonTooltip } from './components/ui/DisabledButtonTooltip'
 
 export function App() {
   useEffect(() => {
@@ -23,5 +24,10 @@ export function App() {
     }
   }, [])
 
-  return <AppShell />
+  return (
+    <>
+      <AppShell />
+      <DisabledButtonTooltip />
+    </>
+  )
 }
