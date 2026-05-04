@@ -7,7 +7,7 @@ import { useOperationStore } from '@/stores/operationStore'
 import { useErrorStore } from '@/stores/errorStore'
 import { usePRStore } from '@/stores/prStore'
 import { NotificationBell } from '@/components/notifications/NotificationBell'
-import { markFetchPerformed } from '@/lib/fetchState'
+import { markFetchPerformed, onFetchPerformed } from '@/lib/fetchState'
 import {
   canCreatePR,
   canPull,
@@ -42,7 +42,7 @@ function parseGitHubSlug(url: string): string | null {
 }
 
 export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps) {
-  const { repoPath, currentBranch, refreshStatus, recentRepos, openRepo, removeRecentRepo, clearRepo, branches, checkout, fileStatus, syncTick } = useRepoStore()
+  const { repoPath, currentBranch, refreshStatus, recentRepos, openRepo, removeRecentRepo, clearRepo, branches, checkout, fileStatus, syncTick, bumpSyncTick } = useRepoStore()
   const { accounts, currentAccountId, permissionErrors, fetchRepoPermission, viewAsRole, setViewAsRole } = useAuthStore()
   const opRun   = useOperationStore(s => s.run)
   const pushErr = useErrorStore(s => s.pushRaw)
@@ -88,11 +88,24 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
     try { setSync(await ipc.getSyncStatus(repoPath)) } catch { /* no upstream */ }
   }, [repoPath])
 
+  const refreshRevisionState = async () => {
+    await Promise.all([loadSync(), refreshStatus()])
+    bumpSyncTick()
+    onSynced?.()
+  }
+
   useEffect(() => {
     setSync(null); setSyncErr(null)
     setHasFetched(repoPath ? sessionTopBarFetched.has(repoPath) : false)
     if (repoPath) loadSync()
   }, [repoPath, currentBranch, syncTick])
+
+  useEffect(() => {
+    return onFetchPerformed((path) => {
+      sessionTopBarFetched.add(path)
+      if (path === repoPath) setHasFetched(true)
+    })
+  }, [repoPath])
 
   useEffect(() => {
     ipc.windowIsMaximized().then(setIsMaximized).catch(() => {})
@@ -117,7 +130,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
   const doPush = async () => {
     if (!repoPath || syncOp !== 'idle') return
     setSyncOp('pushing'); setSyncErr(null)
-    try { await opRun('Pushing…', () => ipc.push(repoPath)); await loadSync(); showStatusToast('Push successful.') }
+    try { await opRun('Pushing…', () => ipc.push(repoPath)); await refreshRevisionState(); showStatusToast('Push successful.') }
     catch (e) {
       const s = String(e)
       if (s.toLowerCase().includes('everything up-to-date') || s.toLowerCase().includes('up to date')) {
@@ -138,8 +151,10 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
         await ipc.fetch(repoPath)
         await ipc.updateFromMain(repoPath)
       })
-      await loadSync()
-      await refreshStatus()
+      markFetchPerformed(repoPath)
+      sessionTopBarFetched.add(repoPath)
+      setHasFetched(true)
+      await refreshRevisionState()
       showStatusToast(`Update from ${defaultBranch} successful.`)
     } catch (e) {
       const s = String(e)
@@ -165,10 +180,9 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
     try {
       await opRun('Fetching…', () => ipc.fetch(repoPath))
       markFetchPerformed(repoPath)
-      await loadSync()
       sessionTopBarFetched.add(repoPath)
       setHasFetched(true)
-      onSynced?.()
+      await refreshRevisionState()
       showStatusToast('Fetch successful.')
     } catch (e) {
       const s = String(e)
@@ -183,9 +197,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced }: TopBarProps)
     setSyncOp('pulling'); setSyncErr(null)
     try {
       await opRun('Pulling…', () => ipc.pull(repoPath))
-      await loadSync()
-      await refreshStatus()
-      onSynced?.()
+      await refreshRevisionState()
       showStatusToast('Pull successful.')
     } catch (e) {
       const s = String(e)

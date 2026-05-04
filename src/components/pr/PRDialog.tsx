@@ -148,6 +148,7 @@ function Btn({ label, onClick, disabled, primary, danger }: {
 export function PRDialog() {
   const { open, repoPath, headBranch, remoteUrl, closeDialog } = usePRStore()
   const branches                     = useRepoStore(s => s.branches)
+  const bumpPrTick                   = useRepoStore(s => s.bumpPrTick)
   const { locks }                    = useLockStore()
   const { accounts, currentAccountId } = useAuthStore()
   const showStatusToast = useStatusToastStore(s => s.show)
@@ -251,6 +252,7 @@ export function PRDialog() {
       })
       setResult(res)
       setPhase('success')
+      bumpPrTick()
       showStatusToast('PR created successfully.')
       // Associate currently-locked files with this PR so we can prompt to unlock on merge
       if (repoPath) {

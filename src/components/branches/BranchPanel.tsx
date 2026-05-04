@@ -70,7 +70,7 @@ function SectionHeader({ label, count }: { label: string; count: number }) {
 }
 
 export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
-  const { repoPath, branches, currentBranch, checkout, loadBranches, fileStatus } = useRepoStore()
+  const { repoPath, branches, currentBranch, checkout, loadBranches, fileStatus, bumpSyncTick } = useRepoStore()
   const opRun  = useOperationStore(s => s.run)
   const dialog = useDialogStore()
 
@@ -224,6 +224,7 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
       await opRun('Updating from main…', () => ipc.updateFromMain(repoPath))
       await loadBranches()
       onRefresh()
+      bumpSyncTick()
     } catch (e) {
       const msg = String(e)
       setError(msg)

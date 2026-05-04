@@ -88,7 +88,7 @@ function fileStatusLabel(f: FileStatus): { char: string; color: string } {
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
-  const { currentBranch, fileStatus, syncTick, bumpHistoryTick } = useRepoStore()
+  const { currentBranch, fileStatus, syncTick, bumpSyncTick } = useRepoStore()
   const { accounts, currentAccountId } = useAuthStore()
   const isAdmin = useAuthStore(s => s.isAdmin(repoPath))
   const opRun = useOperationStore(s => s.run)
@@ -171,7 +171,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
       sessionFetchedRepos.add(repoPath)
       setHasFetched(true)
       await loadSync()
-      bumpHistoryTick()
+      bumpSyncTick()
     } finally { setBusy(null) }
   }
 
@@ -184,7 +184,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
       localStorage.setItem(LAST_PULL_KEY(repoPath), String(now))
       setLastPull(now)
       await loadSync()
-      bumpHistoryTick()
+      bumpSyncTick()
     } finally { setBusy(null) }
   }
 
@@ -194,7 +194,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
     try {
       await opRun('Pushing…', () => ipc.push(repoPath))
       await loadSync()
-      bumpHistoryTick()
+      bumpSyncTick()
     } finally { setBusy(null) }
   }
 

@@ -5,6 +5,7 @@ import { useRepoStore } from '@/stores/repoStore'
 import { useAuthStore } from '@/stores/authStore'
 import { cn } from '@/lib/utils'
 import { markFetchPerformed } from '@/lib/fetchState'
+import { getTopBarSyncHandlers, getTopBarSyncSnapshot } from '@/lib/topBarSyncBridge'
 
 interface CommandPaletteProps {
   open: boolean
@@ -32,7 +33,7 @@ export function CommandPalette({
   onClone,
   onAddAccount,
 }: CommandPaletteProps) {
-  const { repoPath, refreshStatus } = useRepoStore()
+  const { repoPath, refreshStatus, bumpSyncTick } = useRepoStore()
   const { accounts, currentAccountId } = useAuthStore()
   const [syncing, setSyncing] = useState(false)
 
@@ -43,18 +44,29 @@ export function CommandPalette({
 
   const doFetch = async () => {
     if (!repoPath) return
+    const topBarHandlers = getTopBarSyncHandlers()
+    if (getTopBarSyncSnapshot().repoPath === repoPath && topBarHandlers) return void topBarHandlers.fetch()
     setSyncing(true)
-    try { await ipc.fetch(repoPath); markFetchPerformed(repoPath) } finally { setSyncing(false) }
+    try {
+      await ipc.fetch(repoPath)
+      markFetchPerformed(repoPath)
+      await refreshStatus()
+      bumpSyncTick()
+    } finally { setSyncing(false) }
   }
 
   const doPull = async () => {
     if (!repoPath) return
-    try { await ipc.pull(repoPath); await refreshStatus() } catch {}
+    const topBarHandlers = getTopBarSyncHandlers()
+    if (getTopBarSyncSnapshot().repoPath === repoPath && topBarHandlers) return void topBarHandlers.pull()
+    try { await ipc.pull(repoPath); await refreshStatus(); bumpSyncTick() } catch {}
   }
 
   const doPush = async () => {
     if (!repoPath) return
-    try { await ipc.push(repoPath) } catch {}
+    const topBarHandlers = getTopBarSyncHandlers()
+    if (getTopBarSyncSnapshot().repoPath === repoPath && topBarHandlers) return void topBarHandlers.push()
+    try { await ipc.push(repoPath); await refreshStatus(); bumpSyncTick() } catch {}
   }
 
   const commands: PaletteCommand[] = [

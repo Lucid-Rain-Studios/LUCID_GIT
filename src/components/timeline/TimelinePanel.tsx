@@ -70,6 +70,12 @@ function initials(author: string): string {
   return author.slice(0, 2).toUpperCase()
 }
 
+function compactFilePath(filePath: string, parentCount = 2): string {
+  const parts = filePath.split(/[\\/]+/).filter(Boolean)
+  if (parts.length <= parentCount + 1) return filePath
+  return `.../${parts.slice(-(parentCount + 1)).join('/')}`
+}
+
 // Shared SVG filter defs; placed once above the list.
 function GraphDefs() {
   return (
@@ -124,7 +130,7 @@ function remapGraphWithMainLeft(graph: GraphNode[], mainHashes: Set<string>): Gr
     }
   }
 
-  const orderedNonMain = [...allLanes].sort((a, b) => a - b)
+  const orderedNonMain = [...allLanes].filter(lane => lane !== mainLane).sort((a, b) => a - b)
   const nonMainLaneMap = new Map(orderedNonMain.map((lane, index) => [lane, index + 1]))
   const mapNonMainLane = (lane: number) => nonMainLaneMap.get(lane) ?? orderedNonMain.length + 1
 
@@ -165,15 +171,56 @@ function remapGraphWithMainLeft(graph: GraphNode[], mainHashes: Set<string>): Gr
   })
 }
 
-function pruneGraphToBranchKeys(graph: GraphNode[], allowedBranchKeys: Set<string>): GraphNode[] {
-  if (allowedBranchKeys.size === 0) return graph.filter(node => node.isMain)
+function compactGraphLanes(graph: GraphNode[]): GraphNode[] {
+  if (graph.length === 0) return graph
 
-  return graph
-    .filter(node => node.isMain || allowedBranchKeys.has(node.color))
+  const visibleLanes = new Set<number>()
+  for (const node of graph) {
+    visibleLanes.add(node.lane)
+    for (const seg of [...node.topLines, ...node.bottomLines]) {
+      visibleLanes.add(seg.from)
+      visibleLanes.add(seg.to)
+    }
+  }
+
+  const branchLanes = [...visibleLanes].filter(lane => lane !== 0).sort((a, b) => a - b)
+  const laneMap = new Map(branchLanes.map((lane, index) => [lane, index + 1]))
+  const mapLane = (lane: number) => lane === 0 ? 0 : laneMap.get(lane) ?? branchLanes.length + 1
+
+  return graph.map(node => {
+    const topLines = node.topLines.map(seg => ({ ...seg, from: mapLane(seg.from), to: mapLane(seg.to) }))
+    const bottomLines = node.bottomLines.map(seg => ({ ...seg, from: mapLane(seg.from), to: mapLane(seg.to) }))
+    const lane = mapLane(node.lane)
+    const maxLane = Math.max(
+      lane,
+      ...topLines.flatMap(l => [l.from, l.to]),
+      ...bottomLines.flatMap(l => [l.from, l.to]),
+      0,
+    )
+    return { ...node, lane, topLines, bottomLines, maxLane }
+  })
+}
+
+function pruneGraphToBranchKeys(graph: GraphNode[], allowedBranchKeys: Set<string>): GraphNode[] {
+  const rows = allowedBranchKeys.size === 0
+    ? graph.filter(node => node.isMain)
+    : graph.filter(node => node.isMain || allowedBranchKeys.has(node.color))
+
+  return compactGraphLanes(rows
     .map(node => {
-      const keepSegment = (seg: LineSegment) => seg.isMain || allowedBranchKeys.has(seg.branchKey ?? seg.color)
-      const topLines = node.topLines.filter(keepSegment)
-      const bottomLines = node.bottomLines.filter(keepSegment)
+      const mapSegment = (seg: LineSegment): LineSegment | null => {
+        const branchVisible = seg.isMain || allowedBranchKeys.has(seg.branchKey ?? seg.color)
+        if (!branchVisible) return null
+        if (seg.isMain || seg.from === seg.to) return seg
+        const fromVisibleNode = seg.from === node.lane
+        const toVisibleNode = seg.to === node.lane
+        if (fromVisibleNode || toVisibleNode) {
+          return { ...seg, from: fromVisibleNode ? seg.from : 0, to: toVisibleNode ? seg.to : 0 }
+        }
+        return null
+      }
+      const topLines = node.topLines.map(mapSegment).filter((seg): seg is LineSegment => !!seg)
+      const bottomLines = node.bottomLines.map(mapSegment).filter((seg): seg is LineSegment => !!seg)
       const maxLane = Math.max(
         node.lane,
         ...topLines.flatMap(l => [l.from, l.to]),
@@ -181,7 +228,7 @@ function pruneGraphToBranchKeys(graph: GraphNode[], allowedBranchKeys: Set<strin
         0,
       )
       return { ...node, topLines, bottomLines, maxLane }
-    })
+    }))
 }
 
 function GraphCell({ node, graphColW, hoveredBranchKey, branchHoverLabels, onHoverBranch }: {
@@ -955,6 +1002,9 @@ function CommitFileRow({ f, selected, repoPath, commitHash, remoteUrl, onClick }
   const absPath = repoPath.replace(/\\/g, '/').replace(/\/$/, '') + '/' + f.path
 
   const label = f.oldPath ? `${f.oldPath} → ${f.path}` : f.path
+  const displayLabel = f.oldPath
+    ? `${compactFilePath(f.oldPath)} → ${compactFilePath(f.path)}`
+    : compactFilePath(f.path)
   const sc = FILE_STATUS_COLOR[f.status] ?? '#8b94b0'
   const sb = FILE_STATUS_BG[f.status]   ?? 'transparent'
 
@@ -983,7 +1033,7 @@ function CommitFileRow({ f, selected, repoPath, commitHash, remoteUrl, onClick }
         <span style={{
           fontFamily: "'JetBrains Mono', monospace", fontSize: 11.5,
           color: '#c8cdd8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
-        }} title={label}>{label}</span>
+        }} title={label}>{displayLabel}</span>
       </div>
 
       {ctx && (
@@ -1641,7 +1691,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   }, [leftWidth])
 
   useEffect(() => {
-    setGraphWidth(w => (w == null ? graphColW : Math.max(w, graphColW)))
+    setGraphWidth(graphColW)
   }, [graphColW])
 
   const effectiveGraphWidth = Math.max(graphColW, graphWidth ?? graphColW)
@@ -1677,11 +1727,17 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   }, [graphColW, leftWidth, maxLeftWidth, minLeftWidth])
 
   // ── Load history ───────────────────────────────────────────────────────────
-  const loadHistory = useCallback(async (limit: number, branches?: Set<string>, defaultBranchOverride?: string) => {
+  const loadHistory = useCallback(async (
+    limit: number,
+    branches?: Set<string>,
+    defaultBranchOverride?: string,
+    filterBranchesOverride?: BranchInfo[],
+  ) => {
     setHistLoading(true)
     try {
       const active = branches ?? selBranches
       const mainBranch = defaultBranchOverride ?? defaultBranch
+      const branchPool = filterBranchesOverride ?? filterBranches
       const refs = [...active].filter(Boolean)
       if (refs.length === 0) {
         setNodes([])
@@ -1689,7 +1745,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
         return
       }
       const commits = await opRun('Loading history…', () => ipc.log(repoPath, { limit, all: !refs, refs }))
-      const defaultRef = filterBranches.find(b => active.has(b.name) && (b.displayName === mainBranch || b.name === mainBranch))?.name
+      const defaultRef = branchPool.find(b => active.has(b.name) && (b.displayName === mainBranch || b.name === mainBranch))?.name
       const defaultCommits = defaultRef
         ? await ipc.log(repoPath, { limit, all: false, refs: [defaultRef] }).catch(() => [])
         : []
@@ -1708,7 +1764,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
       for (const node of graph) {
         const ref = selectedTipRefs.get(node.commit.hash)
         if (!ref) continue
-        const branch = filterBranches.find(b => b.name === ref)
+        const branch = branchPool.find(b => b.name === ref)
         if (branch && (branch.displayName === mainBranch || branch.name === mainBranch)) allowedKeys.add('main')
         else allowedKeys.add(node.color)
       }
@@ -1735,7 +1791,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
       const nextSel = new Set(liveBranches.map(b => b.name))
       setSelBranches(nextSel)
       limitRef.current = INITIAL_LIMIT
-      loadHistory(INITIAL_LIMIT, nextSel, def)
+      loadHistory(INITIAL_LIMIT, nextSel, def, liveBranches)
     }).catch(() => {})
   }, [repoPath])
 
@@ -1908,26 +1964,6 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
             {totalLoaded > 0 ? `${totalLoaded} Commits` : 'Commits'}
           </span>
           <div style={{ flex: 1 }} />
-          <div
-            title="Commit list width"
-            style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}
-          >
-            <span style={{ fontFamily: "'IBM Plex Sans', system-ui", fontSize: 10, color: '#4e5870', fontWeight: 700 }}>
-              Width
-            </span>
-            <input
-              type="range"
-              min={minLeftWidth}
-              max={maxLeftWidth}
-              value={leftWidth}
-              onChange={e => setLeftWidth(Math.max(minLeftWidth, Math.min(maxLeftWidth, Number(e.currentTarget.value))))}
-              style={{
-                width: 112,
-                accentColor: '#e8622f',
-                cursor: 'ew-resize',
-              }}
-            />
-          </div>
           <TLBranchDropdown
             open={filterOpen}
             onToggleOpen={() => setFilterOpen(o => !o)}

@@ -37,7 +37,7 @@ const TYPE_ICON: Record<ConflictPreviewFile['type'], string> = {
 }
 
 export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePreviewDialogProps) {
-  const { repoPath, currentBranch, refreshStatus } = useRepoStore()
+  const { repoPath, currentBranch, refreshStatus, bumpSyncTick } = useRepoStore()
 
   const [loading, setLoading]   = useState(true)
   const [conflicts, setConflicts] = useState<ConflictPreviewFile[]>([])
@@ -62,6 +62,7 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
     try {
       await opRun(`Merging ${targetBranch}…`, () => ipc.merge(repoPath, targetBranch))
       await refreshStatus()
+      bumpSyncTick()
       onMerged()
       onClose()
     } catch (e) {

@@ -108,7 +108,7 @@ function loadVisibility(): Record<string, string[]> {
 }
 
 export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthChange, repoPath, onOpenTerminal, onOpenRepo, onOpenExplorer }: SidebarProps) {
-  const { fileStatus, currentBranch, syncTick } = useRepoStore()
+  const { fileStatus, currentBranch, syncTick, prTick } = useRepoStore()
   const { accounts, currentAccountId } = useAuthStore()
   const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login?.toLowerCase() ?? null
   const lockedFileCount = useLockStore(s =>
@@ -171,7 +171,7 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
       cancelled = true
       window.clearInterval(id)
     }
-  }, [repoPath, isAdmin])
+  }, [repoPath, isAdmin, prTick])
 
   const [groupsCollapsed,   setGroupsCollapsed]   = useState<Record<string, boolean>>(loadCollapsed)
   const [sectionVisibility, setSectionVisibility] = useState<Record<string, string[]>>(loadVisibility)

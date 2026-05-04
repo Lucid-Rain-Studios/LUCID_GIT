@@ -5,6 +5,7 @@ import { ipc } from '@/ipc'
 import { cn } from '@/lib/utils'
 import { useErrorStore } from '@/stores/errorStore'
 import { useDialogStore } from '@/stores/dialogStore'
+import { markFetchPerformed } from '@/lib/fetchState'
 
 type HookState = 'idle' | 'running' | 'passed' | 'failed'
 
@@ -49,10 +50,10 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
       setMessage('')
       setHookState('idle')
       setHookOutput('')
-      refreshStatus()
+      await refreshStatus()
 
       // Keep upstream sync counts accurate for Pull/Push badges
-      await ipc.fetch(repoPath).catch(() => {})
+      await ipc.fetch(repoPath).then(() => markFetchPerformed(repoPath)).catch(() => {})
       bumpSyncTick()
 
     } catch (e) {

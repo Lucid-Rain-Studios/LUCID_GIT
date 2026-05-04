@@ -74,11 +74,15 @@ class LockService {
       const locks = await this.listLocks(repoPath)
       resolvedLockId = locks.find(l => l.path === normalized)?.id
     }
+    const fileExists = fs.existsSync(fullPath)
+    if (!resolvedLockId && !fileExists) {
+      throw new Error(`Unable to unlock deleted file "${normalized}": lock id could not be resolved`)
+    }
     // Use --id=<id> form for maximum CLI compatibility across Git LFS versions.
+    // This also allows owners to unlock deleted files without using admin-only force unlock.
     const pathArgs = resolvedLockId ? [`--id=${resolvedLockId}`] : [normalized]
     const unlockOpts: string[] = []
-    // Deleted (ghost) files can still be locked in LFS; force-unlock avoids local path checks.
-    if (force || !fs.existsSync(fullPath)) unlockOpts.push('--force')
+    if (force) unlockOpts.push('--force')
     const args = [...gitAuthArgs(token), 'lfs', 'unlock', ...unlockOpts, ...pathArgs]
     try {
       await exec(args, repoPath)
