@@ -383,7 +383,14 @@ class GitService {
       throw new Error(`Could not find ${defaultBranch.ref}`)
     }
 
-    await exec(['merge', '--no-edit', defaultBranch.ref], repoPath)
+    const mergeArgs = [...gitAuthArgs(token, remoteUrl), 'merge', '--no-edit', defaultBranch.ref]
+    try {
+      await exec(mergeArgs, repoPath)
+    } catch (error) {
+      if (!this.shouldRunLfsRecovery(error)) throw error
+      await this.recoverLfsAndMergeState(repoPath)
+      await exec(mergeArgs, repoPath)
+    }
   }
 
   /** git log with parsed output. Pass filePath to filter to a single file, or refs to limit to specific branches. */
