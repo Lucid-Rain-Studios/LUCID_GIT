@@ -76,9 +76,15 @@ if errorlevel 1 (
 echo.
 
 echo [2/7] Installing dependencies...
+call :stop_dev_processes
 call npm ci --include=dev
 if errorlevel 1 (
   echo ERROR: npm ci failed.
+  goto :fail
+)
+if not exist "node_modules\typescript\bin\tsc" (
+  echo ERROR: npm ci completed, but local TypeScript was not installed.
+  echo Delete node_modules and run this script again.
   goto :fail
 )
 echo.
@@ -136,3 +142,8 @@ echo.
 echo Patch release stopped. Press any key to close this window...
 pause >nul
 exit /b 1
+
+:stop_dev_processes
+echo [preflight] Stopping repo dev processes that can lock node_modules...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='SilentlyContinue'; $root=(Resolve-Path '.').Path; Get-Process electron | Where-Object { $_.Path -like ($root + '\node_modules\electron\dist\electron.exe') } | Stop-Process -Force; $vitePid=(Get-NetTCPConnection -LocalPort 5173 -State Listen | Select-Object -First 1 -ExpandProperty OwningProcess); if ($vitePid) { Get-Process -Id $vitePid | Stop-Process -Force }"
+exit /b 0

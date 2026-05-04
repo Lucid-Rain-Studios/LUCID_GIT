@@ -5,13 +5,13 @@
   "author": "Lucid Rain Studios",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "npx tsc -p tsconfig.main.json && concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "build": "npx tsc -p tsconfig.main.json && vite build",
+    "dev": "tsc -p tsconfig.main.json && concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "build": "tsc -p tsconfig.main.json && vite build",
     "package": "npm run build && electron-builder",
     "release": "npm run build && electron-builder --publish always",
     "release:patch": "npm version patch && npm run release",
     "release:minor": "npm version minor && npm run release",
-    "typecheck": "npx tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint src electron"
   },
   "dependencies": {
