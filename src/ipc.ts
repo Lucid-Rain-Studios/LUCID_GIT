@@ -698,28 +698,33 @@ function logRendererEvent(source: string, message: string, detail?: unknown): vo
 }
 
 function wrapApi<T extends LucidGitAPI>(api: T): T {
-  return new Proxy(api, {
-    get(target, prop, receiver) {
-      const value = Reflect.get(target, prop, receiver)
-      if (typeof value !== 'function' || prop === 'logRendererEvent') return value
+  const wrapped: Partial<T> = {}
 
-      return (...args: unknown[]) => {
+  for (const key of Object.keys(api) as Array<keyof T>) {
+    const value = api[key]
+    if (typeof value !== 'function' || key === 'logRendererEvent') {
+      wrapped[key] = value
+      continue
+    }
+
+    wrapped[key] = ((...args: unknown[]) => {
         try {
-          const result = value.apply(target, args)
+          const result = value.apply(api, args)
           if (result && typeof result.then === 'function') {
             return result.catch((error: unknown) => {
-              logRendererEvent(`renderer.ipc.${String(prop)}`, `IPC call failed: ${describeUnknown(error)}`, { args, error })
+              logRendererEvent(`renderer.ipc.${String(key)}`, `IPC call failed: ${describeUnknown(error)}`, { args, error })
               throw error
             })
           }
           return result
         } catch (error) {
-          logRendererEvent(`renderer.ipc.${String(prop)}`, `IPC call threw synchronously: ${describeUnknown(error)}`, { args, error })
+          logRendererEvent(`renderer.ipc.${String(key)}`, `IPC call threw synchronously: ${describeUnknown(error)}`, { args, error })
           throw error
         }
-      }
-    },
-  }) as T
+      }) as T[typeof key]
+  }
+
+  return wrapped as T
 }
 
 export const logUiError = logRendererEvent

@@ -443,8 +443,16 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
                   border: '1px solid #1a2030', borderRadius: 10, overflow: 'hidden',
                 }}>
                   {/* Owner header */}
-                  <button
+                  <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => toggleOwner(group.login)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        toggleOwner(group.login)
+                      }
+                    }}
                     style={{
                       width: '100%', display: 'flex', alignItems: 'center', gap: 10,
                       padding: '10px 14px',
@@ -496,7 +504,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
                     >
                       <path d="M2 3.5l3 3 3-3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
-                  </button>
+                  </div>
 
                   {/* Files */}
                   {!isCollapsed && (

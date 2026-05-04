@@ -7,6 +7,7 @@ import { watcherService } from './services/WatcherService'
 import { logService } from './services/LogService'
 
 const isDev = !app.isPackaged
+const openDevToolsOnStart = process.env.LUCID_OPEN_DEVTOOLS === '1'
 
 // ── Auto-updater setup ────────────────────────────────────────────────────────
 
@@ -100,9 +101,11 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' }
   })
 
+  attachWindowDiagnostics(win)
+
   if (isDev) {
     win.loadURL('http://localhost:5173')
-    win.webContents.openDevTools()
+    if (openDevToolsOnStart) win.webContents.openDevTools()
   } else {
     win.loadFile(path.join(__dirname, '../dist-renderer/index.html'))
   }
@@ -123,6 +126,35 @@ function createWindow(): BrowserWindow {
   })
 
   return win
+}
+
+function attachWindowDiagnostics(win: BrowserWindow): void {
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    const message = `Renderer failed to load ${validatedURL || '(unknown URL)'}: ${errorDescription} (${errorCode})`
+    logService.error('renderer.load', message)
+    if (isDev) console.error('[renderer.load]', message)
+  })
+
+  win.webContents.on('render-process-gone', (_event, details) => {
+    const message = `Renderer process gone: ${details.reason} (exitCode ${details.exitCode})`
+    logService.error('renderer.process', message)
+    if (isDev) console.error('[renderer.process]', message)
+  })
+
+  win.webContents.on('preload-error', (_event, preloadPath, error) => {
+    const message = `Preload failed: ${preloadPath}\n${error.message}\nStack:\n${error.stack ?? ''}`
+    logService.error('renderer.preload', message)
+    if (isDev) console.error('[renderer.preload]', message)
+  })
+
+  win.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    if (!message || /^Request Autofill\./.test(message)) return
+    if (level < 2) return
+    const source = sourceId ? `${sourceId}:${line}` : `line ${line}`
+    const formatted = `${message}\nSource: ${source}`
+    logService.error('renderer.console', formatted)
+    if (isDev) console.log(`[renderer:${level}] ${message} (${source})`)
+  })
 }
 
 // ── Window control IPC ────────────────────────────────────────────────────────
