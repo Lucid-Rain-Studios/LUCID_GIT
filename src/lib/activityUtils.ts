@@ -192,6 +192,7 @@ export function getMonthLabels(weeks: DayActivity[][]): { month: string; offset:
 export function formatDateForTooltip(dateKey: string): string {
   const date = fromDateKey(dateKey)
   return date.toLocaleDateString('en-US', {
+    timeZone: 'UTC',
     weekday: 'long',
     year: 'numeric',
     month: 'long',

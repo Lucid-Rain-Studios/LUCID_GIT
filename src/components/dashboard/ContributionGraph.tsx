@@ -20,7 +20,7 @@ const DAY_GAP = 3
 const MONTH_LABEL_HEIGHT = 24
 const WEEKDAY_LABEL_WIDTH = 28
 
-const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
@@ -76,14 +76,15 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
     // Grid bounds — all UTC
     const jan1  = new Date(Date.UTC(currentYear, 0, 1))
     const dec31 = new Date(Date.UTC(currentYear, 11, 31))
+    const getMondayFirstDay = (date: Date) => (date.getUTCDay() + 6) % 7
 
-    // Sunday on or before Jan 1
+    // Monday on or before Jan 1
     const gridStart = new Date(jan1)
-    gridStart.setUTCDate(gridStart.getUTCDate() - gridStart.getUTCDay())
+    gridStart.setUTCDate(gridStart.getUTCDate() - getMondayFirstDay(gridStart))
 
-    // Saturday on or after Dec 31
+    // Sunday on or after Dec 31
     const gridEnd = new Date(dec31)
-    gridEnd.setUTCDate(gridEnd.getUTCDate() + (6 - gridEnd.getUTCDay()))
+    gridEnd.setUTCDate(gridEnd.getUTCDate() + (6 - getMondayFirstDay(gridEnd)))
 
     const jan1Key  = toDateKey(jan1.getTime())
     const dec31Key = toDateKey(dec31.getTime())
@@ -174,25 +175,22 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
               ))}
             </g>
 
-            {/* Day of week labels — Mon / Wed / Fri only (indices 1, 3, 5) */}
+            {/* Day of week labels */}
             <g>
-              {WEEKDAY_LABELS.map((label, idx) => {
-                if (idx !== 1 && idx !== 3 && idx !== 5) return null
-                return (
-                  <text
-                    key={label}
-                    x={WEEKDAY_LABEL_WIDTH - 4}
-                    y={MONTH_LABEL_HEIGHT + (idx * (DAY_SIZE + DAY_GAP)) + DAY_SIZE + 3}
-                    fill="#344057"
-                    fontSize={8.5}
-                    fontFamily="'IBM Plex Sans', system-ui"
-                    textAnchor="end"
-                    dominantBaseline="middle"
-                  >
-                    {label}
-                  </text>
-                )
-              })}
+              {WEEKDAY_LABELS.map((label, idx) => (
+                <text
+                  key={label}
+                  x={WEEKDAY_LABEL_WIDTH - 4}
+                  y={MONTH_LABEL_HEIGHT + (idx * (DAY_SIZE + DAY_GAP)) + (DAY_SIZE / 2)}
+                  fill="#344057"
+                  fontSize={8}
+                  fontFamily="'IBM Plex Sans', system-ui"
+                  textAnchor="end"
+                  dominantBaseline="middle"
+                >
+                  {label}
+                </text>
+              ))}
             </g>
 
             {/* Contribution squares */}
@@ -219,6 +217,15 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
                   const level   = getContributionLevel(day.count)
                   const color   = getContributionColor(level, 'dark')
                   const isToday = day.date === todayKey
+                  const monthEdge = getMonthEdge(day.date)
+                  const stroke = isToday
+                    ? '#4a9eff'
+                    : monthEdge === 'start'
+                      ? 'rgba(220,226,242,0.62)'
+                      : monthEdge === 'end'
+                        ? 'rgba(92,104,128,0.78)'
+                        : 'none'
+                  const strokeWidth = isToday || monthEdge ? 1 : 0
 
                   return (
                     <Tooltip
@@ -235,8 +242,8 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
                         height={DAY_SIZE}
                         fill={color}
                         rx={2}
-                        stroke={isToday ? '#4a9eff' : 'none'}
-                        strokeWidth={isToday ? 1 : 0}
+                        stroke={stroke}
+                        strokeWidth={strokeWidth}
                         style={{ cursor: day.count > 0 ? 'pointer' : 'default' }}
                       />
                     </Tooltip>
@@ -426,4 +433,15 @@ function GraphIcon() {
 function truncate(str: string, len: number): string {
   if (str.length <= len) return str
   return str.slice(0, len - 3) + '...'
+}
+
+function getMonthEdge(dateKey: string): 'start' | 'end' | null {
+  const [, month, day] = dateKey.split('-').map(Number)
+  if (day === 1) return 'start'
+
+  const date = new Date(`${dateKey}T00:00:00.000Z`)
+  const nextDay = new Date(date)
+  nextDay.setUTCDate(date.getUTCDate() + 1)
+
+  return nextDay.getUTCMonth() + 1 !== month ? 'end' : null
 }
