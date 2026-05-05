@@ -7,6 +7,7 @@ import {
 import { useRepoStore } from '@/stores/repoStore'
 import { useOperationStore } from '@/stores/operationStore'
 import { useStatusToastStore } from '@/stores/statusToastStore'
+import { markFetchPerformed } from '@/lib/fetchState'
 
 interface OverviewPanelProps {
   repoPath: string
@@ -464,9 +465,18 @@ function ResolveDialog({
           )
         }
         await opRun(`Merging PR #${pr.number}…`, () => ipc.githubMergePR({ owner, repo, prNumber: pr.number, repoPath }))
-        bumpHistoryTick()
+        let fetchedMergedPrUpdates = false
+        try {
+          await opRun('Fetching merged PR updates...', () => ipc.fetch(repoPath))
+          markFetchPerformed(repoPath)
+          fetchedMergedPrUpdates = true
+        } catch (fetchError) {
+          showStatusToast('PR merged, but fetch failed. Fetch manually to update pull status.')
+          console.error('Post-PR-merge fetch failed', fetchError)
+        }
         bumpPrTick()
-        bumpSyncTick()
+        if (fetchedMergedPrUpdates) bumpSyncTick()
+        else bumpHistoryTick()
       } else {
         await opRun(`Closing PR #${pr.number}…`, () => ipc.githubClosePR({ owner, repo, prNumber: pr.number }))
         bumpPrTick()
