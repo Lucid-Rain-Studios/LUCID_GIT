@@ -172,6 +172,10 @@ export function FileTree({
   const unlockFile = useLockStore(s => s.unlockFile)
   const { accounts, currentAccountId } = useAuthStore()
   const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login ?? null
+  const canSelectAllDeferredStagePaths = isDeferredStaging
+    && files.some(file => !deferredStagePaths?.has(file.path))
+  const discardCandidates = isDeferredStaging ? files : unstaged
+  const hasTrackedWorkingChanges = files.some(file => file.workingStatus !== '?')
 
   // ── Multi-select state ─────────────────────────────────────────────────────
   const [multiPaths, setMultiPaths]         = useState<Set<string>>(new Set())
@@ -343,19 +347,25 @@ export function FileTree({
       }}>
         <ActionBtn
           label="Stage All"
-          disabled={busy || unstaged.length === 0}
-          onClick={() => run('Staging all…', () => ipc.stage(repoPath, unstaged.map(f => f.path)))}
+          disabled={busy || (isDeferredStaging ? !canSelectAllDeferredStagePaths : unstaged.length === 0)}
+          onClick={() => {
+            if (isDeferredStaging) {
+              onSetDeferredStagePaths?.(files.map(f => f.path))
+              return
+            }
+            run('Staging all…', () => ipc.stage(repoPath, unstaged.map(f => f.path)))
+          }}
         />
         <ActionBtn
           label="Discard All"
           danger
-          disabled={busy || unstaged.filter(f => f.workingStatus !== '?').length === 0}
+          disabled={busy || (isDeferredStaging ? !hasTrackedWorkingChanges : unstaged.filter(f => f.workingStatus !== '?').length === 0)}
           onClick={async () => {
             const ok = await dialog.confirm({ title: 'Discard all changes', message: 'This will discard all working-tree changes. This cannot be undone.', confirmLabel: 'Discard All', danger: true })
             if (!ok) return
             // Capture files locked by me before discarding so they can be unlocked after reset.
             const myLockedFiles = currentLogin
-              ? unstaged.filter(f => {
+              ? discardCandidates.filter(f => {
                   const lock = lockFor(f)
                   return lock?.owner.login === currentLogin
                 })

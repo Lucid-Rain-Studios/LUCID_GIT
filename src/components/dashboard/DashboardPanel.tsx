@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { ipc, SyncStatus, Lock, FileStatus, PullRequest } from '@/ipc'
+import { ipc, SyncStatus, Lock, FileStatus, PullRequest, PotentialMergeConflictReport } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useOperationStore } from '@/stores/operationStore'
@@ -102,6 +102,8 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
   const [lastPull,  setLastPull]  = useState<number | null>(null)
   const [lastFetch, setLastFetch] = useState<number | null>(null)
   const [hasFetched, setHasFetched] = useState(() => sessionFetchedRepos.has(repoPath))
+  const [conflictReport, setConflictReport] = useState<PotentialMergeConflictReport | null>(null)
+  const [conflictChecking, setConflictChecking] = useState<'lightweight' | 'deep' | null>(null)
   const syncTickRef = useRef(syncTick)
 
   const staged       = React.useMemo(() => fileStatus.filter(f =>  f.staged).length,  [fileStatus])
@@ -121,6 +123,17 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
     loadSync()
   }, [repoPath, loadSync])
 
+  const runPotentialConflictCheck = useCallback(async (mode: 'lightweight' | 'deep') => {
+    setConflictChecking(mode)
+    try {
+      setConflictReport(await ipc.potentialMergeConflicts(repoPath, mode))
+    } catch {
+      setConflictReport(null)
+    } finally {
+      setConflictChecking(null)
+    }
+  }, [repoPath])
+
   useEffect(() => {
     reload()
     // Use session cache so remoteUrl isn't re-read from git on every tab switch
@@ -136,6 +149,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
     setLastPull(storedPull   ? parseInt(storedPull,  10) : null)
     setLastFetch(storedFetch)
     setHasFetched(sessionFetchedRepos.has(repoPath))
+    setConflictReport(null)
   }, [repoPath])
 
 
@@ -149,6 +163,11 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
       setHasFetched(true)
     })
   }, [repoPath])
+
+  useEffect(() => {
+    if (lastFetch === null) return
+    runPotentialConflictCheck('lightweight')
+  }, [lastFetch, runPotentialConflictCheck])
 
   // Refresh sync status when a history operation (undo, reset, revert, cherry-pick) changes local HEAD
   useEffect(() => {
@@ -268,6 +287,9 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
           lastPull={lastPull}
           sync={effectiveSync}
           fileStatus={fileStatus}
+          conflictReport={conflictReport}
+          conflictChecking={conflictChecking}
+          onDeepConflictCheck={() => runPotentialConflictCheck('deep')}
           onFetch={doFetch}
           busy={busyState === 'idle' ? null : busyState}
         />
@@ -283,10 +305,13 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
         hasFetched={effectiveHasFetched}
         ghSlug={ghSlug}
         currentBranch={currentBranch}
+        conflictReport={conflictReport}
+        conflictChecking={conflictChecking}
         onFetch={doFetch}
         onPull={doPull}
         onPush={doPush}
         onGoChanges={() => onNavigate('timeline')}
+        onDeepConflictCheck={() => runPotentialConflictCheck('deep')}
         canCreatePR={canCreatePRNow}
         onOpenPR={() => {
           if (usingTopBarState && topBarHandlers) {
@@ -330,7 +355,8 @@ interface FlowStepDef {
 
 function DailyFlowStrip({
   sync, staged, unstaged, busy, hasFetched, ghSlug, currentBranch,
-  onFetch, onPull, onPush, onGoChanges, onOpenPR, canCreatePR,
+  conflictReport, conflictChecking,
+  onFetch, onPull, onPush, onGoChanges, onDeepConflictCheck, onOpenPR, canCreatePR,
 }: {
   sync: SyncStatus | null
   staged: number; unstaged: number
@@ -338,12 +364,15 @@ function DailyFlowStrip({
   hasFetched: boolean
   ghSlug: string | null
   currentBranch: string
+  conflictReport: PotentialMergeConflictReport | null
+  conflictChecking: 'lightweight' | 'deep' | null
   onFetch: () => void; onPull: () => void; onPush: () => void
-  onGoChanges: () => void; onOpenPR: () => void; canCreatePR: boolean
+  onGoChanges: () => void; onDeepConflictCheck: () => void; onOpenPR: () => void; canCreatePR: boolean
 }) {
   const behind     = sync?.behind ?? 0
   const ahead      = sync?.ahead  ?? 0
-  const hasChanges = staged + unstaged > 0
+  const possibleConflictCount = conflictReport?.branchesWithConflicts.length ?? 0
+  const changedFileCount = conflictReport?.changedFiles.length ?? staged + unstaged
 
   let syncState: StepState   = 'done'
   let syncSub                = 'In sync with remote'
@@ -386,12 +415,21 @@ function DailyFlowStrip({
       btns: s1Btns,
     },
     {
-      n: 2, label: 'Work & Commit',
-      sub: hasChanges
-        ? `${staged > 0 ? `${staged} staged` : ''}${staged > 0 && unstaged > 0 ? ' · ' : ''}${unstaged > 0 ? `${unstaged} modified` : ''}`
-        : 'Working directory clean',
-      state: hasChanges ? 'action' : 'done',
-      btns: hasChanges ? [{ label: 'View Changes', color: '#4a9eff', disabled: false, onClick: onGoChanges }] : undefined,
+      n: 2, label: 'Potential Merge Conflicts',
+      sub: conflictChecking === 'lightweight'
+        ? 'Checking changed files across branches...'
+        : conflictChecking === 'deep'
+          ? 'Running in-depth branch previews...'
+          : possibleConflictCount > 0
+            ? `${possibleConflictCount} branch${possibleConflictCount !== 1 ? 'es' : ''} touched your changed files`
+            : changedFileCount > 0
+              ? `${changedFileCount} changed file${changedFileCount !== 1 ? 's' : ''}; no branch overlap found`
+              : 'No local or unpushed changes to compare',
+      state: possibleConflictCount > 0 ? 'warn' : changedFileCount > 0 ? 'done' : 'neutral',
+      btns: [
+        { label: conflictChecking === 'deep' ? 'Checking...' : 'In-depth Check', color: possibleConflictCount > 0 ? '#e84545' : '#4a9eff', disabled: !!conflictChecking, disabledReason: 'Conflict check already running', onClick: onDeepConflictCheck },
+        ...(staged + unstaged > 0 ? [{ label: 'View Changes', color: '#4a9eff', disabled: false, onClick: onGoChanges }] : []),
+      ],
     },
     {
       n: 3, label: 'Open PR',
@@ -475,6 +513,7 @@ type SuggestionUrgency = 'ok' | 'tip' | 'warn' | 'high' | 'critical'
 interface Suggestion {
   urgency: SuggestionUrgency
   text: string
+  conflictItems?: Array<{ file: string; branch: string }>
   action?: { label: string; onClick: () => void; disabled: boolean }
 }
 
@@ -486,11 +525,14 @@ const URGENCY_COLOR: Record<SuggestionUrgency, { dot: string; bg: string; border
   critical: { dot: '#e84545', bg: 'rgba(232,69,69,0.08)',   border: 'rgba(232,69,69,0.28)',   text: '#c05050'  },
 }
 
-function SuggestionsCard({ lastFetch, lastPull, sync, fileStatus, onFetch, busy }: {
+function SuggestionsCard({ lastFetch, lastPull, sync, fileStatus, conflictReport, conflictChecking, onDeepConflictCheck, onFetch, busy }: {
   lastFetch: number | null
   lastPull: number | null
   sync: SyncStatus | null
   fileStatus: FileStatus[]
+  conflictReport: PotentialMergeConflictReport | null
+  conflictChecking: 'lightweight' | 'deep' | null
+  onDeepConflictCheck: () => void
   onFetch: () => void
   busy: 'idle' | 'fetch' | 'pull' | 'push' | null
 }) {
@@ -505,6 +547,32 @@ function SuggestionsCard({ lastFetch, lastPull, sync, fileStatus, onFetch, busy 
   const hasWork    = fileStatus.some(f => f.staged || f.workingStatus === 'M' || f.workingStatus === 'A' || f.workingStatus === '?')
 
   const suggestions: Suggestion[] = []
+  const conflictBranches = conflictReport?.branchesWithConflicts ?? []
+
+  if (conflictBranches.length > 0) {
+    const fileCount = new Set(conflictBranches.flatMap(branch => branch.files)).size
+    const firstBranch = conflictBranches[0]
+    const conflictItems = conflictBranches.flatMap(branch =>
+      branch.files.map(file => ({ file, branch: branch.branch }))
+    )
+    suggestions.push({
+      urgency: 'critical',
+      text: `${conflictReport?.mode === 'deep' ? 'In-depth check' : 'Fetch check'} found ${conflictBranches.length} branch${conflictBranches.length !== 1 ? 'es' : ''} touching ${fileCount} of your changed file${fileCount !== 1 ? 's' : ''}. Highest risk: ${firstBranch.branch} (${firstBranch.conflictCount} file${firstBranch.conflictCount !== 1 ? 's' : ''}).`,
+      conflictItems,
+      action: { label: conflictChecking ? 'Checking...' : 'Run In-depth Check', onClick: onDeepConflictCheck, disabled: !!conflictChecking },
+    })
+  } else if (conflictChecking) {
+    suggestions.push({
+      urgency: 'tip',
+      text: conflictChecking === 'deep' ? 'Running in-depth conflict previews across candidate branches.' : 'Checking your changed files against other branch changes after fetch.',
+    })
+  } else if (conflictReport && conflictReport.changedFiles.length > 0) {
+    suggestions.push({
+      urgency: 'ok',
+      text: `Potential conflict check found no branch overlap across ${conflictReport.branchesChecked} branch${conflictReport.branchesChecked !== 1 ? 'es' : ''}.`,
+      action: { label: 'Run In-depth Check', onClick: onDeepConflictCheck, disabled: false },
+    })
+  }
 
   // ── Sync age ──────────────────────────────────────────────────────────────
   if (lastSyncTime === null) {
@@ -565,7 +633,7 @@ function SuggestionsCard({ lastFetch, lastPull, sync, fileStatus, onFetch, busy 
 
   return (
     <Card title="Suggestions" icon={<SuggestionsIcon />}>
-      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', flex: 1 }}>
+      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', flex: 1, minHeight: 0 }}>
         {suggestions.map((s, i) => {
           const uc = URGENCY_COLOR[s.urgency]
           return (
@@ -575,6 +643,17 @@ function SuggestionsCard({ lastFetch, lastPull, sync, fileStatus, onFetch, busy 
                 <p style={{ margin: 0, fontSize: 12, lineHeight: 1.65, color: uc.text, fontFamily: "'IBM Plex Sans', system-ui" }}>
                   {s.text}
                 </p>
+                {s.conflictItems && s.conflictItems.length > 0 && (
+                  <ul style={{ margin: '8px 0 0', paddingLeft: 15, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {s.conflictItems.map(item => (
+                      <li key={`${item.branch}:${item.file}`} style={{ fontSize: 11.5, lineHeight: 1.45, color: '#ff6b6b', fontFamily: "'JetBrains Mono', monospace", overflowWrap: 'anywhere' }}>
+                        <span style={{ color: '#ff8a8a' }}>{item.file}</span>
+                        <span style={{ color: '#9a5560' }}> may conflict with </span>
+                        <span style={{ color: '#ff8a8a' }}>{item.branch}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 {s.action && (
                   <div style={{ marginTop: 8 }}>
                     <SmallBtn label={s.action.label} color={uc.dot} disabled={s.action.disabled} disabledReason={s.action.disabled ? 'Operation in progress' : null} onClick={s.action.onClick} />

@@ -5,7 +5,7 @@ import path from 'path'
 import { exec, execSafe, execWithProgress, gitAuthArgs, ProgressCallback } from '../util/dugite-exec'
 import { authService } from './AuthService'
 import { parseGitLog, GIT_LOG_FORMAT } from '../util/git-log-parse'
-import { FileStatus, BranchInfo, CommitEntry, DiffContent, StashEntry, ContributorInfo, ConflictPreviewFile, SyncStatus, LFSStatus, LfsLockCacheFile, LfsLocksMaintenanceResult, SizeBreakdown, CleanupResult, BranchActivity, BranchDiffSummary, BranchDiffFile } from '../types'
+import { FileStatus, BranchInfo, CommitEntry, DiffContent, StashEntry, ContributorInfo, ConflictPreviewFile, SyncStatus, LFSStatus, LfsLockCacheFile, LfsLocksMaintenanceResult, SizeBreakdown, CleanupResult, BranchActivity, BranchDiffSummary, BranchDiffFile, PotentialMergeConflictReport } from '../types'
 
 // ── Diff helpers ──────────────────────────────────────────────────────────────
 
@@ -303,6 +303,102 @@ class GitService {
     }
 
     return results
+  }
+
+  private async changedFilesSinceMergeBase(repoPath: string, targetRef: string): Promise<string[]> {
+    const baseRes = await execSafe(['merge-base', 'HEAD', targetRef], repoPath)
+    if (baseRes.exitCode !== 0) return []
+    const base = baseRes.stdout.trim()
+    if (!base) return []
+
+    const diffRes = await execSafe(['diff', '--name-only', base, targetRef], repoPath)
+    if (diffRes.exitCode !== 0) return []
+    return diffRes.stdout
+      .split('\n')
+      .map(line => line.trim().replace(/\\/g, '/'))
+      .filter(Boolean)
+  }
+
+  private async workingChangePaths(repoPath: string): Promise<string[]> {
+    const [status, ahead] = await Promise.all([
+      this.status(repoPath).catch(() => [] as FileStatus[]),
+      this.aheadFilePaths(repoPath).catch(() => [] as string[]),
+    ])
+
+    return [...new Set([
+      ...status.map(file => file.path.replace(/\\/g, '/')),
+      ...ahead.map(file => file.replace(/\\/g, '/')),
+    ].filter(Boolean))].sort()
+  }
+
+  async potentialMergeConflicts(repoPath: string, mode: 'lightweight' | 'deep'): Promise<PotentialMergeConflictReport> {
+    const changedFiles = await this.workingChangePaths(repoPath)
+    const changedSet = new Set(changedFiles)
+    const current = await this.currentBranch(repoPath)
+    const branches = await this.branchList(repoPath)
+    const activity = await this.branchActivity(repoPath).catch(() => [] as BranchActivity[])
+    const activityRank = new Map(activity.map((entry, index) => [entry.ref, index]))
+
+    const candidates = branches
+      .filter(branch =>
+        !branch.current &&
+        branch.name !== current &&
+        branch.name !== 'origin/HEAD' &&
+        !branch.name.endsWith('/HEAD')
+      )
+      .sort((a, b) => (activityRank.get(a.name) ?? 9999) - (activityRank.get(b.name) ?? 9999))
+      .slice(0, mode === 'deep' ? 40 : 30)
+
+    const branchesWithConflicts: PotentialMergeConflictReport['branchesWithConflicts'] = []
+
+    if (changedFiles.length > 0) {
+      for (const branch of candidates) {
+        if (mode === 'deep') {
+          const conflicts = await this.mergePreview(repoPath, branch.name).catch(() => [])
+          let files = conflicts
+            .map(conflict => conflict.path.replace(/\\/g, '/'))
+            .filter(file => changedSet.has(file))
+          if (files.length === 0) {
+            const targetRef = await this.resolveBranchRef(repoPath, branch.name).catch(() => null)
+            files = targetRef
+              ? (await this.changedFilesSinceMergeBase(repoPath, targetRef)).filter(file => changedSet.has(file))
+              : []
+          }
+          const uniqueFiles = [...new Set(files)].sort()
+          if (uniqueFiles.length > 0) {
+            branchesWithConflicts.push({
+              branch: branch.name,
+              isRemote: branch.isRemote,
+              files: uniqueFiles,
+              conflictCount: uniqueFiles.length,
+            })
+          }
+          continue
+        }
+
+        const targetRef = await this.resolveBranchRef(repoPath, branch.name).catch(() => null)
+        if (!targetRef) continue
+        const branchFiles = await this.changedFilesSinceMergeBase(repoPath, targetRef)
+        const overlap = branchFiles.filter(file => changedSet.has(file))
+        const uniqueFiles = [...new Set(overlap)].sort()
+        if (uniqueFiles.length > 0) {
+          branchesWithConflicts.push({
+            branch: branch.name,
+            isRemote: branch.isRemote,
+            files: uniqueFiles,
+            conflictCount: uniqueFiles.length,
+          })
+        }
+      }
+    }
+
+    return {
+      checkedAt: Date.now(),
+      mode,
+      changedFiles,
+      branchesChecked: candidates.length,
+      branchesWithConflicts,
+    }
   }
 
   /** Delete a remote branch via `git push <remote> --delete <branch>`. */

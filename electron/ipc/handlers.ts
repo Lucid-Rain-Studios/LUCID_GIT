@@ -369,6 +369,10 @@ export function registerHandlers(): void {
     return conflicts
   })
 
+  handle(CHANNELS.GIT_POTENTIAL_MERGE_CONFLICTS, async (_event, repoPath: string, mode: 'lightweight' | 'deep') => {
+    return gitService.potentialMergeConflicts(repoPath, mode)
+  })
+
   handle(CHANNELS.GIT_MERGE, async (_event, repoPath: string, targetBranch: string) => {
     await runGitOp('Merge', () => gitService.merge(repoPath, targetBranch))
     const ourBranch = await gitService.currentBranch(repoPath)

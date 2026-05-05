@@ -95,6 +95,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GIT_BRANCH_DIFF, repoPath, base, compare),
   mergePreview: (repoPath: string, targetBranch: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_MERGE_PREVIEW, repoPath, targetBranch),
+  potentialMergeConflicts: (repoPath: string, mode: 'lightweight' | 'deep') =>
+    ipcRenderer.invoke(CHANNELS.GIT_POTENTIAL_MERGE_CONFLICTS, repoPath, mode),
   merge: (repoPath: string, targetBranch: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_MERGE, repoPath, targetBranch),
   mergeGetConflictText: (repoPath: string, filePath: string) =>

@@ -130,6 +130,21 @@ export interface ConflictPreviewFile {
   theirs: ContributorInfo
 }
 
+export interface PotentialMergeConflictBranch {
+  branch: string
+  isRemote: boolean
+  files: string[]
+  conflictCount: number
+}
+
+export interface PotentialMergeConflictReport {
+  checkedAt: number
+  mode: 'lightweight' | 'deep'
+  changedFiles: string[]
+  branchesChecked: number
+  branchesWithConflicts: PotentialMergeConflictBranch[]
+}
+
 export interface LFSStatus {
   tracked: string[]    // patterns from .gitattributes with filter=lfs
   untracked: string[]  // suggested patterns (binary exts in repo not yet tracked)

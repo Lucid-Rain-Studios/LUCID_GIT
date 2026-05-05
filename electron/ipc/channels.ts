@@ -25,6 +25,7 @@ export const CHANNELS = {
   GIT_BRANCH_DELETE_REMOTE: 'git:branch-delete-remote',
   GIT_CHECKOUT:      'git:checkout',
   GIT_MERGE_PREVIEW: 'git:merge-preview',
+  GIT_POTENTIAL_MERGE_CONFLICTS: 'git:potential-merge-conflicts',
   GIT_MERGE:         'git:merge',
   GIT_MERGE_RESOLVE: 'git:merge-resolve',
   GIT_MERGE_GET_CONFLICT_TEXT: 'git:merge-get-conflict-text',

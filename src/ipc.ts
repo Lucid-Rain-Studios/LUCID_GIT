@@ -68,6 +68,21 @@ export interface ConflictPreviewFile {
   theirs: ContributorInfo
 }
 
+export interface PotentialMergeConflictBranch {
+  branch: string
+  isRemote: boolean
+  files: string[]
+  conflictCount: number
+}
+
+export interface PotentialMergeConflictReport {
+  checkedAt: number
+  mode: 'lightweight' | 'deep'
+  changedFiles: string[]
+  branchesChecked: number
+  branchesWithConflicts: PotentialMergeConflictBranch[]
+}
+
 
 export interface MergeConflictText {
   ours: string
@@ -537,6 +552,7 @@ export interface LucidGitAPI {
   checkout: (repoPath: string, branch: string) => Promise<void>
   branchDiff: (repoPath: string, base: string, compare: string) => Promise<BranchDiffSummary>
   mergePreview: (repoPath: string, targetBranch: string) => Promise<ConflictPreviewFile[]>
+  potentialMergeConflicts: (repoPath: string, mode: 'lightweight' | 'deep') => Promise<PotentialMergeConflictReport>
   merge: (repoPath: string, targetBranch: string) => Promise<void>
   mergeGetConflictText: (repoPath: string, filePath: string) => Promise<MergeConflictText>
   mergeResolveText: (repoPath: string, filePath: string, choice: 'ours' | 'theirs') => Promise<void>
