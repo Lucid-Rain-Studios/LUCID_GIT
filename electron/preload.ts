@@ -69,6 +69,10 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GIT_SYNC_STATUS, repoPath),
   updateFromMain: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_UPDATE_FROM_MAIN, repoPath),
+  mergeOverlapFiles: (repoPath: string, mergeRef: string) =>
+    ipcRenderer.invoke(CHANNELS.GIT_MERGE_OVERLAP, repoPath, mergeRef),
+  updateFromMainConflicts: (repoPath: string) =>
+    ipcRenderer.invoke(CHANNELS.GIT_UPDATE_FROM_MAIN_CONFLICTS, repoPath),
   diff: (repoPath: string, filePath: string, staged: boolean) =>
     ipcRenderer.invoke(CHANNELS.GIT_DIFF, repoPath, filePath, staged),
   discard: (repoPath: string, paths: string[], isUntracked: boolean) =>

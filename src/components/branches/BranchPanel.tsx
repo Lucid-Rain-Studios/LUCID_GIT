@@ -223,6 +223,27 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
     setUpdatingMain(true)
     setError(null)
     try {
+      // An unconcluded merge (MERGE_HEAD on disk) blocks any update — git
+      // aborts with "You have not concluded your merge". Open the conflict
+      // resolver first instead of failing with a raw git error.
+      const existingMerge = await ipc.mergeInProgress(repoPath).catch(() => null)
+      if (existingMerge) { onMergePreview(existingMerge.mergedBranch); return }
+      // FIRST: fetch, then check whether uncommitted edits overlap the
+      // incoming changes. The merge runs only once that is clear — otherwise
+      // the user is prompted to stash the overlapping files first.
+      await opRun('Checking main for conflicts…', () => ipc.fetch(repoPath))
+      const overlap = await ipc.updateFromMainConflicts(repoPath).catch(() => [] as string[])
+      if (overlap.length > 0) {
+        const ok = await dialog.confirm({
+          title: 'Stash changes before updating from main',
+          message: `You have uncommitted changes to ${overlap.length} file${overlap.length === 1 ? '' : 's'} that also changed in main. Merging now would overwrite them.`,
+          detail: 'Stash your changes to update safely — restore them anytime from the Stash panel.',
+          confirmLabel: 'Stash & Update',
+          cancelLabel: 'Cancel',
+        })
+        if (!ok) return
+        await opRun('Stashing local changes…', () => ipc.stashSave(repoPath, 'Auto-stash before update from main'))
+      }
       await opRun('Updating from main…', () => ipc.updateFromMain(repoPath))
       await loadBranches()
       onRefresh()

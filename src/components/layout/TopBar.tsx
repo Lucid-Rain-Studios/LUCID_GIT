@@ -207,19 +207,53 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
     finally { setSyncOp('idle') }
   }
 
+  /**
+   * A merge that was started but never concluded (MERGE_HEAD on disk) blocks
+   * every pull / update — git aborts with "You have not concluded your merge".
+   * Detect that up front and send the user to the conflict resolver instead of
+   * failing with a raw git error. Returns true when sync must not proceed.
+   */
+  const routeIfMergeInProgress = async (verb: string): Promise<boolean> => {
+    if (!repoPath) return false
+    const existingMerge = await ipc.mergeInProgress(repoPath).catch(() => null)
+    if (!existingMerge) return false
+    showStatusToast(`Finish the in-progress merge before ${verb}.`)
+    onMergeConflict?.(existingMerge.mergedBranch)
+    return true
+  }
+
   const doUpdateFromMain = async () => {
     if (!repoPath || updatingFromMain || syncOp !== 'idle') return
     setUpdatingFromMain(true)
     try {
-      await opRun(`Updating from ${defaultBranch}…`, async () => {
-        await ipc.fetch(repoPath)
-        await ipc.updateFromMain(repoPath)
-      })
+      // An unconcluded merge blocks the update — resolve it first.
+      if (await routeIfMergeInProgress(`updating from ${defaultBranch}`)) return
+      // FIRST: fetch, then check whether any uncommitted edits touch files
+      // that also changed upstream. No merge starts until this is clear —
+      // if it isn't, the user is prompted to stash the overlapping files.
+      await opRun(`Checking ${defaultBranch} for conflicts…`, () => ipc.fetch(repoPath))
+      const overlap = await ipc.updateFromMainConflicts(repoPath).catch(() => [] as string[])
+      let stashed = false
+      if (overlap.length > 0) {
+        const stashAndUpdate = await useDialogStore.getState().confirm({
+          title: `Stash changes before updating from ${defaultBranch}`,
+          message: `You have uncommitted changes to ${overlap.length} file${overlap.length === 1 ? '' : 's'} that also changed in ${defaultBranch}. Merging now would overwrite them.`,
+          detail: 'Stash your changes to update safely — restore them anytime from the Stash panel.',
+          confirmLabel: 'Stash & Update',
+          cancelLabel: 'Cancel',
+        })
+        if (!stashAndUpdate) return
+        await opRun('Stashing local changes…', () => ipc.stashSave(repoPath, `Auto-stash before update from ${defaultBranch}`))
+        stashed = true
+      }
+      await opRun(`Updating from ${defaultBranch}…`, () => ipc.updateFromMain(repoPath))
       markFetchPerformed(repoPath)
       sessionTopBarFetched.add(repoPath)
       setHasFetched(true)
       await refreshRevisionState()
-      showStatusToast(`Update from ${defaultBranch} successful.`)
+      showStatusToast(stashed
+        ? `Update from ${defaultBranch} successful — your changes are in the stash.`
+        : `Update from ${defaultBranch} successful.`)
     } catch (e) {
       const s = String(e)
       // Always surface the underlying git error (file lock, conflict, etc.)
@@ -277,24 +311,33 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
 
   const doTopBarPull = async () => {
     if (!repoPath || syncOp !== 'idle') return
-
-    // Block the pull when the working tree is dirty. A mid-pull failure (e.g.
-    // Unreal Editor holding a .uasset open) can otherwise leave the index in
-    // a half-merged state and silently move staged changes back to unstaged.
-    if (hasChanges) {
-      const stashAndPull = await useDialogStore.getState().confirm({
-        title: 'Commit or stash before pulling',
-        message: 'You have uncommitted changes. Pulling now risks leaving them in an inconsistent state if Git can\'t write to a file that another program (like Unreal Editor) has open.',
-        detail: 'Commit your changes in the Changes panel, or stash them and pull now.',
-        confirmLabel: 'Stash & Pull',
-        cancelLabel: 'Cancel',
-      })
-      if (!stashAndPull) return
-    }
-
     setSyncOp('pulling'); setSyncErr(null)
-    const stashed = hasChanges && useRepoStore.getState().fileStatus.length > 0
+
     try {
+      // An unconcluded merge blocks the pull — resolve it first.
+      if (await routeIfMergeInProgress('pulling')) return
+      // FIRST: fetch, then check whether local edits overlap the incoming
+      // changes. The pull only proceeds once that is clear — if it isn't, the
+      // user is prompted to stash the overlapping files first. Edits to
+      // unrelated files merge in cleanly with no prompt.
+      let willStash = false
+      if (hasChanges) {
+        await opRun('Checking for conflicts…', () => ipc.fetch(repoPath))
+        const overlap = await ipc.mergeOverlapFiles(repoPath, '@{u}').catch(() => [] as string[])
+        if (overlap.length > 0) {
+          const stashAndPull = await useDialogStore.getState().confirm({
+            title: 'Commit or stash before pulling',
+            message: `You have uncommitted changes to ${overlap.length} file${overlap.length === 1 ? '' : 's'} that also changed on the remote. Pulling now would overwrite them.`,
+            detail: 'Commit your changes in the Changes panel, or stash them and pull now.',
+            confirmLabel: 'Stash & Pull',
+            cancelLabel: 'Cancel',
+          })
+          if (!stashAndPull) return
+          willStash = true
+        }
+      }
+
+      const stashed = willStash && useRepoStore.getState().fileStatus.length > 0
       if (stashed) {
         await opRun('Stashing local changes…', () => ipc.stashSave(repoPath, 'Auto-stash before pull'))
       }
@@ -303,6 +346,12 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
       showStatusToast(stashed ? 'Pull successful — your changes are in the stash.' : 'Pull successful.')
     } catch (e) {
       const s = String(e)
+      // An unconcluded merge (MERGE_HEAD) — git reports "commit your changes
+      // before merging". Route to the conflict resolver rather than the
+      // generic message below, which misdescribes the actual problem.
+      if (/merge_head|not concluded your merge|unfinished merge/i.test(s)) {
+        if (await routeIfMergeInProgress('pulling')) return
+      }
       if (s.toLowerCase().includes('please commit') || s.toLowerCase().includes('local changes')) {
         showStatusToast('Please commit your local changes before pulling.')
         return

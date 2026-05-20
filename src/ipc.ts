@@ -570,6 +570,8 @@ export interface LucidGitAPI {
   getRemoteUrl:  (repoPath: string) => Promise<string | null>
   getSyncStatus: (repoPath: string) => Promise<SyncStatus>
   updateFromMain:(repoPath: string) => Promise<void>
+  mergeOverlapFiles:(repoPath: string, mergeRef: string) => Promise<string[]>
+  updateFromMainConflicts:(repoPath: string) => Promise<string[]>
   diff:           (repoPath: string, filePath: string, staged: boolean) => Promise<DiffContent>
   discard:        (repoPath: string, paths: string[], isUntracked: boolean) => Promise<void>
   discardAll:     (repoPath: string) => Promise<void>

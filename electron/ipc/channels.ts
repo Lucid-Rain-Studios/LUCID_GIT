@@ -35,6 +35,8 @@ export const CHANNELS = {
   GIT_REMOTE_URL:    'git:remote-url',
   GIT_SYNC_STATUS:   'git:sync-status',
   GIT_UPDATE_FROM_MAIN: 'git:update-from-main',
+  GIT_UPDATE_FROM_MAIN_CONFLICTS: 'git:update-from-main-conflicts',
+  GIT_MERGE_OVERLAP:    'git:merge-overlap',
   GIT_DIFF:             'git:diff',
   GIT_DISCARD:          'git:discard',
   GIT_DISCARD_ALL:      'git:discard-all',

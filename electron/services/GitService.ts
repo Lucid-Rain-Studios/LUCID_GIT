@@ -109,9 +109,33 @@ async function runInPathChunks(
 // ── GitService ────────────────────────────────────────────────────────────────
 
 class GitService {
-  private async hasUncommittedChanges(repoPath: string): Promise<boolean> {
-    const res = await execSafe(['status', '--porcelain=v1', '-z'], repoPath)
-    return res.exitCode === 0 && res.stdout.length > 0
+  /**
+   * Uncommitted local files that an incoming merge of `mergeRef` into HEAD
+   * would also modify. Git refuses a merge / pull only for this overlap set —
+   * an empty result means a dirty working tree is still safe to merge into,
+   * because the local edits and the incoming changes touch different files.
+   */
+  async mergeOverlapFiles(repoPath: string, mergeRef: string): Promise<string[]> {
+    const [localFiles, incoming] = await Promise.all([
+      this.status(repoPath).then(s => s.map(f => f.path)).catch(() => [] as string[]),
+      execSafe(['diff', '--name-only', '-z', 'HEAD', mergeRef], repoPath),
+    ])
+    if (incoming.exitCode !== 0 || localFiles.length === 0) return []
+    const incomingSet = new Set(incoming.stdout.split('\0').filter(Boolean))
+    return localFiles.filter(p => incomingSet.has(p))
+  }
+
+  /**
+   * Preflight for `updateFromMain`: report uncommitted local files whose edits
+   * overlap the incoming changes from the remote default branch. Callers MUST
+   * fetch first so origin refs are current, and MUST NOT start the merge while
+   * this returns a non-empty list — stash or commit the overlap instead.
+   */
+  async updateFromMainConflicts(repoPath: string): Promise<string[]> {
+    const defaultBranch = await this.remoteDefaultBranch(repoPath)
+    const check = await execSafe(['rev-parse', '--verify', defaultBranch.ref], repoPath)
+    if (check.exitCode !== 0) return []
+    return this.mergeOverlapFiles(repoPath, defaultBranch.ref)
   }
 
   private async remoteDefaultBranch(repoPath: string): Promise<{ name: string; ref: string }> {
@@ -589,10 +613,6 @@ class GitService {
 
   /** Fetch origin then merge origin/main into HEAD. Streams progress. */
   async updateFromMain(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
-    if (await this.hasUncommittedChanges(repoPath)) {
-      throw new Error('Update from main needs a clean working tree. Commit or stash your current changes first so incoming files are not mixed with local edits.')
-    }
-
     const token = await authService.getCurrentToken()
     const remoteUrl = await this.getRemoteUrl(repoPath)
 
@@ -605,6 +625,19 @@ class GitService {
     const check = await execSafe(['rev-parse', '--verify', defaultBranch.ref], repoPath)
     if (check.exitCode !== 0) {
       throw new Error(`Could not find ${defaultBranch.ref}`)
+    }
+
+    // Only block when local edits overlap the incoming files — git would
+    // refuse those anyway. Edits to unrelated files merge in cleanly, so the
+    // user can keep working without first stashing or committing.
+    const overlap = await this.mergeOverlapFiles(repoPath, defaultBranch.ref)
+    if (overlap.length > 0) {
+      const shown = overlap.slice(0, 10).join('\n')
+      const more = overlap.length > 10 ? `\n…and ${overlap.length - 10} more` : ''
+      throw new Error(
+        `Your local changes would be overwritten by the update from ${defaultBranch.name}. ` +
+        `Commit or stash ${overlap.length} file${overlap.length === 1 ? '' : 's'} that also changed upstream:\n${shown}${more}`
+      )
     }
 
     // Pre-count files that will change in the merge, so the synthetic stage

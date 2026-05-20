@@ -289,6 +289,14 @@ export function registerHandlers(): void {
     })
   })
 
+  handle(CHANNELS.GIT_MERGE_OVERLAP, async (_event, repoPath: string, mergeRef: string) => {
+    return gitService.mergeOverlapFiles(repoPath, mergeRef)
+  })
+
+  handle(CHANNELS.GIT_UPDATE_FROM_MAIN_CONFLICTS, async (_event, repoPath: string) => {
+    return gitService.updateFromMainConflicts(repoPath)
+  })
+
   handle(CHANNELS.GIT_DIFF, async (_event, repoPath: string, filePath: string, staged: boolean) => {
     return gitService.diff(repoPath, filePath, staged)
   })
