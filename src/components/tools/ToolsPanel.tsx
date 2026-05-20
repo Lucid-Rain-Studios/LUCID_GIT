@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { ipc, BranchInfo, CommitEntry, LfsLocksMaintenanceResult } from '@/ipc'
+import { ipc, BranchInfo, CommitEntry } from '@/ipc'
 import { useOperationStore } from '@/stores/operationStore'
 import { useDialogStore } from '@/stores/dialogStore'
 import { useRepoStore } from '@/stores/repoStore'
@@ -12,14 +12,13 @@ interface ToolsPanelProps {
   onCherryPickConflict?: () => void
 }
 
-type ToolId = 'restore' | 'revert' | 'cherrypick' | 'reset' | 'lfslocks'
+type ToolId = 'restore' | 'revert' | 'cherrypick' | 'reset'
 
 const TOOLS: { id: ToolId; label: string; icon: string; desc: string }[] = [
   { id: 'restore',    label: 'Restore File',    icon: '↩', desc: 'Bring a file back to its state at any past commit' },
   { id: 'revert',     label: 'Revert Commit',   icon: '⎌', desc: 'Create a new commit that undoes a specific commit' },
   { id: 'cherrypick', label: 'Cherry-pick',      icon: '🍒', desc: 'Apply changes from a single commit to HEAD' },
   { id: 'reset',      label: 'Reset to Commit',  icon: '⏮', desc: 'Move HEAD and optionally the index / working tree' },
-  { id: 'lfslocks',   label: 'LFS Locks',        icon: 'LFS', desc: 'Check and refresh Git LFS lock cache state' },
 ]
 
 export function ToolsPanel({ repoPath, onRefresh, onCherryPickConflict }: ToolsPanelProps) {
@@ -54,7 +53,6 @@ export function ToolsPanel({ repoPath, onRefresh, onCherryPickConflict }: ToolsP
         {activeTool === 'revert'     && <RevertTool     repoPath={repoPath} run={run} />}
         {activeTool === 'cherrypick' && <CherryPickTool repoPath={repoPath} onRefresh={onRefresh} onConflict={onCherryPickConflict} />}
         {activeTool === 'reset'      && <ResetTool      repoPath={repoPath} run={run} />}
-        {activeTool === 'lfslocks'   && <LfsLocksTool   repoPath={repoPath} onRefresh={onRefresh} />}
       </div>
     </div>
   )
@@ -710,125 +708,6 @@ function ResetTool({ repoPath, run }: { repoPath: string; run: (label: string, f
 }
 
 // ── Reusable toggle ────────────────────────────────────────────────────────────
-
-function LfsLocksTool({ repoPath, onRefresh }: { repoPath: string; onRefresh: () => void }) {
-  const [result, setResult] = useState<LfsLocksMaintenanceResult | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const opRun = useOperationStore(s => s.run)
-  const dialog = useDialogStore()
-
-  const doCheck = async () => {
-    setError(null)
-    try {
-      const next = await opRun('Checking LFS locks...', () => ipc.lfsLocksCheck(repoPath))
-      setResult(next)
-    } catch (e) {
-      setError(String(e))
-    }
-  }
-
-  const doRepair = async () => {
-    const ok = await dialog.confirm({
-      title: 'Clear LFS lock cache',
-      message: 'Clear Git LFS lockcache.db and refresh locks from the server?',
-      detail: 'This only removes local LFS lock cache database files. It does not unlock files or change commits.',
-      confirmLabel: 'Clear & Refresh',
-      danger: true,
-    })
-    if (!ok) return
-    setError(null)
-    try {
-      const next = await opRun('Refreshing LFS locks...', () => ipc.lfsLocksRepair(repoPath))
-      setResult(next)
-      onRefresh()
-    } catch (e) {
-      setError(String(e))
-    }
-  }
-
-  return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <ToolHeader title="LFS Locks" desc="Check Git LFS lock health, clear lockcache.db, and refresh locks from the server." />
-      <div style={{ flex: 1, overflowY: 'auto', padding: '18px 18px' }}>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
-          <ActionButton label="Check Locks" onClick={doCheck} />
-          <ActionButton label="Clear Cache & Refresh" onClick={doRepair} danger />
-        </div>
-
-        <div style={{ marginBottom: 18, padding: 14, background: '#161a27', border: '1px solid #252d42', borderRadius: 6 }}>
-          <div style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 12, color: '#dde1f0', fontWeight: 600, marginBottom: 6 }}>What this does</div>
-          <div style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 12, color: '#8b94b0', lineHeight: 1.6 }}>
-            Check runs <code style={{ fontFamily: 'var(--lg-font-mono)' }}>git lfs locks --verify</code> when supported, falls back to <code style={{ fontFamily: 'var(--lg-font-mono)' }}>git lfs locks --json</code>, and inspects local <code style={{ fontFamily: 'var(--lg-font-mono)' }}>lockcache.db</code> files. Refresh deletes local cache databases, then asks Git LFS to rebuild lock state from the remote.
-          </div>
-        </div>
-
-        {error && (
-          <div style={{ marginBottom: 14, padding: '10px 12px', background: 'rgba(232,69,69,0.1)', border: '1px solid rgba(232,69,69,0.35)', borderRadius: 6, fontFamily: 'var(--lg-font-ui)', fontSize: 12, color: '#e84545' }}>
-            {error}
-          </div>
-        )}
-
-        {result && (
-          <>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, marginBottom: 14 }}>
-              <MiniStat label="Status" value={result.hasErrors ? 'Error' : result.usedVerify ? 'Verified' : 'Checked'} warn={result.hasErrors} />
-              <MiniStat label="Locks" value={result.lockCount === null ? 'Unknown' : String(result.lockCount)} />
-              <MiniStat label="Cache DBs" value={String(result.lockCacheFiles.length)} />
-              <MiniStat label="Deleted" value={String(result.deletedLockCacheFiles.length)} />
-            </div>
-
-            <div style={{ marginBottom: 14, padding: '10px 12px', background: result.hasErrors ? 'rgba(245,168,50,0.08)' : 'rgba(46,197,115,0.08)', border: `1px solid ${result.hasErrors ? 'rgba(245,168,50,0.25)' : 'rgba(46,197,115,0.25)'}`, borderRadius: 6 }}>
-              <div style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 12, color: result.hasErrors ? '#f5a832' : '#2ec573', fontWeight: 600 }}>{result.summary}</div>
-              {result.verifyError && result.hasErrors && (
-                <pre style={{ margin: '8px 0 0', whiteSpace: 'pre-wrap', fontFamily: 'var(--lg-font-mono)', fontSize: 11, color: '#e84545' }}>{result.verifyError}</pre>
-              )}
-              {result.verifyError && !result.hasErrors && (
-                <pre style={{ margin: '8px 0 0', whiteSpace: 'pre-wrap', fontFamily: 'var(--lg-font-mono)', fontSize: 11, color: '#8b94b0' }}>{result.verifyError}</pre>
-              )}
-            </div>
-
-            <Field label="Lock cache files">
-              {result.lockCacheFiles.length === 0 ? (
-                <div style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 12, color: '#4e5870' }}>No lockcache.db files found yet.</div>
-              ) : (
-                <div style={{ border: '1px solid #252d42', borderRadius: 6, overflow: 'hidden' }}>
-                  {result.lockCacheFiles.map(file => (
-                    <div key={file.path} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderBottom: '1px solid #252d42' }}>
-                      <span style={{ width: 58, fontFamily: 'var(--lg-font-mono)', fontSize: 10, color: file.integrity === 'ok' ? '#2ec573' : file.integrity === 'corrupt' ? '#e84545' : '#f5a832', textTransform: 'uppercase' }}>{file.integrity}</span>
-                      <FilePathText path={file.path} style={{ flex: 1, minWidth: 0, fontFamily: 'var(--lg-font-mono)', fontSize: 11, color: '#8b94b0' }} />
-                      <span style={{ fontFamily: 'var(--lg-font-mono)', fontSize: 10, color: '#4e5870' }}>{formatBytes(file.sizeBytes)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Field>
-          </>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function MiniStat({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
-  return (
-    <div style={{ padding: '8px 10px', background: '#161a27', border: `1px solid ${warn ? 'rgba(245,168,50,0.45)' : '#252d42'}`, borderRadius: 6 }}>
-      <div style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 10, color: '#4e5870', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>{label}</div>
-      <div style={{ fontFamily: 'var(--lg-font-mono)', fontSize: 12, color: warn ? '#f5a832' : '#dde1f0', fontWeight: 600 }}>{value}</div>
-    </div>
-  )
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  const units = ['KB', 'MB', 'GB', 'TB']
-  let value = bytes / 1024
-  let unit = 0
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
-    unit++
-  }
-  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unit]}`
-}
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
