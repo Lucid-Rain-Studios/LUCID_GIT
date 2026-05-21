@@ -48,6 +48,9 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
       if (cancelled) return
       setLastMessage(msg)
       setHeadPushed(pushed)
+      // Amending a pushed commit would rewrite already-shared history, so the
+      // option is only available for local commits — clear any stale toggle.
+      if (pushed) setAmend(false)
     })
     return () => { cancelled = true }
   }, [repoPath, fileStatus.length])
@@ -139,17 +142,6 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
   const handleCommit = async () => {
     if (!canCommit || !repoPath) return
 
-    if (amend && headPushed) {
-      const ok = await dialog.confirm({
-        title: 'Amend a pushed commit?',
-        message: 'The last commit has already been pushed to the remote.',
-        detail: 'Amending will rewrite history. Anyone with the old commit will need to force-pull or rebase. You may also need to force-push to update the remote.',
-        confirmLabel: 'Amend anyway',
-        danger: true,
-      })
-      if (!ok) return
-    }
-
     // Run pre-commit hook inline first
     setHookState('running')
     setHookOutput('')
@@ -209,27 +201,38 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
       {/* Amend toggle */}
       {lastMessage !== null && (
         <label
-          className="flex items-center gap-2 cursor-pointer select-none min-w-0"
-          title={lastMessage}
+          className={cn(
+            'flex items-center gap-2 select-none min-w-0',
+            headPushed ? 'cursor-not-allowed' : 'cursor-pointer',
+          )}
+          title={
+            headPushed
+              ? 'The last commit is already pushed — amending it would rewrite shared history. Make a new commit instead.'
+              : lastMessage
+          }
         >
           <AppCheckbox
             checked={amend}
             onChange={() => setAmend(a => !a)}
-            color={headPushed ? '#e84545' : '#4a9eff'}
+            disabled={headPushed}
+            color="#4a9eff"
           />
-          <span className="flex items-baseline gap-1 min-w-0 flex-1 text-[10px] font-mono leading-none">
+          <span className={cn(
+            'flex items-baseline gap-1 min-w-0 flex-1 text-[10px] font-mono leading-none',
+            headPushed && 'opacity-50',
+          )}>
             <span className="text-lg-text-secondary whitespace-nowrap">Amend previous commit</span>
             <span className="text-lg-text-secondary/60 whitespace-nowrap">—</span>
             <span className="text-lg-text-secondary/70 truncate min-w-0">
               {lastMessage.split('\n')[0]}
             </span>
           </span>
-          {amend && headPushed && (
+          {headPushed && (
             <span
-              className="text-[9px] font-mono text-lg-error font-semibold shrink-0"
-              title="HEAD is reachable from the upstream branch — amending will rewrite shared history."
+              className="text-[9px] font-mono text-lg-text-secondary/70 font-semibold shrink-0"
+              title="The last commit is already on the remote."
             >
-              PUSHED ⚠
+              PUSHED
             </span>
           )}
         </label>
