@@ -2529,20 +2529,26 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
             </div>
             <CommitBox deferredStagePaths={[...timelineStagePaths]} />
             {/* Stash section */}
-            <div style={{ borderTop: '1px solid #1e2436', flexShrink: 0 }}>
+            <div style={{ flexShrink: 0 }}>
               <button
                 onClick={toggleStash}
                 style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: 6,
-                  height: 30, paddingLeft: 12, paddingRight: 10,
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  color: '#3a4260', fontFamily: 'var(--lg-font-ui)', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
+                  width: '100%', display: 'flex', alignItems: 'center', gap: 7,
+                  height: 34, paddingLeft: 12, paddingRight: 10,
+                  background: stashOpen ? 'rgba(74,158,255,0.22)' : 'rgba(74,158,255,0.15)',
+                  border: 'none', borderTop: '1px solid rgba(74,158,255,0.4)', cursor: 'pointer',
+                  color: '#4a9eff', fontFamily: 'var(--lg-font-ui)', fontSize: 10.5, fontWeight: 700,
+                  letterSpacing: '0.1em', textTransform: 'uppercase',
+                  transition: 'background 0.12s',
                 }}
-                onMouseEnter={e => (e.currentTarget.style.color = '#6a7490')}
-                onMouseLeave={e => (e.currentTarget.style.color = '#3a4260')}
+                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(74,158,255,0.3)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = stashOpen ? 'rgba(74,158,255,0.22)' : 'rgba(74,158,255,0.15)' }}
               >
-                <svg width="8" height="8" viewBox="0 0 8 8" fill="none" style={{ transition: 'transform 0.15s', transform: stashOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
-                  <path d="M2 1.5l3 2.5-3 2.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                <svg
+                  width="9" height="9" viewBox="0 0 8 8" fill="none"
+                  style={{ flexShrink: 0, transition: 'transform 0.15s', transform: stashOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                >
+                  <path d="M2 1.5l3 2.5-3 2.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
                 Stashes
               </button>

@@ -979,16 +979,22 @@ class GitService {
   }
 
   /** Dry-run merge: returns files that would conflict. Does not modify the working tree. */
-  async mergePreview(repoPath: string, targetBranch: string): Promise<ConflictPreviewFile[]> {
+  async mergePreview(repoPath: string, targetBranch: string, baseBranch?: string): Promise<ConflictPreviewFile[]> {
     const targetRef = await this.resolveBranchRef(repoPath, targetBranch)
+    // "Ours" side: an explicit base branch (e.g. a PR's base branch) when one
+    // is given, otherwise the working tree's current branch (HEAD). Passing a
+    // base branch keeps the preview correct even when the user is checked out
+    // on an unrelated branch.
+    const ourRef = baseBranch ? await this.resolveBranchRef(repoPath, baseBranch) : 'HEAD'
+
     // 1. Find the common ancestor
-    const baseRes = await execSafe(['merge-base', 'HEAD', targetRef], repoPath)
+    const baseRes = await execSafe(['merge-base', ourRef, targetRef], repoPath)
     if (baseRes.exitCode !== 0) throw new Error(`Could not find merge base with "${targetBranch}"`)
     const base = baseRes.stdout.trim()
 
     // 2. Files changed on each side since the merge base
     const [oursRes, theirsRes] = await Promise.all([
-      execSafe(['diff', '--name-status', base, 'HEAD'], repoPath),
+      execSafe(['diff', '--name-status', base, ourRef], repoPath),
       execSafe(['diff', '--name-status', base, targetRef], repoPath),
     ])
 
@@ -1010,7 +1016,7 @@ class GitService {
     const theirsMap = parseNameStatus(theirsRes.stdout)
 
     const UE_EXTS = new Set(['.uasset', '.umap', '.udk', '.ubulk', '.uexp', '.ucas'])
-    const currentBranch = await this.currentBranch(repoPath)
+    const ourLabel = baseBranch ?? await this.currentBranch(repoPath)
 
     const conflicts: ConflictPreviewFile[] = []
     for (const [filePath, oursStatus] of oursMap) {
@@ -1028,7 +1034,7 @@ class GitService {
         : 'content'
 
       const [oursInfo, theirsInfo] = await Promise.all([
-        this._contributorInfo(repoPath, filePath, 'HEAD', currentBranch),
+        this._contributorInfo(repoPath, filePath, ourRef, ourLabel),
         this._contributorInfo(repoPath, filePath, targetRef, targetBranch),
       ])
 

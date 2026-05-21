@@ -591,7 +591,7 @@ export interface LucidGitAPI {
   applyPatch:     (repoPath: string, patch: string, reverse?: boolean) => Promise<void>
   checkout: (repoPath: string, branch: string) => Promise<void>
   branchDiff: (repoPath: string, base: string, compare: string) => Promise<BranchDiffSummary>
-  mergePreview: (repoPath: string, targetBranch: string) => Promise<ConflictPreviewFile[]>
+  mergePreview: (repoPath: string, targetBranch: string, baseBranch?: string) => Promise<ConflictPreviewFile[]>
   potentialMergeConflicts: (repoPath: string, mode: 'lightweight' | 'deep') => Promise<PotentialMergeConflictReport>
   merge: (repoPath: string, targetBranch: string) => Promise<void>
   mergeGetConflictText: (repoPath: string, filePath: string) => Promise<MergeConflictText>

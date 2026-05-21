@@ -38,6 +38,29 @@ export function Tooltip({ content, children, side = 'top', delay = 500, asSvgGro
     return () => { clearTimeout(timer.current) }
   }, [])
 
+  // Safety net against a stranded tooltip. `onMouseLeave` can be missed when
+  // the hovered node is swapped out by a re-render, the panel scrolls, or the
+  // window loses focus — leaving the tooltip stuck on screen. While it is
+  // visible, dismiss it as soon as the pointer moves off the wrapper, the
+  // page scrolls, or the window blurs.
+  useEffect(() => {
+    if (!rect) return
+    const onMove = (e: MouseEvent) => {
+      const el = wrapRef.current as Element | null
+      const target = e.target as Node | null
+      if (el && target && el.contains(target)) return
+      hide()
+    }
+    document.addEventListener('mousemove', onMove, true)
+    window.addEventListener('scroll', hide, true)
+    window.addEventListener('blur', hide)
+    return () => {
+      document.removeEventListener('mousemove', onMove, true)
+      window.removeEventListener('scroll', hide, true)
+      window.removeEventListener('blur', hide)
+    }
+  }, [rect, hide])
+
   const tipStyle: React.CSSProperties = rect ? {
     position: 'fixed',
     zIndex: 9999,

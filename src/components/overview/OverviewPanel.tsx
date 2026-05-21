@@ -395,18 +395,34 @@ function ResolveDialog({
   const showStatusToast = useStatusToastStore(s => s.show)
   const [conflicts, setConflicts] = useState<ConflictPreviewFile[]>([])
   const [conflictChoices, setConflictChoices] = useState<Record<string, 'head' | 'base'>>({})
-  const [conflictLoading, setConflictLoading] = useState(false)
+  const [conflictLoading, setConflictLoading] = useState(true)
   const [conflictError, setConflictError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [branchDiff, setBranchDiff] = useState<BranchDiffSummary | null>(null)
-  const [branchDiffLoading, setBranchDiffLoading] = useState(false)
+  const [branchDiffLoading, setBranchDiffLoading] = useState(true)
   const [branchDiffError, setBranchDiffError] = useState<string | null>(null)
+  // Previews stay gated until a fresh fetch lands so they reflect the PR's
+  // current remote state rather than a stale local snapshot.
+  const [refsFetched, setRefsFetched] = useState(false)
+
+  // Fetch the latest remote refs once so the conflict / commit previews below
+  // reflect the PR's current state rather than a stale local snapshot.
+  useEffect(() => {
+    let cancelled = false
+    ipc.fetch(repoPath)
+      .then(() => markFetchPerformed(repoPath))
+      .catch(() => { /* previews fall back to whatever refs are local */ })
+      .finally(() => { if (!cancelled) setRefsFetched(true) })
+    return () => { cancelled = true }
+  }, [repoPath])
 
   useEffect(() => {
-    if (choice !== 'accept') return
+    if (choice !== 'accept' || !refsFetched) return
     setConflictLoading(true)
     setConflictError(null)
-    ipc.mergePreview(repoPath, pr.headBranch)
+    // Preview conflicts between the PR's own base and head branches — never
+    // the branch the user happens to be checked out on.
+    ipc.mergePreview(repoPath, pr.headBranch, pr.baseBranch)
       .then(files => {
         setConflicts(files)
         setConflictChoices(prev => {
@@ -423,10 +439,10 @@ function ResolveDialog({
         setConflictError(String(e))
       })
       .finally(() => setConflictLoading(false))
-  }, [choice, repoPath, pr.headBranch])
+  }, [choice, repoPath, pr.headBranch, pr.baseBranch, refsFetched])
 
   useEffect(() => {
-    if (choice !== 'accept') return
+    if (choice !== 'accept' || !refsFetched) return
     setBranchDiffLoading(true)
     setBranchDiffError(null)
     ipc.branchDiff(repoPath, pr.baseBranch, pr.headBranch)
@@ -436,7 +452,7 @@ function ResolveDialog({
         setBranchDiffError(String(e))
       })
       .finally(() => setBranchDiffLoading(false))
-  }, [choice, repoPath, pr.baseBranch, pr.headBranch])
+  }, [choice, repoPath, pr.baseBranch, pr.headBranch, refsFetched])
 
   const allConflictChoicesMade = conflicts.length > 0 && conflicts.every(file => conflictChoices[file.path])
 

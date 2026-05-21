@@ -405,9 +405,9 @@ export function registerHandlers(): void {
     return runGitOp('Checkout', () => gitService.checkout(repoPath, branch))
   })
 
-  handle(CHANNELS.GIT_MERGE_PREVIEW, async (_event, repoPath: string, targetBranch: string) => {
-    const conflicts = await gitService.mergePreview(repoPath, targetBranch)
-    const ourBranch = await gitService.currentBranch(repoPath)
+  handle(CHANNELS.GIT_MERGE_PREVIEW, async (_event, repoPath: string, targetBranch: string, baseBranch?: string) => {
+    const conflicts = await gitService.mergePreview(repoPath, targetBranch, baseBranch)
+    const ourBranch = baseBranch ?? await gitService.currentBranch(repoPath)
     for (const c of conflicts) {
       heatmapService.recordConflictEvent({
         repoPath, filePath: c.path,
