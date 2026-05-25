@@ -99,7 +99,15 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
   const [recoveredMergeBranch, setRecoveredMergeBranch] = useState<string | null>(null)
   const opRun = useOperationStore(s => s.run)
   const displayMergeBranch = recoveredMergeBranch ?? targetBranch
-  const allChoicesMade = conflicts.length > 0 && conflicts.every(c => preselectedChoices[c.path])
+  // Auto-resolved files don't need a choice — git already wrote one to the
+  // index and the user can opt-in to override. Only truly unmerged files
+  // (with stages 1/2/3) gate "Complete merge".
+  const unresolvedFiles = conflicts.filter(c => !c.autoResolved)
+  const allChoicesMade = unresolvedFiles.length > 0 && unresolvedFiles.every(c => preselectedChoices[c.path])
+  // A merge can already be in progress with zero unresolved files — e.g. git
+  // auto-resolved everything but stopped before committing. In that case the
+  // user just needs to finalize; there are no per-file choices required.
+  const canFinalizeWithoutChoices = inConflictResolution && unresolvedFiles.length === 0
 
   useEffect(() => {
     if (!repoPath) return
@@ -264,9 +272,13 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
           {!loading && !error && conflicts.length === 0 && (
             <div className="flex flex-col items-center justify-center py-10 gap-2">
               <div className="text-lg-success text-2xl">✓</div>
-              <div className="text-xs font-mono text-lg-text-primary font-semibold">No conflicts</div>
-              <div className="text-[10px] font-mono text-lg-text-secondary">
-                This merge can be applied cleanly.
+              <div className="text-xs font-mono text-lg-text-primary font-semibold">
+                {inConflictResolution ? 'Merge ready to finalize' : 'No conflicts'}
+              </div>
+              <div className="text-[10px] font-mono text-lg-text-secondary text-center max-w-sm">
+                {inConflictResolution
+                  ? 'A merge from this branch is already in progress and has no unresolved files. Complete it to commit, or abort to discard.'
+                  : 'This merge can be applied cleanly.'}
               </div>
             </div>
           )}
@@ -304,6 +316,11 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
               <div className="px-4 py-2 border-b border-lg-border bg-lg-bg-secondary">
                 <span className="text-[10px] font-mono text-lg-warning">
                   ⚠ {conflicts.length} file{conflicts.length !== 1 ? 's' : ''} will conflict
+                  {conflicts.some(c => c.autoResolved) && (
+                    <span className="ml-2 text-lg-text-secondary">
+                      · {conflicts.filter(c => c.autoResolved).length} auto-resolved (review below)
+                    </span>
+                  )}
                 </span>
               </div>
               {conflicts.map(file => (
@@ -312,6 +329,14 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
                     <div className="flex items-center gap-2 mb-2">
                       <span className="text-sm">{TYPE_ICON[file.type]}</span>
                       <FilePathText path={file.path} className="flex-1 text-xs font-mono text-lg-text-primary truncate" />
+                      {file.autoResolved && (
+                        <span
+                          className="shrink-0 px-1.5 py-0.5 rounded text-[9px] font-mono bg-lg-accent/20 text-lg-accent"
+                          title="Git auto-picked one side. Confirm or flip it before completing the merge."
+                        >
+                          Auto-resolved
+                        </span>
+                      )}
                       <span className={cn(
                         'shrink-0 px-1.5 py-0.5 rounded text-[9px] font-mono',
                         file.conflictType === 'content'
@@ -399,9 +424,11 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
             {conflicts.length > 0 && (
               <div className="text-[10px] font-mono text-lg-text-secondary">
                 {inConflictResolution
-                  ? allChoicesMade
-                    ? 'All conflicts have a choice — complete the merge to commit.'
-                    : `Pick a side for each file (${Object.keys(preselectedChoices).filter(p => conflicts.some(c => c.path === p)).length}/${conflicts.length} chosen).`
+                  ? unresolvedFiles.length === 0
+                    ? 'Git auto-resolved every conflict. Review the picks above (optional) and complete the merge.'
+                    : allChoicesMade
+                      ? 'All conflicts have a choice — complete the merge to commit.'
+                      : `Pick a side for each conflicted file (${unresolvedFiles.filter(c => preselectedChoices[c.path]).length}/${unresolvedFiles.length} chosen).`
                   : 'Pick a preferred side for each file before merging.'}
               </div>
             )}
@@ -419,9 +446,9 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
               {inConflictResolution ? (
                 <button
                   onClick={finalizeMerge}
-                  disabled={merging || !allChoicesMade}
+                  disabled={merging || (!allChoicesMade && !canFinalizeWithoutChoices)}
                   className="px-3 h-7 rounded text-[11px] font-mono bg-lg-success/20 border border-lg-success/60 text-lg-success hover:bg-lg-success/30 transition-colors disabled:opacity-40"
-                  title={!allChoicesMade ? 'Pick a side for every conflicted file first' : undefined}
+                  title={!allChoicesMade && !canFinalizeWithoutChoices ? 'Pick a side for every conflicted file first' : undefined}
                 >
                   {merging ? 'Completing merge…' : 'Complete merge'}
                 </button>

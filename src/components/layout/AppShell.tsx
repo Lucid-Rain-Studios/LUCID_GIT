@@ -678,6 +678,14 @@ export function AppShell() {
       <ErrorPanel
         onReauth={() => setShowLoginDialog(true)}
         onNavigateTab={(tab) => setLeftTab(tab as TabId)}
+        onOpenMergeResolver={async () => {
+          if (!repoPath) return
+          // Find whatever branch the in-progress merge is against and open
+          // the MergePreviewDialog on it. Falling back to the current branch
+          // would render the wrong "ours/theirs" labels.
+          const inProgress = await ipc.mergeInProgress(repoPath).catch(() => null)
+          setMergeTarget(inProgress?.mergedBranch ?? null)
+        }}
       />
       <CommandPalette
         open={cmdOpen}

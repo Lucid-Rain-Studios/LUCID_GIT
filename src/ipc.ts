@@ -66,6 +66,12 @@ export interface ConflictPreviewFile {
   conflictType: 'content' | 'binary' | 'delete-modify'
   ours: ContributorInfo
   theirs: ContributorInfo
+  /**
+   * True when this file was modified on both sides but git auto-resolved it
+   * during the merge (typically a binary/LFS file with a `merge=ours` driver).
+   * The UI still surfaces it so the user can review/override the silent pick.
+   */
+  autoResolved?: boolean
 }
 
 export interface PotentialMergeConflictBranch {

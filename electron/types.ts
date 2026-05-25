@@ -130,6 +130,14 @@ export interface ConflictPreviewFile {
   conflictType: 'content' | 'binary' | 'delete-modify'
   ours: ContributorInfo
   theirs: ContributorInfo
+  /**
+   * True when this file was modified on both sides since the merge base but
+   * git auto-resolved it during the merge (typically a binary/LFS file with
+   * a `merge=ours` or similar driver, where neither version has stages 1/2/3
+   * in the index). The dialog still surfaces it so the user can pick a side;
+   * the override is applied via `checkout HEAD/MERGE_HEAD -- <path>`.
+   */
+  autoResolved?: boolean
 }
 
 export interface PotentialMergeConflictBranch {

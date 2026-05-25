@@ -346,12 +346,13 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
       showStatusToast(stashed ? 'Pull successful — your changes are in the stash.' : 'Pull successful.')
     } catch (e) {
       const s = String(e)
-      // An unconcluded merge (MERGE_HEAD) — git reports "commit your changes
-      // before merging". Route to the conflict resolver rather than the
-      // generic message below, which misdescribes the actual problem.
-      if (/merge_head|not concluded your merge|unfinished merge/i.test(s)) {
-        if (await routeIfMergeInProgress('pulling')) return
-      }
+      // Any pull failure that leaves MERGE_HEAD behind needs the conflict
+      // resolver — git reports a variety of strings here ("Automatic merge
+      // failed", "CONFLICT (content)", "not concluded your merge", binary
+      // conflict warnings, etc.) so don't try to match all of them. If a
+      // merge is in progress, route to the dialog unconditionally — that's
+      // always the right next step regardless of what git printed.
+      if (await routeIfMergeInProgress('pulling')) return
       if (s.toLowerCase().includes('please commit') || s.toLowerCase().includes('local changes')) {
         showStatusToast('Please commit your local changes before pulling.')
         return

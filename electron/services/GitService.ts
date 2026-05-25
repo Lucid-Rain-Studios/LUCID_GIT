@@ -1081,8 +1081,25 @@ class GitService {
     const stage = choice === 'ours' ? '2' : '3'
     const stageRes = await execSafe(['ls-files', '-u', '--', filePath], repoPath)
 
-    // No unmerged stages means git auto-resolved this file; nothing to do.
-    if (!stageRes.stdout.trim()) return
+    // No unmerged stages: git auto-resolved this file (often a binary with a
+    // `merge=ours` driver). Override by checking out the requested side from
+    // the explicit ref. HEAD already holds our pre-merge version; MERGE_HEAD
+    // holds theirs. This lets the user reverse git's auto-pick.
+    if (!stageRes.stdout.trim()) {
+      const ref = choice === 'ours' ? 'HEAD' : 'MERGE_HEAD'
+      const showRes = await execSafe(['cat-file', '-e', `${ref}:${filePath}`], repoPath)
+      if (showRes.exitCode !== 0) {
+        // The chosen side deleted the file — remove it from the index/worktree.
+        await exec(['rm', '-f', '--', filePath], repoPath)
+        return
+      }
+      await this.runWithLfsRecovery(
+        repoPath,
+        await this.authenticatedArgs(repoPath, ['checkout', ref, '--', filePath]),
+      )
+      await exec(['add', '--', filePath], repoPath)
+      return
+    }
 
     const hasChosenVersion = stageRes.stdout
       .split('\n')
@@ -1163,11 +1180,55 @@ class GitService {
    * Build ConflictPreviewFile records for every unmerged file in an in-progress
    * merge. Used when the UI is recovering from a failed `merge` / `pull` /
    * `updateFromMain` and needs to show conflicts without re-running the merge.
+   *
+   * Also surfaces *auto-resolved* binary files — files modified on both sides
+   * since the merge base where git silently picked a side (typically because
+   * of a `merge=ours` driver or LFS smudge merging). These never appear in
+   * `git diff --diff-filter=U`, but the user almost always wants to review
+   * which side won and possibly override it. Marked with `autoResolved: true`.
    */
   async listInProgressConflicts(repoPath: string): Promise<ConflictPreviewFile[]> {
     const merge = await this.mergeInProgress(repoPath)
     if (!merge) return []
-    return this._buildConflictPreviews(repoPath, merge.unresolvedFiles, 'MERGE_HEAD', merge.mergedBranch)
+    const unresolved = await this._buildConflictPreviews(repoPath, merge.unresolvedFiles, 'MERGE_HEAD', merge.mergedBranch)
+    const autoResolved = await this._findAutoResolvedBinaryFiles(repoPath, merge.unresolvedFiles, merge.mergedBranch)
+    return [...unresolved, ...autoResolved]
+  }
+
+  /**
+   * Find binary/UE-asset files modified on both sides of an in-progress merge
+   * that git auto-resolved (no stages in the index). Returns ConflictPreviewFile
+   * records flagged `autoResolved` so the UI can offer a manual override.
+   */
+  private async _findAutoResolvedBinaryFiles(
+    repoPath: string,
+    unresolvedFiles: string[],
+    mergedBranch: string,
+  ): Promise<ConflictPreviewFile[]> {
+    const baseRes = await execSafe(['merge-base', 'HEAD', 'MERGE_HEAD'], repoPath)
+    if (baseRes.exitCode !== 0) return []
+    const base = baseRes.stdout.trim()
+    if (!base) return []
+
+    const [oursRes, theirsRes] = await Promise.all([
+      execSafe(['diff', '--name-only', base, 'HEAD'], repoPath),
+      execSafe(['diff', '--name-only', base, 'MERGE_HEAD'], repoPath),
+    ])
+
+    const oursChanged = new Set(oursRes.stdout.split('\n').map(s => s.trim()).filter(Boolean))
+    const theirsChanged = theirsRes.stdout.split('\n').map(s => s.trim()).filter(Boolean)
+    const unresolvedSet = new Set(unresolvedFiles)
+
+    // Both-sides-modified binaries that aren't already in the unresolved list.
+    const candidates = theirsChanged.filter(f =>
+      oursChanged.has(f) &&
+      !unresolvedSet.has(f) &&
+      BINARY_EXTS.has(path.extname(f).toLowerCase())
+    )
+
+    if (candidates.length === 0) return []
+    const previews = await this._buildConflictPreviews(repoPath, candidates, 'MERGE_HEAD', mergedBranch)
+    return previews.map(p => ({ ...p, autoResolved: true }))
   }
 
   /** Shared conflict-preview builder for merge and cherry-pick in-progress states. */

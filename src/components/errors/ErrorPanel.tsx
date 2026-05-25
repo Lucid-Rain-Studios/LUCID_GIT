@@ -9,9 +9,10 @@ import { ActionBtn } from '@/components/ui/ActionBtn'
 interface ErrorPanelProps {
   onReauth: () => void
   onNavigateTab: (tab: string) => void
+  onOpenMergeResolver: () => void | Promise<void>
 }
 
-export function ErrorPanel({ onReauth, onNavigateTab }: ErrorPanelProps) {
+export function ErrorPanel({ onReauth, onNavigateTab, onOpenMergeResolver }: ErrorPanelProps) {
   const { current, history, dismiss, clearHistory } = useErrorStore()
   const { repoPath, currentBranch } = useRepoStore()
 
@@ -47,7 +48,10 @@ export function ErrorPanel({ onReauth, onNavigateTab }: ErrorPanelProps) {
 
         case 'open-conflict-resolver':
           handleDismiss()
-          onNavigateTab('branches')
+          // The conflict resolver lives in the MergePreviewDialog, not on
+          // the Branches tab — opening it directly avoids a confusing detour
+          // where the user has to re-pull just to get the dialog to appear.
+          await onOpenMergeResolver()
           break
 
         case 'run-lfs-migrate':
