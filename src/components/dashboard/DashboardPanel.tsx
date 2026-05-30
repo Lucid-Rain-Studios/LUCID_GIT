@@ -23,6 +23,7 @@ import {
 import { getTopBarSyncHandlers, getTopBarSyncSnapshot, onTopBarSyncChanged } from '@/lib/topBarSyncBridge'
 import { FilePathText } from '@/components/ui/FilePathText'
 import { ActionBtn, ActionTab } from '@/components/ui/ActionBtn'
+import { MyPRStatusPill } from './MyPRStatusPill'
 
 const sessionFetchedRepos = new Set<string>()
 const sessionRemoteUrls   = new Map<string, string | null>()
@@ -251,9 +252,12 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
             {currentBranch || 'no branch'} · {repoName}
           </div>
         </div>
-        <ActionBtn onClick={reload} size="sm">
-          <RefreshIcon /> Refresh
-        </ActionBtn>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <MyPRStatusPill repoPath={repoPath} />
+          <ActionBtn onClick={reload} size="sm">
+            <RefreshIcon /> Refresh
+          </ActionBtn>
+        </div>
       </div>
 
       {/* ── Stale-pull warning ─────────────────────────────────────────── */}

@@ -6,6 +6,7 @@ import { useOperationStore } from '@/stores/operationStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useLockStore } from '@/stores/lockStore'
 import { useNotificationStore } from '@/stores/notificationStore'
+import { usePRUnlockStore } from '@/stores/prUnlockStore'
 import { useStatusToastStore } from '@/stores/statusToastStore'
 import { StatusToastStack } from '@/components/notifications/StatusToastStack'
 import { useErrorStore } from '@/stores/errorStore'
@@ -34,6 +35,7 @@ import { OverviewPanel } from '@/components/overview/OverviewPanel'
 import { DashboardPanel } from '@/components/dashboard/DashboardPanel'
 import { ChangelogPanel } from '@/components/changelog/ChangelogPanel'
 import { PRDialog } from '@/components/pr/PRDialog'
+import { PRUnlockDialog } from '@/components/pr/PRUnlockDialog'
 import { RepoMapPanel } from '@/components/map/RepoMapPanel'
 import { ContentBrowserPanel } from '@/components/map/ContentBrowserPanel'
 import { ErrorPanel } from '@/components/errors/ErrorPanel'
@@ -257,7 +259,29 @@ export function AppShell() {
   useEffect(() => {
     const unsub = ipc.onNotification((n: AppNotification) => {
       pushNotification(n)
-      if (n.type === 'pr-merged') showStatusToast('PR has been approved.')
+      if (n.type === 'pr-merged') {
+        showStatusToast('PR has been approved.')
+        // Keep the dashboard pill current, and auto-pop the unlock dialog when
+        // there are merged files the user isn't currently editing.
+        usePRUnlockStore.getState().refresh(n.repoPath).catch(() => {})
+        const meta = (n.meta ?? {}) as {
+          prNumber?: number; prTitle?: string; htmlUrl?: string
+          availableToUnlock?: string[]; containsLocalChanges?: string[]
+        }
+        const availableToUnlock = meta.availableToUnlock ?? []
+        if (typeof meta.prNumber === 'number' && availableToUnlock.length > 0) {
+          usePRUnlockStore.getState().openDialog(n.repoPath, {
+            prNumber:             meta.prNumber,
+            title:                meta.prTitle ?? `PR #${meta.prNumber}`,
+            htmlUrl:              meta.htmlUrl ?? '',
+            availableToUnlock,
+            containsLocalChanges: meta.containsLocalChanges ?? [],
+          })
+        }
+      }
+      if (n.type === 'pr-closed') {
+        usePRUnlockStore.getState().refresh(n.repoPath).catch(() => {})
+      }
 
       // Lock-on-dirty-file: fire a desktop toast (gated by Settings) when a
       // teammate locks a file you currently have uncommitted changes on. The
@@ -317,6 +341,7 @@ export function AppShell() {
       loadLocks(repoPath)
       ipc.startLockPolling(repoPath)
       ipc.prMonitorStart(repoPath).catch(() => {})
+      usePRUnlockStore.getState().refresh(repoPath).catch(() => {})
       ipc.notificationList(repoPath).then(persisted => {
         const existingIds = new Set(notifications.map(n => n.id))
         persisted.filter(n => !existingIds.has(n.id)).forEach(n => pushNotification(n))
@@ -680,6 +705,7 @@ export function AppShell() {
       )}
 
       <PRDialog />
+      <PRUnlockDialog />
       <GlobalDialogs />
       <ErrorPanel
         onReauth={() => setShowLoginDialog(true)}

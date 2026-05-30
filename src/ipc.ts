@@ -178,6 +178,26 @@ export interface AppNotification {
   meta?: Record<string, unknown>  // structured payload for pr-merged / pr-closed
 }
 
+export interface PRMonitorMergedInfo {
+  prNumber: number
+  title: string
+  htmlUrl: string
+  availableToUnlock: string[]
+  containsLocalChanges: string[]
+}
+
+export interface PRMonitorDeniedInfo {
+  prNumber: number
+  title: string
+  htmlUrl: string
+}
+
+export interface PRMonitorStatus {
+  pending: number
+  merged:  PRMonitorMergedInfo[]
+  denied:  PRMonitorDeniedInfo[]
+}
+
 export interface WebhookConfig {
   url: string
   enabled: boolean
@@ -772,6 +792,8 @@ export interface LucidGitAPI {
   prMonitorStop:   (repoPath: string) => Promise<void>
   prMonitorRecord: (repoPath: string, prNumber: number, owner: string, repo: string, lockedFiles: string[], title: string) => Promise<void>
   prMonitorCheck:  (repoPath: string) => Promise<void>
+  prMonitorStatus: (repoPath: string) => Promise<PRMonitorStatus>
+  prMonitorResolve:(repoPath: string, prNumber: number) => Promise<void>
 
   // Bug logs
   logGetText: () => Promise<string>

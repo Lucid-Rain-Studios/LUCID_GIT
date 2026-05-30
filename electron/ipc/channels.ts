@@ -194,6 +194,8 @@ export const CHANNELS = {
   PR_MONITOR_STOP:   'pr-monitor:stop',
   PR_MONITOR_RECORD: 'pr-monitor:record',
   PR_MONITOR_CHECK:  'pr-monitor:check',
+  PR_MONITOR_STATUS: 'pr-monitor:status',
+  PR_MONITOR_RESOLVE:'pr-monitor:resolve',
 
   // OS dialogs + shell
   DIALOG_OPEN_DIRECTORY: 'dialog:open-directory',

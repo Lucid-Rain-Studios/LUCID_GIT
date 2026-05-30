@@ -117,6 +117,26 @@ export interface AppNotification {
   meta?: Record<string, unknown>  // structured payload for pr-merged / pr-closed notifications
 }
 
+export interface PRMonitorMergedInfo {
+  prNumber: number
+  title: string
+  htmlUrl: string
+  availableToUnlock: string[]      // merged files safe to unlock (not currently being edited)
+  containsLocalChanges: string[]   // merged files kept locked because they have uncommitted changes
+}
+
+export interface PRMonitorDeniedInfo {
+  prNumber: number
+  title: string
+  htmlUrl: string
+}
+
+export interface PRMonitorStatus {
+  pending: number
+  merged:  PRMonitorMergedInfo[]
+  denied:  PRMonitorDeniedInfo[]
+}
+
 export interface WebhookConfig {
   url: string
   enabled: boolean

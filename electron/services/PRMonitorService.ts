@@ -9,7 +9,7 @@ import { notificationService } from './NotificationService'
 import { desktopNotificationService } from './DesktopNotificationService'
 import { lockService } from './LockService'
 import { CHANNELS } from '../ipc/channels'
-import type { AppNotification } from '../types'
+import type { AppNotification, PRMonitorStatus, PRMonitorMergedInfo, PRMonitorDeniedInfo } from '../types'
 
 const POLL_INTERVAL_MS = 2 * 60 * 1000  // 2 minutes
 
@@ -20,6 +20,7 @@ interface TrackedPR {
   state:       'open' | 'closed-merged' | 'closed-denied'
   title:       string
   recordedAt:  string
+  resolved?:   boolean   // user has acted on / dismissed the merge-unlock prompt
 }
 
 interface MonitorState {
@@ -112,6 +113,69 @@ class PRMonitorService {
       this.slugCache.set(repoPath, slug)
     }
     await this.check(repoPath, slug)
+  }
+
+  // Live status of the user's tracked PRs, used by the dashboard pill and the
+  // auto-unlock dialog. The merged-file split is recomputed against the current
+  // locks + working tree so it never goes stale relative to the merge-time snapshot.
+  async getStatus(repoPath: string): Promise<PRMonitorStatus> {
+    const state = loadState(repoPath)
+    const entries = Object.entries(state.trackedPRs)
+
+    let pending = 0
+    const merged: PRMonitorMergedInfo[] = []
+    const denied: PRMonitorDeniedInfo[] = []
+
+    const slug = this.slugCache.get(repoPath) ?? await this.resolveSlug(repoPath) ?? undefined
+    if (slug) this.slugCache.set(repoPath, slug)
+
+    const { accounts, currentAccountId } = authService.listAccounts()
+    const currentLogin = accounts.find(account => account.userId === currentAccountId)?.login ?? null
+
+    let dirty = false
+
+    for (const [numStr, tracked] of entries) {
+      const prNumber = Number(numStr)
+      const htmlUrl = slug
+        ? `https://github.com/${slug.owner}/${slug.repo}/pull/${prNumber}`
+        : ''
+
+      if (tracked.state === 'open') {
+        pending++
+      } else if (tracked.state === 'closed-merged' && !tracked.resolved) {
+        // Can't compute the lock split without knowing who the user is; surface
+        // the merged PR with empty lists rather than wrongly auto-resolving it.
+        if (!currentLogin) {
+          merged.push({ prNumber, title: tracked.title, htmlUrl, availableToUnlock: [], containsLocalChanges: [] })
+          continue
+        }
+        const currentChanges = await this.currentChangedFileSet(repoPath)
+        const { availableToUnlock, containsLocalChanges } =
+          await this.resolveMergedPRLockState(repoPath, tracked.lockedFiles, currentLogin, currentChanges)
+        // Auto-resolve once nothing of this PR remains locked by the user.
+        if (availableToUnlock.length === 0 && containsLocalChanges.length === 0) {
+          tracked.resolved = true
+          dirty = true
+          continue
+        }
+        merged.push({ prNumber, title: tracked.title, htmlUrl, availableToUnlock, containsLocalChanges })
+      } else if (tracked.state === 'closed-denied' && !tracked.resolved) {
+        denied.push({ prNumber, title: tracked.title, htmlUrl })
+      }
+    }
+
+    if (dirty) saveState(repoPath, state)
+
+    return { pending, merged, denied }
+  }
+
+  // Mark a resolved/denied PR as acted-on so it stops surfacing on the pill / dialog.
+  markResolved(repoPath: string, prNumber: number): void {
+    const state = loadState(repoPath)
+    const tracked = state.trackedPRs[String(prNumber)]
+    if (!tracked) return
+    tracked.resolved = true
+    saveState(repoPath, state)
   }
 
   // ── Private ─────────────────────────────────────────────────────────────────

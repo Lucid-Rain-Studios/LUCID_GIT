@@ -382,6 +382,10 @@ const api = {
     ipcRenderer.invoke(CHANNELS.PR_MONITOR_RECORD, repoPath, prNumber, owner, repo, lockedFiles, title),
   prMonitorCheck:  (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.PR_MONITOR_CHECK, repoPath),
+  prMonitorStatus: (repoPath: string) =>
+    ipcRenderer.invoke(CHANNELS.PR_MONITOR_STATUS, repoPath),
+  prMonitorResolve:(repoPath: string, prNumber: number) =>
+    ipcRenderer.invoke(CHANNELS.PR_MONITOR_RESOLVE, repoPath, prNumber),
 
   // ── Bug logs ──────────────────────────────────────────────────────────────
   logGetText: () =>

@@ -994,4 +994,12 @@ export function registerHandlers(): void {
   handle(CHANNELS.PR_MONITOR_CHECK, async (_event, repoPath: string) => {
     return prMonitorService.checkNow(repoPath)
   })
+
+  handle(CHANNELS.PR_MONITOR_STATUS, async (_event, repoPath: string) => {
+    return prMonitorService.getStatus(repoPath)
+  })
+
+  handle(CHANNELS.PR_MONITOR_RESOLVE, (_event, repoPath: string, prNumber: number) => {
+    prMonitorService.markResolved(repoPath, prNumber)
+  })
 }
