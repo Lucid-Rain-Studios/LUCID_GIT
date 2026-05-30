@@ -18,6 +18,7 @@ export const CHANNELS = {
   GIT_PULL:          'git:pull',
   GIT_FETCH:         'git:fetch',
   GIT_LOG:           'git:log',
+  GIT_CHANGELOG:     'git:changelog',
   GIT_BRANCH_LIST:   'git:branch-list',
   GIT_BRANCH_CREATE: 'git:branch-create',
   GIT_BRANCH_RENAME: 'git:branch-rename',

@@ -342,6 +342,9 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
         await opRun('Stashing local changes…', () => ipc.stashSave(repoPath, 'Auto-stash before pull'))
       }
       await opRun('Pulling…', () => ipc.pull(repoPath))
+      markFetchPerformed(repoPath)
+      sessionTopBarFetched.add(repoPath)
+      setHasFetched(true)
       await refreshRevisionState()
       showStatusToast(stashed ? 'Pull successful — your changes are in the stash.' : 'Pull successful.')
     } catch (e) {

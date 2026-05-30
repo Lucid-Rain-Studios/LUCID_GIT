@@ -53,6 +53,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GIT_FETCH, repoPath),
   log: (repoPath: string, args?: { limit?: number; all?: boolean; filePath?: string; refs?: string[] }) =>
     ipcRenderer.invoke(CHANNELS.GIT_LOG, repoPath, args),
+  changelog: (repoPath: string, query: { fromDate?: string; toDate?: string; fromCommit?: string; toCommit?: string; ref?: string }) =>
+    ipcRenderer.invoke(CHANNELS.GIT_CHANGELOG, repoPath, query),
   branchList: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_BRANCH_LIST, repoPath),
   createBranch: (repoPath: string, name: string, from?: string) =>

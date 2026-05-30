@@ -9,7 +9,7 @@ import { AppCheckbox } from '@/components/ui/AppCheckbox'
 export type TabId =
   | 'dashboard' | 'timeline' | 'branches'
   | 'tools'     | 'presence' | 'map'      | 'heatmap'  | 'forecast' | 'locks'
-  | 'lfs'       | 'cleanup'  | 'unreal'   | 'hooks'    | 'overview'
+  | 'lfs'       | 'cleanup'  | 'unreal'   | 'hooks'    | 'overview' | 'changelog'
   | 'settings'  | 'content'  | 'logs'
 
 interface SidebarProps {
@@ -53,11 +53,12 @@ const NAV_GROUPS: NavGroup[] = [
   {
     key: 'admin', label: 'Admin', adminOnly: true,
     items: [
-      { id: 'overview', label: 'Overview', Icon: OverviewIcon },
-      { id: 'lfs',      label: 'LFS',      Icon: LFSIcon },
-      { id: 'cleanup',  label: 'Cleanup',  Icon: CleanupIcon },
-      { id: 'unreal',   label: 'Unreal',   Icon: UnrealIcon },
-      { id: 'hooks',    label: 'Hooks',    Icon: HooksIcon },
+      { id: 'overview',  label: 'Overview',  Icon: OverviewIcon },
+      { id: 'changelog', label: 'Changelog', Icon: ChangelogIcon },
+      { id: 'lfs',       label: 'LFS',       Icon: LFSIcon },
+      { id: 'cleanup',   label: 'Cleanup',   Icon: CleanupIcon },
+      { id: 'unreal',    label: 'Unreal',    Icon: UnrealIcon },
+      { id: 'hooks',     label: 'Hooks',     Icon: HooksIcon },
     ],
   },
 ]
@@ -68,7 +69,7 @@ const VISIBILITY_KEY  = 'lucid-git:sidebar-visibility'
 const VISIBILITY_DEFAULTS: Record<string, string[]> = {
   workspace: ['dashboard', 'timeline', 'branches'],
   tools:     ['tools', 'locks', 'content', 'logs'],
-  admin:     ['overview', 'lfs', 'cleanup', 'unreal', 'hooks'],
+  admin:     ['overview', 'changelog', 'lfs', 'cleanup', 'unreal', 'hooks'],
 }
 
 function parseGitHubSlug(url: string): string | null {
@@ -794,6 +795,13 @@ function HooksIcon({ size = 16 }) {
   return <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
     <path d="M5 3v6a3 3 0 0 0 6 0V7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
     <circle cx="11" cy="5.5" r="2" stroke="currentColor" strokeWidth="1.3" />
+  </svg>
+}
+
+function ChangelogIcon({ size = 16 }) {
+  return <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+    <rect x="2.5" y="1.5" width="11" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
+    <path d="M5 5h6M5 8h6M5 11h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
   </svg>
 }
 

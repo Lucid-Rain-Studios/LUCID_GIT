@@ -253,6 +253,11 @@ export function registerHandlers(): void {
     return gitService.log(repoPath, args)
   })
 
+  handle(CHANNELS.GIT_CHANGELOG, async (_event, repoPath: string, query: { fromDate?: string; toDate?: string; fromCommit?: string; toCommit?: string; ref?: string }) => {
+    await requireAdmin(repoPath)
+    return gitService.changelog(repoPath, query ?? {})
+  })
+
   handle(CHANNELS.GIT_BRANCH_LIST, async (_event, repoPath: string) => {
     return gitService.branchList(repoPath)
   })

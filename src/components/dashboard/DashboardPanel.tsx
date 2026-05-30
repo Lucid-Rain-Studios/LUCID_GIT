@@ -208,6 +208,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
       const now = Date.now()
       localStorage.setItem(LAST_PULL_KEY(repoPath), String(now))
       setLastPull(now)
+      markFetchPerformed(repoPath)
       await loadSync()
       bumpSyncTick()
     } finally { setBusy(null) }

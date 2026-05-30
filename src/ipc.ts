@@ -34,6 +34,21 @@ export interface CommitEntry {
   message: string
 }
 
+export interface ChangelogEntry {
+  hash: string
+  timestamp: number
+  subject: string
+  body: string
+}
+
+export interface ChangelogQuery {
+  fromDate?: string
+  toDate?: string
+  fromCommit?: string
+  toCommit?: string
+  ref?: string
+}
+
 export interface CommitFileChange {
   status:   string   // 'M' | 'A' | 'D' | 'R' | 'C' | 'T'
   path:     string
@@ -567,6 +582,7 @@ export interface LucidGitAPI {
   pull: (repoPath: string) => Promise<void>
   fetch: (repoPath: string) => Promise<void>
   log: (repoPath: string, args?: { limit?: number; all?: boolean; filePath?: string; refs?: string[] }) => Promise<CommitEntry[]>
+  changelog: (repoPath: string, query: ChangelogQuery) => Promise<ChangelogEntry[]>
   commitFiles: (repoPath: string, hash: string) => Promise<CommitFileChange[]>
   branchList:    (repoPath: string) => Promise<BranchInfo[]>
   createBranch:  (repoPath: string, name: string, from?: string) => Promise<void>

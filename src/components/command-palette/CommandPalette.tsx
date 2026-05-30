@@ -60,7 +60,7 @@ export function CommandPalette({
     if (!repoPath) return
     const topBarHandlers = getTopBarSyncHandlers()
     if (getTopBarSyncSnapshot().repoPath === repoPath && topBarHandlers) return void topBarHandlers.pull()
-    try { await ipc.pull(repoPath); await refreshStatus(); bumpSyncTick() } catch {}
+    try { await ipc.pull(repoPath); markFetchPerformed(repoPath); await refreshStatus(); bumpSyncTick() } catch {}
   }
 
   const doPush = async () => {

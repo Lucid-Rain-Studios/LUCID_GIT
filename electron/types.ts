@@ -48,6 +48,26 @@ export interface CommitEntry {
   message: string
 }
 
+export interface ChangelogEntry {
+  hash: string
+  timestamp: number   // unix ms (author date)
+  subject: string
+  body: string        // commit body without subject; empty string if none
+}
+
+export interface ChangelogQuery {
+  /** ISO date 'YYYY-MM-DD' (inclusive). Ignored if fromCommit is set. */
+  fromDate?: string
+  /** ISO date 'YYYY-MM-DD' (inclusive). Ignored if toCommit is set. */
+  toDate?: string
+  /** Commit ref. Range becomes fromCommit..toCommit. */
+  fromCommit?: string
+  /** Commit ref. Defaults to HEAD when fromCommit is set. */
+  toCommit?: string
+  /** Ref to walk (branch). Defaults to HEAD. Only used in date mode. */
+  ref?: string
+}
+
 export interface Account {
   userId: string
   login: string

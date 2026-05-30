@@ -32,6 +32,7 @@ import { ToolsPanel } from '@/components/tools/ToolsPanel'
 import { PresencePanel } from '@/components/presence/PresencePanel'
 import { OverviewPanel } from '@/components/overview/OverviewPanel'
 import { DashboardPanel } from '@/components/dashboard/DashboardPanel'
+import { ChangelogPanel } from '@/components/changelog/ChangelogPanel'
 import { PRDialog } from '@/components/pr/PRDialog'
 import { RepoMapPanel } from '@/components/map/RepoMapPanel'
 import { ContentBrowserPanel } from '@/components/map/ContentBrowserPanel'
@@ -51,7 +52,7 @@ import { PanelErrorBoundary } from '@/components/ui/PanelErrorBoundary'
 import { BugLogsPanel } from '@/components/logs/BugLogsPanel'
 import { GlobalLoadingCursor } from '@/components/ui/GlobalLoadingCursor'
 
-type TabId = 'timeline' | 'branches' | 'lfs' | 'cleanup' | 'unreal' | 'hooks' | 'settings' | 'tools' | 'presence' | 'overview' | 'map' | 'content' | 'heatmap' | 'forecast' | 'dashboard' | 'locks' | 'logs'
+type TabId = 'timeline' | 'branches' | 'lfs' | 'cleanup' | 'unreal' | 'hooks' | 'settings' | 'tools' | 'presence' | 'overview' | 'changelog' | 'map' | 'content' | 'heatmap' | 'forecast' | 'dashboard' | 'locks' | 'logs'
 
 const ASSET_EXTS = new Set([
   'uasset', 'umap', 'upk', 'udk',
@@ -552,6 +553,11 @@ export function AppShell() {
             /* ── Admin overview ── */
             <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
               <OverviewPanel repoPath={repoPath} onNavigate={tab => setLeftTab(tab as TabId)} onRefresh={handleRefresh} />
+            </PanelErrorBoundary>
+          ) : leftTab === 'changelog' ? (
+            /* ── Admin changelog ── */
+            <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
+              <ChangelogPanel repoPath={repoPath} />
             </PanelErrorBoundary>
           ) : leftTab === 'timeline' ? (
             /* ── Timeline — full width ── */

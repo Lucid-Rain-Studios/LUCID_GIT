@@ -5,7 +5,7 @@ import path from 'path'
 import { exec, execSafe, execWithProgress, execWithStdin, gitAuthArgs, ProgressCallback } from '../util/dugite-exec'
 import { authService } from './AuthService'
 import { parseGitLog, GIT_LOG_FORMAT } from '../util/git-log-parse'
-import { FileStatus, BranchInfo, CommitEntry, DiffContent, StashEntry, ContributorInfo, ConflictPreviewFile, SyncStatus, LFSStatus, LfsLockCacheFile, LfsLocksMaintenanceResult, SizeBreakdown, CleanupResult, BranchActivity, BranchDiffSummary, BranchDiffFile, PotentialMergeConflictReport } from '../types'
+import { FileStatus, BranchInfo, CommitEntry, ChangelogEntry, ChangelogQuery, DiffContent, StashEntry, ContributorInfo, ConflictPreviewFile, SyncStatus, LFSStatus, LfsLockCacheFile, LfsLocksMaintenanceResult, SizeBreakdown, CleanupResult, BranchActivity, BranchDiffSummary, BranchDiffFile, PotentialMergeConflictReport } from '../types'
 
 // ── Diff helpers ──────────────────────────────────────────────────────────────
 
@@ -712,6 +712,51 @@ class GitService {
     const { exitCode, stdout } = await execSafe(cmdArgs, repoPath)
     if (exitCode !== 0) return []
     return parseGitLog(stdout)
+  }
+
+  /**
+   * Collect commits between two dates or two refs for a changelog.
+   * Excludes merge commits (`--no-merges`) and returns commits in chronological
+   * order (oldest first) so consumers can render them as a forward timeline.
+   * Author identity is intentionally NOT returned.
+   */
+  async changelog(repoPath: string, q: ChangelogQuery): Promise<ChangelogEntry[]> {
+    const SEP = '\x1f'
+    const REC = '\x1e'
+    const FMT = `${SEP}%H${SEP}%at${SEP}%s${SEP}%b${REC}`
+
+    const args: string[] = ['log', '--no-merges', '--reverse', `--format=${FMT}`]
+
+    const hasCommitRange = !!q.fromCommit
+    if (hasCommitRange) {
+      const to = q.toCommit?.trim() || 'HEAD'
+      args.push(`${q.fromCommit!.trim()}..${to}`)
+    } else {
+      if (q.fromDate) args.push(`--since=${q.fromDate}`)
+      // git --until is exclusive on its right edge for `YYYY-MM-DD`; bump to
+      // end-of-day so the picker behaves inclusively for the user.
+      if (q.toDate)   args.push(`--until=${q.toDate} 23:59:59`)
+      if (q.ref)      args.push(q.ref)
+    }
+
+    const { exitCode, stdout } = await execSafe(args, repoPath)
+    if (exitCode !== 0) return []
+
+    return stdout
+      .split(REC)
+      .map(r => r.trim())
+      .filter(r => r.includes(SEP))
+      .map(r => {
+        const parts = r.split(SEP).slice(1)
+        const [hash = '', ts = '0', subject = '', body = ''] = parts
+        return {
+          hash:      hash.trim(),
+          timestamp: parseInt(ts.trim(), 10) * 1000,
+          subject:   subject.trim(),
+          body:      body.replace(/\s+$/, ''),
+        }
+      })
+      .filter(e => e.hash.length > 0)
   }
 
   /** Returns the preferred branch label for update UX. */
