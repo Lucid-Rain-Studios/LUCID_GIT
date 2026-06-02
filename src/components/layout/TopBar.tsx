@@ -7,7 +7,7 @@ import { useOperationStore } from '@/stores/operationStore'
 import { useErrorStore } from '@/stores/errorStore'
 import { usePRStore } from '@/stores/prStore'
 import { NotificationBell } from '@/components/notifications/NotificationBell'
-import { formatFetchAgo, getLastFetch, markFetchPerformed, onFetchPerformed } from '@/lib/fetchState'
+import { getLastFetch, markFetchPerformed, onFetchPerformed } from '@/lib/fetchState'
 import {
   canCreatePR,
   canPull,
@@ -57,8 +57,6 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
   const [sync, setSync]       = useState<SyncStatus | null>(null)
   const [syncOp, setSyncOp]   = useState<'idle' | 'fetching' | 'pulling' | 'pushing'>('idle')
   const [syncErr, setSyncErr] = useState<string | null>(null)
-  const [lastFetchAt, setLastFetchAt] = useState<number | null>(() => repoPath ? getLastFetch(repoPath) : null)
-  const [nowTick, setNowTick] = useState(() => Date.now())
   const [updatingFromMain, setUpdatingFromMain] = useState(false)
   const [defaultBranch, setDefaultBranch] = useState<string>('main')
   const [hasFetched, setHasFetched] = useState(() => repoPath ? sessionTopBarFetched.has(repoPath) : false)
@@ -120,25 +118,12 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
   }, [repoPath, currentBranch, syncTick, loadSync])
 
   useEffect(() => {
-    return onFetchPerformed((path, at) => {
+    return onFetchPerformed((path) => {
       sessionTopBarFetched.add(path)
       if (path === repoPath) {
         setHasFetched(true)
-        setLastFetchAt(at)
       }
     })
-  }, [repoPath])
-
-  // Repaint the "Last fetched: …" label so the relative timestamp drifts
-  // forward without needing a fresh fetch.
-  useEffect(() => {
-    const id = setInterval(() => setNowTick(Date.now()), 15_000)
-    return () => clearInterval(id)
-  }, [])
-
-  // Reload the stored last-fetch timestamp when the active repo changes.
-  useEffect(() => {
-    setLastFetchAt(repoPath ? getLastFetch(repoPath) : null)
   }, [repoPath])
 
   // Pick up auto-fetches performed by ForecastService. It fetches every
@@ -742,7 +727,6 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
                 pullLabel={pullButtonLabel(busyState)}
                 behindCount={hasBehind && isIdle ? (sync?.behind ?? 0) : 0}
                 aheadCount={isIdle && hasUpstream ? (sync?.ahead ?? 0) : 0}
-                lastFetchLabel={formatFetchAgo(lastFetchAt, nowTick)}
                 hasFetched={hasFetched}
                 error={!!syncErr}
                 disabled={!isIdle}
@@ -1666,10 +1650,9 @@ function CloneIcon() {
 // ── Split Fetch | Pull button ─────────────────────────────────────────────────
 
 function FetchPullSplitBtn({
-  fetchLabel, pullLabel, behindCount, aheadCount, lastFetchLabel, hasFetched, error, disabled, fetchDisabledReason, pullDisabledReason, onFetch, onPull,
+  fetchLabel, pullLabel, behindCount, aheadCount, hasFetched, error, disabled, fetchDisabledReason, pullDisabledReason, onFetch, onPull,
 }: {
   fetchLabel: string; pullLabel: string; behindCount: number; aheadCount: number
-  lastFetchLabel: string
   hasFetched: boolean; error: boolean; disabled: boolean
   fetchDisabledReason?: string | null; pullDisabledReason?: string | null
   onFetch: () => void; onPull: () => void
@@ -1751,11 +1734,7 @@ function FetchPullSplitBtn({
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
       <div
-        title={
-          showSyncBadge
-            ? `${behindCount} behind, ${aheadCount} ahead · ${lastFetchLabel}`
-            : lastFetchLabel
-        }
+        title={showSyncBadge ? `${behindCount} behind, ${aheadCount} ahead` : undefined}
         style={{
           display: 'flex', alignItems: 'center', gap: 5,
           fontFamily: 'var(--lg-font-mono)', fontSize: 8.5, lineHeight: 1,
@@ -1770,7 +1749,6 @@ function FetchPullSplitBtn({
             {aheadCount > 0  && <span style={{ color: '#2dbd6e' }}>↑{aheadCount}</span>}
           </span>
         )}
-        <span>{lastFetchLabel}</span>
       </div>
 
       <div style={{

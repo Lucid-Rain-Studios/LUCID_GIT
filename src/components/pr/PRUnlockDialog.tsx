@@ -129,7 +129,7 @@ export function PRUnlockDialog() {
           {availableToUnlock.length === 0 ? (
             <EmptyRow text="No merged files are currently locked by you." />
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 14 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 14, maxHeight: 320, overflowY: 'auto', paddingRight: 2 }}>
               {availableToUnlock.map(p => {
                 const done = isDone(p)
                 const busy = unlocking.has(p)
@@ -171,7 +171,7 @@ export function PRUnlockDialog() {
               <div style={{ fontSize: 11, color: '#5a6880', lineHeight: 1.5, marginBottom: 6 }}>
                 These files have uncommitted changes, so they stay locked while you keep working on them.
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 14 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 14, maxHeight: 140, overflowY: 'auto', paddingRight: 2 }}>
                 {containsLocalChanges.map(p => (
                   <FilePathText key={p} path={p} style={{
                     fontFamily: 'var(--lg-font-mono)', fontSize: 11, color: '#6a7488',

@@ -24,6 +24,7 @@ import { getTopBarSyncHandlers, getTopBarSyncSnapshot, onTopBarSyncChanged } fro
 import { FilePathText } from '@/components/ui/FilePathText'
 import { ActionBtn, ActionTab } from '@/components/ui/ActionBtn'
 import { MyPRStatusPill } from './MyPRStatusPill'
+import { AutoFetchControl } from './AutoFetchControl'
 
 const sessionFetchedRepos = new Set<string>()
 const sessionRemoteUrls   = new Map<string, string | null>()
@@ -254,9 +255,15 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <MyPRStatusPill repoPath={repoPath} />
-          <ActionBtn onClick={reload} size="sm">
-            <RefreshIcon /> Refresh
+          <ActionBtn
+            onClick={doFetch}
+            disabled={busyState !== 'idle'}
+            disabledReason={fetchDisabledReason(busyState)}
+            size="sm"
+          >
+            <RefreshIcon /> {fetchButtonLabel(busyState)}
           </ActionBtn>
+          <AutoFetchControl repoPath={repoPath} busy={busyState} />
         </div>
       </div>
 
