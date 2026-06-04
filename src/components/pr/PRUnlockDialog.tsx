@@ -11,17 +11,18 @@ import { FilePathText } from '@/components/ui/FilePathText'
 // currently editing — files with uncommitted local changes are shown but kept
 // locked so the user can keep working on them.
 export function PRUnlockDialog() {
-  const { dialogOpen, dialogPR, repoPath, closeDialog, markResolved, refresh } = usePRUnlockStore()
+  const { dialogOpen, target, repoPath, closeDialog, markResolved, refresh } = usePRUnlockStore()
   const { unlockFile, locks } = useLockStore()
 
   const [unlocking, setUnlocking] = useState<Set<string>>(new Set())
   const [unlocked,  setUnlocked]  = useState<Set<string>>(new Set())
 
-  // Reset transient state whenever a different PR is shown.
+  // Reset transient state whenever a different target is shown.
+  const targetKey = target ? (target.kind === 'pr' ? `pr-${target.prNumber}` : 'main') : null
   useEffect(() => {
     setUnlocking(new Set())
     setUnlocked(new Set())
-  }, [dialogPR?.prNumber])
+  }, [targetKey])
 
   // Close on Escape (does not mark resolved — reopen via the dashboard pill).
   useEffect(() => {
@@ -33,9 +34,12 @@ export function PRUnlockDialog() {
 
   const overlayDismiss = useDialogOverlayDismiss(closeDialog)
 
-  if (!dialogOpen || !dialogPR || !repoPath) return null
+  if (!dialogOpen || !target || !repoPath) return null
 
-  const { prNumber, title, htmlUrl, availableToUnlock, containsLocalChanges } = dialogPR
+  const { availableToUnlock, containsLocalChanges } = target
+  const isPr    = target.kind === 'pr'
+  const prNumber = isPr ? target.prNumber : null
+  const htmlUrl  = isPr ? target.htmlUrl  : ''
 
   // A file that's no longer in the live lock list was released elsewhere — treat
   // it as already unlocked rather than offering a no-op button.
@@ -62,7 +66,7 @@ export function PRUnlockDialog() {
   }
 
   const handleDone = async () => {
-    await markResolved(repoPath, prNumber)
+    if (isPr && prNumber !== null) await markResolved(repoPath, prNumber)
     closeDialog()
   }
 
@@ -90,7 +94,7 @@ export function PRUnlockDialog() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
             <span style={{ fontSize: 16, color: '#2dbd6e' }}>✓</span>
             <span style={{ fontSize: 14, fontWeight: 700, color: '#c8d0e8', letterSpacing: '-0.02em' }}>
-              Pull Request Accepted
+              {isPr ? 'Pull Request Accepted' : 'Changes Merged Into Main'}
             </span>
           </div>
           <button
@@ -109,17 +113,21 @@ export function PRUnlockDialog() {
         {/* Body */}
         <div style={{ padding: '18px 20px 16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <span style={{
-              fontFamily: 'var(--lg-font-mono)', fontSize: 11, fontWeight: 700,
-              color: '#a27ef0', background: 'rgba(162,126,240,0.12)',
-              border: '1px solid rgba(162,126,240,0.25)', borderRadius: 4, padding: '1px 6px',
-            }}>#{prNumber}</span>
+            {isPr && (
+              <span style={{
+                fontFamily: 'var(--lg-font-mono)', fontSize: 11, fontWeight: 700,
+                color: '#a27ef0', background: 'rgba(162,126,240,0.12)',
+                border: '1px solid rgba(162,126,240,0.25)', borderRadius: 4, padding: '1px 6px',
+              }}>#{prNumber}</span>
+            )}
             <span style={{ fontSize: 13, color: '#c8d0e8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {title}
+              {target.title}
             </span>
           </div>
           <div style={{ fontSize: 12, color: '#5a6880', lineHeight: 1.5, marginBottom: 16 }}>
-            Your pull request was merged. Unlock the files you're no longer editing so your teammates can lock them.
+            {isPr
+              ? "Your pull request was merged. Unlock the files you're no longer editing so your teammates can lock them."
+              : "These files are now in the main branch. Unlock the ones you're no longer editing so your teammates can lock them."}
           </div>
 
           {/* Ready to unlock */}

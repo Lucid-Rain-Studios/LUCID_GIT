@@ -27,23 +27,46 @@ export function MyPRStatusPill({ repoPath }: { repoPath: string }) {
 
   if (!status) return null
 
-  const { pending, merged, denied } = status
+  const { pending, merged, denied, mergedToMain } = status
 
-  // 1 & 2 — merged PRs (any unresolved merged PR has at least one file to act on).
+  const prUnlock        = merged.filter(m => m.availableToUnlock.length > 0)
+  const mainUnlockCount = mergedToMain?.availableToUnlock.length ?? 0
+  const totalUnlock     = prUnlock.reduce((n, m) => n + m.availableToUnlock.length, 0) + mainUnlockCount
+
+  // 1 — files ready to unlock (from a merged PR and/or work that landed in main).
+  if (totalUnlock > 0) {
+    const open = () => {
+      if (prUnlock.length > 0) {
+        const m = prUnlock[0]
+        openDialog(repoPath, {
+          kind: 'pr', prNumber: m.prNumber, title: m.title, htmlUrl: m.htmlUrl,
+          availableToUnlock: m.availableToUnlock, containsLocalChanges: m.containsLocalChanges,
+        })
+      } else if (mergedToMain) {
+        openDialog(repoPath, {
+          kind: 'main', title: 'Changes merged into main',
+          availableToUnlock: mergedToMain.availableToUnlock, containsLocalChanges: mergedToMain.containsLocalChanges,
+        })
+      }
+    }
+    const filesLabel = `unlock ${totalUnlock} file${totalUnlock !== 1 ? 's' : ''}`
+    const label = prUnlock.length > 0
+      ? `PR #${prUnlock[0].prNumber} merged · ${filesLabel}`
+      : `Merged into main · ${filesLabel}`
+    return <Pill accent="#2dbd6e" solid label={label} onClick={open} />
+  }
+
+  // 2 — a merged PR with nothing left to unlock (only kept-locked files).
   if (merged.length > 0) {
-    const withUnlock = merged.find(m => m.availableToUnlock.length > 0)
-    const target = withUnlock ?? merged[0]
-    const totalUnlock = merged.reduce((n, m) => n + m.availableToUnlock.length, 0)
-    const accent = totalUnlock > 0 ? '#2dbd6e' : '#a78bfa'
-    const label = totalUnlock > 0
-      ? `PR #${target.prNumber} merged · unlock ${totalUnlock} file${totalUnlock !== 1 ? 's' : ''}`
-      : `PR #${target.prNumber} merged`
+    const m = merged[0]
     return (
       <Pill
-        accent={accent}
-        solid={totalUnlock > 0}
-        label={label}
-        onClick={() => openDialog(repoPath, target)}
+        accent="#a78bfa"
+        label={`PR #${m.prNumber} merged`}
+        onClick={() => openDialog(repoPath, {
+          kind: 'pr', prNumber: m.prNumber, title: m.title, htmlUrl: m.htmlUrl,
+          availableToUnlock: m.availableToUnlock, containsLocalChanges: m.containsLocalChanges,
+        })}
       />
     )
   }

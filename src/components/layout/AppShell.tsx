@@ -271,6 +271,7 @@ export function AppShell() {
         const availableToUnlock = meta.availableToUnlock ?? []
         if (typeof meta.prNumber === 'number' && availableToUnlock.length > 0) {
           usePRUnlockStore.getState().openDialog(n.repoPath, {
+            kind:                 'pr',
             prNumber:             meta.prNumber,
             title:                meta.prTitle ?? `PR #${meta.prNumber}`,
             htmlUrl:              meta.htmlUrl ?? '',
@@ -281,6 +282,20 @@ export function AppShell() {
       }
       if (n.type === 'pr-closed') {
         usePRUnlockStore.getState().refresh(n.repoPath).catch(() => {})
+      }
+      // Work detected as merged into main (direct merge / squash / external PR).
+      if (n.type === 'main-merged') {
+        usePRUnlockStore.getState().refresh(n.repoPath).catch(() => {})
+        const meta = (n.meta ?? {}) as { availableToUnlock?: string[]; containsLocalChanges?: string[] }
+        const availableToUnlock = meta.availableToUnlock ?? []
+        if (availableToUnlock.length > 0) {
+          usePRUnlockStore.getState().openDialog(n.repoPath, {
+            kind:                 'main',
+            title:                'Changes merged into main',
+            availableToUnlock,
+            containsLocalChanges: meta.containsLocalChanges ?? [],
+          })
+        }
       }
 
       // Lock-on-dirty-file: fire a desktop toast (gated by Settings) when a

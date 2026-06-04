@@ -362,7 +362,7 @@ function GraphCell({ node, graphColW, hoveredBranchKey, branchHoverLabels, onHov
     )
   }
   return (
-    <svg width={graphColW} height={ROW_H} style={{ flexShrink: 0, overflow: 'visible', display: 'block', position: 'relative', zIndex: 1 }}>
+    <svg width={graphColW} height={ROW_H} style={{ flexShrink: 0, overflow: 'visible', display: 'block', position: 'relative', zIndex: hoveredSeg ? 60 : 1 }}>
       {node.topLines.map((seg, i) => renderLine(seg, true, `t${i}`))}
       {node.bottomLines.map((seg, i) => renderLine(seg, false, `b${i}`))}
       {isMerge ? (
@@ -386,8 +386,10 @@ function GraphCell({ node, graphColW, hoveredBranchKey, branchHoverLabels, onHov
           {(() => {
             const padX = 8
             const charW = 6.2
-            const tooltipW = Math.min(Math.max(92, hoveredSeg.label.length * charW + padX * 2), Math.max(92, graphColW - 4))
-            const tooltipX = Math.max(2, Math.min(graphColW - tooltipW - 2, hoveredSeg.x - tooltipW / 2))
+            // Size to the label; allow it to overflow the narrow graph column
+            // (the elevated z-index lets it float above the commit content).
+            const tooltipW = Math.max(92, hoveredSeg.label.length * charW + padX * 2)
+            const tooltipX = Math.max(2, hoveredSeg.x - tooltipW / 2)
             return (
               <>
                 <rect x={tooltipX} y={2} width={tooltipW} height={20} rx={5} fill="#0f1420f5" stroke={hoveredBranchKey === 'main' ? MAIN_BRANCH_COLOR : '#3b4b6d'} />

@@ -236,9 +236,12 @@ export function registerHandlers(): void {
   })
 
   handle(CHANNELS.GIT_PULL, async (event, repoPath: string) => {
-    return gitService.pull(repoPath, (step) => {
+    const result = await gitService.pull(repoPath, (step) => {
       if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
     })
+    // After pulling, locked files whose work just landed in main can be unlocked.
+    prMonitorService.checkMainMerges(repoPath).catch(() => {})
+    return result
   })
 
   handle(CHANNELS.GIT_FETCH, async (event, repoPath: string) => {
@@ -246,6 +249,7 @@ export function registerHandlers(): void {
       if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
     })
     prMonitorService.checkNow(repoPath).catch(() => {})
+    prMonitorService.checkMainMerges(repoPath).catch(() => {})
     return result
   })
 

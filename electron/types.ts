@@ -135,6 +135,9 @@ export interface PRMonitorStatus {
   pending: number
   merged:  PRMonitorMergedInfo[]
   denied:  PRMonitorDeniedInfo[]
+  // Files whose committed work is now present in the default branch (merged
+  // directly or via an externally-created PR), detected purely from git state.
+  mergedToMain: { availableToUnlock: string[]; containsLocalChanges: string[] } | null
 }
 
 export interface WebhookConfig {

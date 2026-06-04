@@ -764,6 +764,11 @@ class GitService {
     return (await this.remoteDefaultBranch(repoPath)).name
   }
 
+  /** Default branch name + resolvable ref (e.g. "origin/main") for diffing against. */
+  async defaultBranchRef(repoPath: string): Promise<{ name: string; ref: string }> {
+    return this.remoteDefaultBranch(repoPath)
+  }
+
   /** Per-branch activity: last committer + timestamp for each local + remote branch. */
   async branchActivity(repoPath: string): Promise<BranchActivity[]> {
     const fmt = '%(refname:short)\t%(authorname)\t%(authoremail)\t%(authordate:iso-strict)\t%(subject)'

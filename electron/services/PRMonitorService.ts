@@ -8,6 +8,7 @@ import { gitHubService } from './GitHubService'
 import { notificationService } from './NotificationService'
 import { desktopNotificationService } from './DesktopNotificationService'
 import { lockService } from './LockService'
+import { gitService } from './GitService'
 import { CHANNELS } from '../ipc/channels'
 import type { AppNotification, PRMonitorStatus, PRMonitorMergedInfo, PRMonitorDeniedInfo } from '../types'
 
@@ -25,6 +26,10 @@ interface TrackedPR {
 
 interface MonitorState {
   trackedPRs: Record<string, TrackedPR>
+  // Per-file content hash (in the default branch) we've already fired a
+  // "merged into main" notification for, so fetch/pull doesn't re-notify the
+  // same merge every cycle. Re-notifies if the file changes in main again.
+  notifiedMainMerges?: Record<string, string>
 }
 
 // ── Disk helpers ──────────────────────────────────────────────────────────────
@@ -131,6 +136,7 @@ class PRMonitorService {
 
     const { accounts, currentAccountId } = authService.listAccounts()
     const currentLogin = accounts.find(account => account.userId === currentAccountId)?.login ?? null
+    const currentChanges = currentLogin ? await this.currentChangedFileSet(repoPath) : new Set<string>()
 
     let dirty = false
 
@@ -149,7 +155,6 @@ class PRMonitorService {
           merged.push({ prNumber, title: tracked.title, htmlUrl, availableToUnlock: [], containsLocalChanges: [] })
           continue
         }
-        const currentChanges = await this.currentChangedFileSet(repoPath)
         const { availableToUnlock, containsLocalChanges } =
           await this.resolveMergedPRLockState(repoPath, tracked.lockedFiles, currentLogin, currentChanges)
         // Auto-resolve once nothing of this PR remains locked by the user.
@@ -166,7 +171,15 @@ class PRMonitorService {
 
     if (dirty) saveState(repoPath, state)
 
-    return { pending, merged, denied }
+    let mergedToMain: PRMonitorStatus['mergedToMain'] = null
+    if (currentLogin) {
+      const main = await this.detectMainMerges(repoPath, currentLogin, currentChanges)
+      if (main.availableToUnlock.length > 0) {
+        mergedToMain = { availableToUnlock: main.availableToUnlock, containsLocalChanges: main.containsLocalChanges }
+      }
+    }
+
+    return { pending, merged, denied, mergedToMain }
   }
 
   // Mark a resolved/denied PR as acted-on so it stops surfacing on the pill / dialog.
@@ -178,7 +191,113 @@ class PRMonitorService {
     saveState(repoPath, state)
   }
 
+  // Detect files whose committed work has landed in the default branch (merged
+  // directly, squash-merged, or via an externally-created PR) and push a
+  // one-time "merged into main" notification so the renderer can auto-pop the
+  // unlock dialog. Called after fetch/pull. Independent of tracked PRs.
+  async checkMainMerges(repoPath: string): Promise<void> {
+    const { accounts, currentAccountId } = authService.listAccounts()
+    const currentLogin = accounts.find(account => account.userId === currentAccountId)?.login ?? null
+    if (!currentLogin) return
+
+    const currentChanges = await this.currentChangedFileSet(repoPath)
+    const { availableToUnlock, containsLocalChanges, signatures } =
+      await this.detectMainMerges(repoPath, currentLogin, currentChanges)
+
+    const state    = loadState(repoPath)
+    const notified = state.notifiedMainMerges ?? {}
+
+    // Files merged at a content hash we haven't notified for yet.
+    const fresh = availableToUnlock.filter(p => notified[p] !== signatures[p])
+
+    // Re-sync the notified map to the current set (prune stale paths so a file
+    // re-locked later can notify again; record current hashes for merged files).
+    const live = new Set(availableToUnlock)
+    for (const p of Object.keys(notified)) if (!live.has(p)) delete notified[p]
+    for (const p of availableToUnlock) notified[p] = signatures[p]
+    state.notifiedMainMerges = notified
+    saveState(repoPath, state)
+
+    if (fresh.length === 0) return
+
+    const body = `${availableToUnlock.length} merged file${availableToUnlock.length !== 1 ? 's' : ''} ready to unlock`
+    const n = notificationService.push(
+      repoPath,
+      'main-merged',
+      'Changes merged into main',
+      body,
+      { availableToUnlock, containsLocalChanges },
+    )
+    desktopNotificationService.notify({
+      event:  'prResolved',
+      title:  'Changes merged into main',
+      body,
+      urgent: true,
+    })
+    this.emitNotification(n)
+  }
+
   // ── Private ─────────────────────────────────────────────────────────────────
+
+  // For each file the user currently holds an LFS lock on, decide whether their
+  // committed version is now identical to the default branch AND was actually
+  // changed in their work (vs the merge-base) — i.e. their work has been merged.
+  // Files with uncommitted local changes are reported separately so the caller
+  // can keep them locked ("still editing").
+  private async detectMainMerges(
+    repoPath: string,
+    currentLogin: string,
+    currentChanges: Set<string>,
+  ): Promise<{ availableToUnlock: string[]; containsLocalChanges: string[]; signatures: Record<string, string> }> {
+    const empty = { availableToUnlock: [] as string[], containsLocalChanges: [] as string[], signatures: {} as Record<string, string> }
+    try {
+      const locks = await lockService.listLocks(repoPath)
+      const myLockPaths = locks
+        .filter(lock => lock.owner.login === currentLogin)
+        .map(lock => lock.path.replace(/\\/g, '/'))
+      if (myLockPaths.length === 0) return empty
+
+      const { ref } = await gitService.defaultBranchRef(repoPath)
+      // The default-branch ref must exist locally (i.e. it has been fetched).
+      if ((await execSafe(['rev-parse', '--verify', '--quiet', ref], repoPath)).exitCode !== 0) return empty
+
+      const mbRes = await execSafe(['merge-base', 'HEAD', ref], repoPath)
+      if (mbRes.exitCode !== 0 || !mbRes.stdout.trim()) return empty
+      const mergeBase = mbRes.stdout.trim()
+
+      // Files you changed since diverging from main, and files that still differ
+      // between your HEAD and main. A file you changed that no longer differs
+      // from main has had its content merged in.
+      const changedByYou   = await this.diffNames(repoPath, mergeBase, 'HEAD')
+      if (changedByYou.size === 0) return empty
+      const differFromMain = await this.diffNames(repoPath, 'HEAD', ref)
+
+      const availableToUnlock: string[] = []
+      const containsLocalChanges: string[] = []
+      const signatures: Record<string, string> = {}
+
+      for (const filePath of myLockPaths) {
+        if (!changedByYou.has(filePath)) continue   // not part of your work
+        if (differFromMain.has(filePath)) continue  // your version isn't in main yet
+        if (currentChanges.has(filePath)) { containsLocalChanges.push(filePath); continue }
+        const blob = await execSafe(['rev-parse', `${ref}:${filePath}`], repoPath)
+        if (blob.exitCode !== 0 || !blob.stdout.trim()) continue
+        signatures[filePath] = blob.stdout.trim()
+        availableToUnlock.push(filePath)
+      }
+      return { availableToUnlock, containsLocalChanges, signatures }
+    } catch {
+      return empty
+    }
+  }
+
+  private async diffNames(repoPath: string, a: string, b: string): Promise<Set<string>> {
+    const res = await execSafe(['diff', '--name-only', a, b], repoPath)
+    if (res.exitCode !== 0) return new Set()
+    return new Set(
+      res.stdout.split('\n').map(line => line.trim().replace(/\\/g, '/')).filter(Boolean),
+    )
+  }
 
   private async resolveSlug(repoPath: string): Promise<{ owner: string; repo: string } | null> {
     try {

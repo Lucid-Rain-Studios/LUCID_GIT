@@ -1,14 +1,22 @@
 import { create } from 'zustand'
-import { ipc, PRMonitorStatus, PRMonitorMergedInfo } from '@/ipc'
+import { ipc, PRMonitorStatus } from '@/ipc'
+
+// The unlock dialog handles two sources of "your merged files":
+//  - 'pr':   a pull request created through the app, tracked by number.
+//  - 'main': work detected (purely from git) as already present in main,
+//            regardless of how it landed (direct merge, squash, external PR).
+export type UnlockTarget =
+  | { kind: 'pr';   prNumber: number; title: string; htmlUrl: string; availableToUnlock: string[]; containsLocalChanges: string[] }
+  | { kind: 'main'; title: string; availableToUnlock: string[]; containsLocalChanges: string[] }
 
 interface PRUnlockState {
   status:     PRMonitorStatus | null
   dialogOpen: boolean
-  dialogPR:   PRMonitorMergedInfo | null
+  target:     UnlockTarget | null
   repoPath:   string | null
 
   refresh:      (repoPath: string) => Promise<void>
-  openDialog:   (repoPath: string, pr: PRMonitorMergedInfo) => void
+  openDialog:   (repoPath: string, target: UnlockTarget) => void
   closeDialog:  () => void
   markResolved: (repoPath: string, prNumber: number) => Promise<void>
 }
@@ -16,7 +24,7 @@ interface PRUnlockState {
 export const usePRUnlockStore = create<PRUnlockState>((set, get) => ({
   status:     null,
   dialogOpen: false,
-  dialogPR:   null,
+  target:     null,
   repoPath:   null,
 
   refresh: async (repoPath) => {
@@ -28,9 +36,9 @@ export const usePRUnlockStore = create<PRUnlockState>((set, get) => ({
     }
   },
 
-  openDialog: (repoPath, pr) => set({ dialogOpen: true, dialogPR: pr, repoPath }),
+  openDialog: (repoPath, target) => set({ dialogOpen: true, target, repoPath }),
 
-  closeDialog: () => set({ dialogOpen: false, dialogPR: null }),
+  closeDialog: () => set({ dialogOpen: false, target: null }),
 
   markResolved: async (repoPath, prNumber) => {
     try { await ipc.prMonitorResolve(repoPath, prNumber) } catch { /* best-effort */ }

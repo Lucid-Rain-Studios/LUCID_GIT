@@ -196,6 +196,7 @@ export interface PRMonitorStatus {
   pending: number
   merged:  PRMonitorMergedInfo[]
   denied:  PRMonitorDeniedInfo[]
+  mergedToMain: { availableToUnlock: string[]; containsLocalChanges: string[] } | null
 }
 
 export interface WebhookConfig {
