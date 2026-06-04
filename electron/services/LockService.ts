@@ -166,6 +166,14 @@ class LockService {
     return locks
   }
 
+  // "Clear Lock Cache" toolbar action: drop the local Git LFS lock cache, then
+  // re-list straight from the server (which rebuilds the cache) and broadcast
+  // the fresh locks. Lean by design — no SQLite integrity inspection.
+  async clearCacheAndRefresh(repoPath: string): Promise<Lock[]> {
+    await gitService.clearLfsLockCache(repoPath)
+    return this.refresh(repoPath)
+  }
+
   // ── Private ─────────────────────────────────────────────────────────────────
 
   private isMissingFileUnlockCacheError(message: string): boolean {

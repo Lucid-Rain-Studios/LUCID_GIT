@@ -655,6 +655,7 @@ export interface LucidGitAPI {
   watchLock: (repoPath: string, filePath: string) => Promise<void>
   startLockPolling: (repoPath: string) => Promise<void>
   stopLockPolling: (repoPath: string) => Promise<void>
+  clearLockCache: (repoPath: string) => Promise<Lock[]>
 
   // LFS
   lfsStatus:    (repoPath: string) => Promise<LFSStatus>

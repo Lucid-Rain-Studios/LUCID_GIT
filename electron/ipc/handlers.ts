@@ -488,6 +488,10 @@ export function registerHandlers(): void {
     lockService.stopPolling(repoPath)
   })
 
+  handle(CHANNELS.LOCK_CLEAR_CACHE, async (_event, repoPath: string) => {
+    return lockService.clearCacheAndRefresh(repoPath)
+  })
+
   handle(CHANNELS.LFS_STATUS, async (_event, repoPath: string) => {
     return gitService.lfsStatus(repoPath)
   })

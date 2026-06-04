@@ -64,6 +64,7 @@ export const CHANNELS = {
   LOCK_WATCH:         'lock:watch',
   LOCK_START_POLLING: 'lock:start-polling',
   LOCK_STOP_POLLING:  'lock:stop-polling',
+  LOCK_CLEAR_CACHE:   'lock:clear-cache',
 
   // LFS
   LFS_STATUS:     'lfs:status',

@@ -7,6 +7,7 @@ import { useOperationStore } from '@/stores/operationStore'
 import { useErrorStore } from '@/stores/errorStore'
 import { usePRStore } from '@/stores/prStore'
 import { NotificationBell } from '@/components/notifications/NotificationBell'
+import { ClearLockCacheButton } from '@/components/locks/ClearLockCacheButton'
 import { getLastFetch, markFetchPerformed, onFetchPerformed } from '@/lib/fetchState'
 import {
   canCreatePR,
@@ -780,6 +781,9 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
           )}
 
           {repoPath && <div style={{ width: 1, height: 18, background: 'var(--lg-border)', flexShrink: 0, marginLeft: 2, marginRight: 2 }} />}
+
+          {/* Clear lock cache */}
+          {repoPath && <ClearLockCacheButton repoPath={repoPath} />}
 
           {/* Notification bell */}
           <NotificationBell />

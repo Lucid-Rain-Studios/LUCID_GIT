@@ -1596,6 +1596,26 @@ class GitService {
     return found.sort()
   }
 
+  /**
+   * Fast path for the "Clear Lock Cache" toolbar action: delete every Git LFS
+   * `lockcache.db` without the SQLite integrity inspection / double directory
+   * walk that `lfsLocksMaintenance` performs. Returns the number of files removed.
+   */
+  async clearLfsLockCache(repoPath: string): Promise<number> {
+    const paths = await this.findLfsLockCacheFiles(repoPath)
+    let deleted = 0
+    await Promise.all(paths.map(async filePath => {
+      try {
+        await fs.promises.rm(filePath, { force: true })
+        deleted++
+      } catch {
+        // Best-effort; a locked/permission-denied file is left for the deeper
+        // "Clear Cache & Refresh" maintenance flow to report.
+      }
+    }))
+    return deleted
+  }
+
   private async inspectLfsLockCacheFile(filePath: string): Promise<LfsLockCacheFile> {
     try {
       const stat = await fs.promises.stat(filePath)

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { ipc, CommitEntry, CommitFileChange, BranchInfo, BlameEntry, FileStatus, DiffContent } from '@/ipc'
 import { useOperationStore } from '@/stores/operationStore'
 import { useRepoStore } from '@/stores/repoStore'
@@ -310,7 +311,9 @@ function GraphCell({ node, graphColW, hoveredBranchKey, branchHoverLabels, onHov
   branchHoverLabels: Map<string, string>
   onHoverBranch: (branchKey: string | null) => void
 }) {
-  const [hoveredSeg, setHoveredSeg] = useState<{ x: number; label: string } | null>(null)
+  // Tooltip is rendered through a portal at viewport coordinates so it can never
+  // be clipped or stacked under the scrollable timeline / graph column.
+  const [hoveredSeg, setHoveredSeg] = useState<{ x: number; y: number; label: string; border: string } | null>(null)
   const isMerge = node.commit.parentHashes.length > 1
   const cx = GRAPH_PAD + node.lane * TL_LANE_W + TL_LANE_W / 2
   const cy = ROW_H / 2
@@ -323,6 +326,7 @@ function GraphCell({ node, graphColW, hoveredBranchKey, branchHoverLabels, onHov
     const strokeWidth = isHovered ? (seg.isMain ? 4.2 : 3.4) : seg.isMain ? 2.7 : 1.65
     const strokeOpacity = isDimmed ? 0.2 : isHovered ? 0.98 : seg.isMain ? 0.86 : 0.56
     const path = linePath(seg, isTop)
+    const border = seg.isMain ? MAIN_BRANCH_COLOR : '#3b4b6d'
     return (
       <g key={key}>
         <path d={path}
@@ -343,14 +347,12 @@ function GraphCell({ node, graphColW, hoveredBranchKey, branchHoverLabels, onHov
           strokeWidth={10}
           strokeLinecap="round"
           style={{ cursor: 'help' }}
-          onMouseEnter={() => {
-            setHoveredSeg({
-              x: GRAPH_PAD + ((seg.from + seg.to) / 2) * TL_LANE_W + TL_LANE_W / 2,
-              label: branchLabel,
-            })
+          onMouseEnter={(e) => {
+            setHoveredSeg({ x: e.clientX, y: e.clientY, label: branchLabel, border })
             onHoverBranch(branchKey)
           }}
-          onMouseMove={() => {
+          onMouseMove={(e) => {
+            setHoveredSeg(prev => (prev ? { ...prev, x: e.clientX, y: e.clientY } : prev))
             if (hoveredBranchKey !== branchKey) onHoverBranch(branchKey)
           }}
           onMouseLeave={() => {
@@ -362,7 +364,7 @@ function GraphCell({ node, graphColW, hoveredBranchKey, branchHoverLabels, onHov
     )
   }
   return (
-    <svg width={graphColW} height={ROW_H} style={{ flexShrink: 0, overflow: 'visible', display: 'block', position: 'relative', zIndex: hoveredSeg ? 60 : 1 }}>
+    <svg width={graphColW} height={ROW_H} style={{ flexShrink: 0, overflow: 'visible', display: 'block', position: 'relative' }}>
       {node.topLines.map((seg, i) => renderLine(seg, true, `t${i}`))}
       {node.bottomLines.map((seg, i) => renderLine(seg, false, `b${i}`))}
       {isMerge ? (
@@ -381,27 +383,33 @@ function GraphCell({ node, graphColW, hoveredBranchKey, branchHoverLabels, onHov
           filter={node.isMain ? 'url(#tl-glow-main)' : undefined}
         />
       )}
-      {hoveredSeg && (
-        <g style={{ pointerEvents: 'none' }}>
-          {(() => {
-            const padX = 8
-            const charW = 6.2
-            // Size to the label; allow it to overflow the narrow graph column
-            // (the elevated z-index lets it float above the commit content).
-            const tooltipW = Math.max(92, hoveredSeg.label.length * charW + padX * 2)
-            const tooltipX = Math.max(2, hoveredSeg.x - tooltipW / 2)
-            return (
-              <>
-                <rect x={tooltipX} y={2} width={tooltipW} height={20} rx={5} fill="#0f1420f5" stroke={hoveredBranchKey === 'main' ? MAIN_BRANCH_COLOR : '#3b4b6d'} />
-                <text x={tooltipX + tooltipW / 2} y={15} textAnchor="middle" fill="#e7ecfa" style={{ fontFamily: 'var(--lg-font-mono)', fontSize: 10 }}>
-                  {hoveredSeg.label}
-                </text>
-              </>
-            )
-          })()}
-        </g>
-      )}
+      {hoveredSeg && <BranchHoverTooltip x={hoveredSeg.x} y={hoveredSeg.y} label={hoveredSeg.label} border={hoveredSeg.border} />}
     </svg>
+  )
+}
+
+// Branch-lane tooltip rendered in a portal at viewport coordinates. Floating on
+// document.body means no ancestor (scroll container, graph column) can clip or
+// out-stack it. Positioned just above the cursor and clamped to the viewport.
+function BranchHoverTooltip({ x, y, label, border }: { x: number; y: number; label: string; border: string }) {
+  const margin = 8
+  const left = Math.max(margin, Math.min(x, window.innerWidth - margin))
+  const top = Math.max(margin, y - 14)
+  return createPortal(
+    <div
+      style={{
+        position: 'fixed', left, top, transform: 'translate(-50%, -100%)',
+        zIndex: 4000, pointerEvents: 'none',
+        background: '#0f1420', border: `1px solid ${border}`, borderRadius: 5,
+        padding: '3px 8px', maxWidth: 'min(420px, 90vw)', whiteSpace: 'nowrap',
+        overflow: 'hidden', textOverflow: 'ellipsis',
+        fontFamily: 'var(--lg-font-mono)', fontSize: 10.5, color: '#e7ecfa',
+        boxShadow: '0 6px 20px rgba(0,0,0,0.55)',
+      }}
+    >
+      {label}
+    </div>,
+    document.body,
   )
 }
 

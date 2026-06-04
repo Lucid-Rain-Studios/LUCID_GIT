@@ -20,12 +20,10 @@ export function ErrorPanel({ onReauth, onNavigateTab, onOpenMergeResolver }: Err
   const [autoFixBusy, setAutoFixBusy] = useState(false)
   const [autoFixResult, setAutoFixResult] = useState<string | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState(false)
 
   // Reset local state when the displayed error changes
   const handleDismiss = () => {
     setAutoFixResult(null)
-    setExpanded(false)
     dismiss()
   }
 
@@ -88,6 +86,12 @@ export function ErrorPanel({ onReauth, onNavigateTab, onOpenMergeResolver }: Err
         case 'retry-with-ssh':
           setAutoFixResult('Switch the remote URL to SSH:\n  git remote set-url origin git@github.com:org/repo.git')
           break
+
+        case 'clear-lock-cache': {
+          const locks = await ipc.clearLockCache(repoPath)
+          setAutoFixResult(`Lock cache cleared — ${locks.length} lock${locks.length !== 1 ? 's' : ''} refreshed from the server.`)
+          break
+        }
       }
     } catch (e) {
       setAutoFixResult(`Fix failed: ${String(e)}`)
@@ -96,23 +100,9 @@ export function ErrorPanel({ onReauth, onNavigateTab, onOpenMergeResolver }: Err
     }
   }
 
-  // Solid app-dark background with a saturated severity-colored frame, matching
-  // the rest of Lucid Git's panel chrome (no transparency on the surface itself).
-  const severityFrame = (s: LucidGitError['severity']) =>
-    s === 'fatal' ? 'border-lg-error'      :
-    s === 'error' ? 'border-lg-error'      :
-                    'border-lg-warning'
-
-  const severityAccent = (s: LucidGitError['severity']) =>
-    s === 'warning' ? 'text-lg-warning' : 'text-lg-error'
-
+  const accent = (s: LucidGitError['severity']) => (s === 'warning' ? '#f5a623' : '#e84040')
   const severityLabel = (s: LucidGitError['severity']) =>
     s === 'fatal' ? 'FATAL' : s === 'error' ? 'ERROR' : 'WARNING'
-
-  const severityDot = (s: LucidGitError['severity']) =>
-    s === 'fatal'   ? 'bg-lg-error' :
-    s === 'error'   ? 'bg-lg-error' :
-                      'bg-lg-warning'
 
   if (!current && !showHistory) return null
 
@@ -127,74 +117,86 @@ export function ErrorPanel({ onReauth, onNavigateTab, onOpenMergeResolver }: Err
       )}
 
       {/* ── Slide-up error panel ── */}
-      {current && (
-        <div className={cn(
-          'fixed bottom-6 left-1/2 -translate-x-1/2 z-50',
-          'w-full max-w-lg mx-4',
-          'rounded-lg border-2 shadow-2xl',
-          'font-mono text-[11px]',
-          'bg-lg-bg-elevated text-lg-text-primary',
-          severityFrame(current.severity)
-        )}>
+      {current && (() => {
+        const c = accent(current.severity)
+        return (
+        <div
+          style={{
+            position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+            zIndex: 50, width: 600, maxWidth: 'calc(100vw - 32px)',
+            background: '#12161f',                 // fully opaque surface
+            border: `1px solid ${c}`,
+            borderTop: `3px solid ${c}`,           // bold severity accent
+            borderRadius: 10,
+            boxShadow: '0 24px 64px rgba(0,0,0,0.7), 0 4px 16px rgba(0,0,0,0.5)',
+            fontFamily: 'var(--lg-font-ui)',
+            overflow: 'hidden',
+            animation: 'slide-down 0.16s ease both',
+          }}
+        >
           {/* Header */}
-          <div className={cn(
-            'flex items-center gap-2 px-4 py-2.5 border-b border-lg-border',
-            severityAccent(current.severity)
-          )}>
-            <span className={cn('w-2 h-2 rounded-full shrink-0', severityDot(current.severity))} />
-            <span className="text-[9px] tracking-widest uppercase opacity-90">
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 9,
+            padding: '11px 14px', background: `${c}1f`, borderBottom: '1px solid #1d2535',
+          }}>
+            <ErrorGlyph color={c} severity={current.severity} />
+            <span style={{
+              fontFamily: 'var(--lg-font-mono)', fontSize: 9, fontWeight: 700, letterSpacing: '0.12em',
+              color: c, background: `${c}26`, border: `1px solid ${c}66`,
+              borderRadius: 4, padding: '2px 6px', flexShrink: 0,
+            }}>
               {severityLabel(current.severity)} · {current.code}
             </span>
-            <span className="flex-1 font-semibold text-[12px]">{current.title}</span>
-            <button
-              onClick={() => setExpanded(v => !v)}
-              className="text-[10px] text-lg-text-secondary hover:text-lg-text-primary transition-colors"
-              title="Toggle details"
-            >
-              {expanded ? '▲' : '▼'}
-            </button>
-            <button
-              onClick={handleDismiss}
-              className="text-[10px] text-lg-text-secondary hover:text-lg-text-primary transition-colors ml-1"
-              title="Dismiss"
-            >
-              ✕
-            </button>
+            <span style={{ flex: 1, fontSize: 13.5, fontWeight: 700, color: '#eef2fb', letterSpacing: '-0.01em' }}>
+              {current.title}
+            </span>
+            <HeaderBtn label={copied === 'all' ? '✓ Copied' : 'Copy'} title="Copy full error"
+              onClick={() => copyToClipboard(`${current.title}\n\n${current.description}\n\n${current.gitMessage}`, 'all')} />
+            <HeaderBtn label="✕" title="Dismiss" onClick={handleDismiss} />
           </div>
 
           {/* Body */}
-          <div className="px-4 py-2.5 space-y-2">
-            <p className="text-[11px] text-lg-text-primary">{current.description}</p>
+          <div style={{ padding: '13px 14px', display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 'min(60vh, 460px)', overflowY: 'auto' }}>
+            {/* Plain-language description */}
+            <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: '#d6deef' }}>
+              {current.description}
+            </p>
 
-            {/* Causes — collapsed by default */}
-            {expanded && current.causes.length > 0 && (
+            {/* Raw output — always visible so you never need Bug Logs */}
+            <div>
+              <SectionHeading>What git reported</SectionHeading>
+              <pre style={{
+                margin: 0, maxHeight: 150, overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                background: '#0b0d13', border: '1px solid #1d2535', borderRadius: 6,
+                padding: '9px 10px', fontFamily: 'var(--lg-font-mono)', fontSize: 11, lineHeight: 1.55,
+                color: '#c2ccdf',
+              }}>
+                {current.gitMessage?.trim() || '(no output captured)'}
+              </pre>
+            </div>
+
+            {/* Likely causes */}
+            {current.causes.length > 0 && (
               <div>
-                <div className="text-[9px] uppercase tracking-widest text-lg-text-secondary mb-1">Likely causes</div>
-                <ul className="space-y-0.5">
-                  {current.causes.map((c, i) => (
-                    <li key={i} className="flex gap-1.5 text-lg-text-secondary">
-                      <span className={cn('shrink-0', severityAccent(current.severity))}>·</span>
-                      <span>{c}</span>
+                <SectionHeading>Likely causes</SectionHeading>
+                <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {current.causes.map((cause, i) => (
+                    <li key={i} style={{ display: 'flex', gap: 8, fontSize: 12, lineHeight: 1.5, color: '#aab4ca' }}>
+                      <span style={{ color: c, flexShrink: 0 }}>•</span>
+                      <span>{cause}</span>
                     </li>
                   ))}
                 </ul>
               </div>
             )}
 
-            {/* Fix steps */}
+            {/* Fixes */}
             {current.fixes.length > 0 && (
               <div>
-                <div className="text-[9px] uppercase tracking-widest text-lg-text-secondary mb-1.5">Fixes</div>
-                <div className="space-y-1">
+                <SectionHeading>How to fix it</SectionHeading>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {current.fixes.map((step, i) => (
-                    <FixRow
-                      key={i}
-                      step={step}
-                      busy={autoFixBusy}
-                      copied={copied}
-                      onDispatch={dispatch}
-                      onCopy={copyToClipboard}
-                    />
+                    <FixRow key={i} step={step} busy={autoFixBusy} copied={copied} onDispatch={dispatch} onCopy={copyToClipboard} />
                   ))}
                 </div>
               </div>
@@ -202,41 +204,40 @@ export function ErrorPanel({ onReauth, onNavigateTab, onOpenMergeResolver }: Err
 
             {/* Auto-fix result */}
             {autoFixResult && (
-              <pre className="text-[10px] text-lg-text-secondary whitespace-pre-wrap border-t border-lg-border pt-1.5 mt-1">
+              <pre style={{
+                margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'var(--lg-font-mono)', fontSize: 11,
+                color: '#6fcf97', background: 'rgba(45,189,110,0.08)', border: '1px solid rgba(45,189,110,0.25)',
+                borderRadius: 6, padding: '8px 10px',
+              }}>
                 {autoFixResult}
               </pre>
-            )}
-
-            {/* Raw output toggle */}
-            {expanded && (
-              <details className="text-[9px] text-lg-text-secondary">
-                <summary className="cursor-pointer hover:text-lg-text-primary transition-colors">Raw git output</summary>
-                <pre className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap bg-lg-bg-primary border border-lg-border rounded p-2">
-                  {current.gitMessage}
-                </pre>
-              </details>
             )}
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-between px-4 py-1.5 border-t border-lg-border">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 14px', borderTop: '1px solid #1d2535', background: 'rgba(0,0,0,0.18)' }}>
             <button
               onClick={() => setShowHistory(true)}
-              className="text-[9px] text-lg-text-secondary hover:text-lg-text-primary transition-colors"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--lg-font-ui)', fontSize: 11, color: '#7b8499' }}
+              onMouseEnter={e => (e.currentTarget.style.color = '#c8d0e8')}
+              onMouseLeave={e => (e.currentTarget.style.color = '#7b8499')}
             >
               Error history ({history.length})
             </button>
             {current.docsUrl && (
               <button
                 onClick={() => ipc.openExternal(current.docsUrl!)}
-                className="text-[9px] text-lg-text-secondary hover:text-lg-text-primary transition-colors"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--lg-font-ui)', fontSize: 11, color: '#7b8499' }}
+                onMouseEnter={e => (e.currentTarget.style.color = '#c8d0e8')}
+                onMouseLeave={e => (e.currentTarget.style.color = '#7b8499')}
               >
-                Docs ↗
+                Documentation ↗
               </button>
             )}
           </div>
         </div>
-      )}
+        )
+      })()}
 
       {/* ── Error history panel ── */}
       {showHistory && (
@@ -291,6 +292,56 @@ export function ErrorPanel({ onReauth, onNavigateTab, onOpenMergeResolver }: Err
   )
 }
 
+function SectionHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      fontFamily: 'var(--lg-font-ui)', fontSize: 9.5, fontWeight: 700,
+      letterSpacing: '0.1em', textTransform: 'uppercase', color: '#5a6880', marginBottom: 6,
+    }}>
+      {children}
+    </div>
+  )
+}
+
+function HeaderBtn({ label, title, onClick }: { label: string; title: string; onClick: () => void }) {
+  const [hover, setHover] = useState(false)
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        flexShrink: 0, background: hover ? '#1e2a3d' : 'transparent', border: 'none',
+        borderRadius: 5, padding: '3px 8px', cursor: 'pointer',
+        fontFamily: 'var(--lg-font-ui)', fontSize: 11, fontWeight: 600,
+        color: hover ? '#e8f1ff' : '#7b8499', transition: 'background 0.12s, color 0.12s',
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
+function ErrorGlyph({ color, severity }: { color: string; severity: LucidGitError['severity'] }) {
+  // Triangle warning for warnings, octagon-ish circle-X for errors/fatal.
+  if (severity === 'warning') {
+    return (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+        <path d="M8 1.5L14.5 13H1.5L8 1.5Z" stroke={color} strokeWidth="1.3" strokeLinejoin="round" fill={`${color}1f`} />
+        <path d="M8 6v3.5" stroke={color} strokeWidth="1.4" strokeLinecap="round" />
+        <circle cx="8" cy="11.4" r="0.75" fill={color} />
+      </svg>
+    )
+  }
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+      <circle cx="8" cy="8" r="6.5" stroke={color} strokeWidth="1.3" fill={`${color}1f`} />
+      <path d="M5.7 5.7l4.6 4.6M10.3 5.7l-4.6 4.6" stroke={color} strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 function FixRow({
   step, busy, copied, onDispatch, onCopy,
 }: {
@@ -304,18 +355,26 @@ function FixRow({
   const hasCommand = !!step.command
 
   return (
-    <div className="flex items-center gap-2 min-w-0">
-      <span className="shrink-0 opacity-50">→</span>
-      <span className="flex-1 opacity-80 truncate">{step.label}</span>
-      <div className="flex items-center gap-1 shrink-0">
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, minWidth: 0 }}>
+      <span style={{ flexShrink: 0, color: '#4a566a', marginTop: 1 }}>→</span>
+      <span style={{ flex: 1, minWidth: 0, fontSize: 12, lineHeight: 1.5, color: '#c2ccdf', fontFamily: 'var(--lg-font-ui)' }}>
+        {step.label}
+        {hasCommand && (
+          <code style={{
+            display: 'block', marginTop: 3, fontFamily: 'var(--lg-font-mono)', fontSize: 10.5,
+            color: '#8a94aa', wordBreak: 'break-all',
+          }}>{step.command}</code>
+        )}
+      </span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
         {hasCommand && (
           <ActionBtn
             onClick={() => onCopy(step.command!, `cmd-${step.label}`)}
             title={step.command}
             size="sm"
-            style={{ height: 20, paddingLeft: 6, paddingRight: 6, fontSize: 9 }}
+            style={{ height: 22, paddingLeft: 8, paddingRight: 8, fontSize: 10 }}
           >
-            {copied === `cmd-${step.label}` ? '✓ Copied' : 'Copy'}
+            {copied === `cmd-${step.label}` ? '✓' : 'Copy'}
           </ActionBtn>
         )}
         {hasAction && (
@@ -323,7 +382,7 @@ function FixRow({
             onClick={() => onDispatch(step.action!)}
             disabled={busy}
             size="sm"
-            style={{ height: 20, paddingLeft: 8, paddingRight: 8, fontSize: 9, fontWeight: 600 }}
+            style={{ height: 22, paddingLeft: 10, paddingRight: 10, fontSize: 10, fontWeight: 600 }}
           >
             {busy ? '…' : 'Fix'}
           </ActionBtn>

@@ -145,6 +145,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.LOCK_START_POLLING, repoPath),
   stopLockPolling: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.LOCK_STOP_POLLING, repoPath),
+  clearLockCache: (repoPath: string) =>
+    ipcRenderer.invoke(CHANNELS.LOCK_CLEAR_CACHE, repoPath),
 
   // ── LFS ───────────────────────────────────────────────────────────────────
   lfsStatus: (repoPath: string) =>

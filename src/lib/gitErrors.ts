@@ -13,6 +13,7 @@ export type FixAction =
   | { type: 'clean-pack-files' }
   | { type: 'increase-buffer' }
   | { type: 'retry-with-ssh' }
+  | { type: 'clear-lock-cache' }
 
 export interface FixStep {
   label: string
@@ -123,7 +124,7 @@ const DEFS: ErrorDef[] = [
   },
   {
     code: 'WORKING_TREE_LOCKED',
-    test: /unable to unlink old.*Invalid argument|unable to unlink old.*Permission denied|unable to (?:create|write) file.*(Permission denied|Access is denied|Invalid argument)/i,
+    test: /unable to unlink old.*Invalid argument|unable to unlink old.*Permission denied|unable to (?:create|write) file.*(Permission denied|Access is denied|Invalid argument)|being used by another process|cannot access the file because it is being used|The process cannot access the file/i,
     title: 'Files locked by another program',
     description: 'Git could not update the working tree because one or more files are open in another program. Close the program holding those files (most often Unreal Editor for .uasset / .umap files), then retry.',
     causes: [
@@ -164,6 +165,24 @@ const DEFS: ErrorDef[] = [
       { label: 'View all active locks', action: { type: 'open-settings', section: 'locks' } },
       { label: 'List locks', command: 'git lfs locks' },
       { label: 'Force unlock (use with caution)', command: 'git lfs unlock --force <path>' },
+    ],
+  },
+  {
+    code: 'LFS_LOCK_CACHE',
+    test: /database disk image is malformed|file is not a database|lockcache(\.db)?|lock id could not be resolved|could not be resolved after refreshing|refreshing the Git LFS lock cache|locks cache.*(corrupt|malformed|stale)/i,
+    title: 'Git LFS lock cache problem',
+    description: "Your local Git LFS lock cache (lockcache.db) is stale or corrupted, so locks couldn't be read or released. Clearing the cache rebuilds it from the server — it does not unlock any files or change commits.",
+    causes: [
+      'The lock cache database was corrupted or interrupted mid-write',
+      "A lock id couldn't be resolved from the stale cache when unlocking",
+      'Different Git LFS versions wrote incompatible cache files',
+    ],
+    severity: 'error',
+    canAutoFix: true,
+    fixes: [
+      { label: 'Clear the lock cache and refresh from the server', action: { type: 'clear-lock-cache' } },
+      { label: 'Open the Locked Files panel to Check & Repair', action: { type: 'open-settings', section: 'locks' } },
+      { label: 'List locks from the server', command: 'git lfs locks --json' },
     ],
   },
   {
@@ -297,15 +316,34 @@ export function parseGitError(raw: string): LucidGitError | null {
   return null
 }
 
-/** Parse or fall back to a generic unknown error. */
+/**
+ * Pull the most meaningful single line out of raw git/CLI stderr so an
+ * unrecognized error still says something specific instead of "An unexpected
+ * error occurred." Prefers explicit fatal/error/remote lines, then any line
+ * mentioning a failure, then the first non-empty line.
+ */
+export function summarizeRawError(raw: string): string {
+  const lines = raw
+    .replace(/^Error:\s*/i, '')
+    .split('\n')
+    .map(l => l.trim())
+    .filter(Boolean)
+  if (lines.length === 0) return 'An unexpected error occurred.'
+  const tagged   = lines.find(l => /^(fatal|error|remote|hint|warning):/i.test(l))
+  const failureish = lines.find(l => /(fail|denied|rejected|conflict|cannot|could not|unable|not found|refused|corrupt|malformed|locked|timed? ?out)/i.test(l))
+  const pick = tagged ?? failureish ?? lines[0]
+  return pick.replace(/^(fatal|error|remote|hint|warning):\s*/i, '').slice(0, 400)
+}
+
+/** Parse or fall back to a generic error that still surfaces the real message. */
 export function parseGitErrorOrGeneric(raw: string): LucidGitError {
   return parseGitError(raw) ?? {
     code: 'UNKNOWN',
     gitMessage: raw,
-    title: 'Git error',
-    description: 'An unexpected error occurred.',
+    title: 'Git operation failed',
+    description: summarizeRawError(raw),
     causes: [],
-    fixes: [{ label: 'View raw output below' }],
+    fixes: [],
     severity: 'error',
     canAutoFix: false,
   }
