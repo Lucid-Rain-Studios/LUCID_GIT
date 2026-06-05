@@ -147,6 +147,10 @@ const api = {
     ipcRenderer.invoke(CHANNELS.LOCK_STOP_POLLING, repoPath),
   clearLockCache: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.LOCK_CLEAR_CACHE, repoPath),
+  lockFolder: (repoPath: string, folderPath: string) =>
+    ipcRenderer.invoke(CHANNELS.LOCK_FOLDER, repoPath, folderPath),
+  unlockFolderMine: (repoPath: string, folderPath: string) =>
+    ipcRenderer.invoke(CHANNELS.UNLOCK_FOLDER_MINE, repoPath, folderPath),
 
   // ── LFS ───────────────────────────────────────────────────────────────────
   lfsStatus: (repoPath: string) =>
@@ -388,6 +392,19 @@ const api = {
     ipcRenderer.invoke(CHANNELS.PR_MONITOR_STATUS, repoPath),
   prMonitorResolve:(repoPath: string, prNumber: number) =>
     ipcRenderer.invoke(CHANNELS.PR_MONITOR_RESOLVE, repoPath, prNumber),
+
+  // Undo / checkpoint
+  undoGet:  (repoPath: string) => ipcRenderer.invoke(CHANNELS.UNDO_GET, repoPath),
+  undoLast: (repoPath: string) => ipcRenderer.invoke(CHANNELS.UNDO_LAST, repoPath),
+  onUndoAvailable: (cb: (info: unknown) => void) => {
+    const handler = (_e: unknown, info: unknown) => cb(info)
+    ipcRenderer.on(CHANNELS.EVT_UNDO_AVAILABLE, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.EVT_UNDO_AVAILABLE, handler)
+  },
+
+  // Global search
+  searchRepo: (repoPath: string, query: string) =>
+    ipcRenderer.invoke(CHANNELS.SEARCH_REPO, repoPath, query),
 
   // ── Bug logs ──────────────────────────────────────────────────────────────
   logGetText: () =>

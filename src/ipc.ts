@@ -199,6 +199,17 @@ export interface PRMonitorStatus {
   mergedToMain: { availableToUnlock: string[]; containsLocalChanges: string[] } | null
 }
 
+export interface UndoInfo {
+  op: 'pull' | 'merge' | 'update-from-main' | 'reset' | 'checkout' | 'revert' | 'cherry-pick'
+  label: string
+}
+
+export interface RepoSearchResult {
+  commits:  { hash: string; subject: string; author: string }[]
+  branches: string[]
+  files:    string[]
+}
+
 export interface WebhookConfig {
   url: string
   enabled: boolean
@@ -656,6 +667,8 @@ export interface LucidGitAPI {
   startLockPolling: (repoPath: string) => Promise<void>
   stopLockPolling: (repoPath: string) => Promise<void>
   clearLockCache: (repoPath: string) => Promise<Lock[]>
+  lockFolder: (repoPath: string, folderPath: string) => Promise<{ locked: number; skipped: number; failed: number }>
+  unlockFolderMine: (repoPath: string, folderPath: string) => Promise<{ unlocked: number; failed: number }>
 
   // LFS
   lfsStatus:    (repoPath: string) => Promise<LFSStatus>
@@ -796,6 +809,14 @@ export interface LucidGitAPI {
   prMonitorCheck:  (repoPath: string) => Promise<void>
   prMonitorStatus: (repoPath: string) => Promise<PRMonitorStatus>
   prMonitorResolve:(repoPath: string, prNumber: number) => Promise<void>
+
+  // Undo / checkpoint
+  undoGet:  (repoPath: string) => Promise<UndoInfo | null>
+  undoLast: (repoPath: string) => Promise<{ ok: boolean; label: string; message: string }>
+  onUndoAvailable: (cb: (info: { repoPath: string; label: string }) => void) => () => void
+
+  // Global search
+  searchRepo: (repoPath: string, query: string) => Promise<RepoSearchResult>
 
   // Bug logs
   logGetText: () => Promise<string>

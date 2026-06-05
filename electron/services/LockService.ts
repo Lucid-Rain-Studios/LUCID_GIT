@@ -174,6 +174,59 @@ class LockService {
     return this.refresh(repoPath)
   }
 
+  // ── Folder-level locking ──────────────────────────────────────────────────────
+
+  private filesUnderFolder(files: string[], folderPath: string): string[] {
+    const prefix = folderPath.replace(/\\/g, '/').replace(/\/+$/, '') + '/'
+    return files.filter(f => f.replace(/\\/g, '/').startsWith(prefix))
+  }
+
+  // Lock every LFS-tracked file under a folder that isn't already locked by anyone.
+  async lockFolder(repoPath: string, folderPath: string): Promise<{ locked: number; skipped: number; failed: number }> {
+    const [lfsFiles, currentLocks] = await Promise.all([
+      gitService.lfsTrackedFiles(repoPath),
+      this.listLocks(repoPath),
+    ])
+    const lockedPaths = new Set(currentLocks.map(l => l.path.replace(/\\/g, '/')))
+    const candidates = this.filesUnderFolder(lfsFiles, folderPath)
+
+    let locked = 0, skipped = 0, failed = 0
+    for (const filePath of candidates) {
+      if (lockedPaths.has(filePath)) { skipped++; continue }
+      try {
+        await this.lockFile(repoPath, filePath)
+        locked++
+      } catch {
+        failed++
+      }
+    }
+    // One broadcast after the batch keeps the UI snappy and avoids per-file churn.
+    await this.refresh(repoPath)
+    return { locked, skipped, failed }
+  }
+
+  // Unlock only the files under a folder that the current user owns.
+  async unlockFolderMine(repoPath: string, folderPath: string): Promise<{ unlocked: number; failed: number }> {
+    const login = this.currentUserLogin()
+    const currentLocks = await this.listLocks(repoPath)
+    const mine = this.filesUnderFolder(
+      currentLocks.filter(l => login && l.owner.login === login).map(l => l.path),
+      folderPath,
+    )
+
+    let unlocked = 0, failed = 0
+    for (const filePath of mine) {
+      try {
+        await this.unlockFile(repoPath, filePath)
+        unlocked++
+      } catch {
+        failed++
+      }
+    }
+    await this.refresh(repoPath)
+    return { unlocked, failed }
+  }
+
   // ── Private ─────────────────────────────────────────────────────────────────
 
   private isMissingFileUnlockCacheError(message: string): boolean {

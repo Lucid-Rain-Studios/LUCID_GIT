@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo, useRef, useLayoutEffect, useCallba
 import { ipc, Lock, BlameEntry } from '@/ipc'
 import { useLockStore } from '@/stores/lockStore'
 import { useAuthStore } from '@/stores/authStore'
+import { useOperationStore } from '@/stores/operationStore'
+import { useStatusToastStore } from '@/stores/statusToastStore'
 import { FileDetailsSidePanel } from '@/components/shared/FileDetailsSidePanel'
 import { FilePathText } from '@/components/ui/FilePathText'
 
@@ -232,13 +234,15 @@ function ContextMenu({ menu, repoPath, locks, currentUserName, onClose, onNaviga
 
 // ── Row components ────────────────────────────────────────────────────────────
 
-function FolderRow({ name, depth, count, collapsed, onToggle }: {
+function FolderRow({ name, depth, count, collapsed, onToggle, onContextMenu }: {
   name: string; depth: number; count: number; collapsed: boolean; onToggle: () => void
+  onContextMenu?: (e: React.MouseEvent) => void
 }) {
   const [hover, setHover] = useState(false)
   return (
     <div
       onClick={onToggle}
+      onContextMenu={onContextMenu}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
@@ -509,6 +513,7 @@ function VirtualListInner({ rows, repoPath, locks, currentUserName, onNavigate, 
   const [scrollTop,   setScrollTop]   = useState(0)
   const [containerH,  setContainerH]  = useState(600)
   const [menu,        setMenu]        = useState<MenuState | null>(null)
+  const [folderMenu,  setFolderMenu]  = useState<{ x: number; y: number; folderPath: string; name: string } | null>(null)
 
   useLayoutEffect(() => {
     const el = containerRef.current
@@ -528,6 +533,12 @@ function VirtualListInner({ rows, repoPath, locks, currentUserName, onNavigate, 
     e.preventDefault()
     e.stopPropagation()
     setMenu({ x: e.clientX, y: e.clientY, filePath })
+  }, [])
+
+  const openFolderMenu = useCallback((e: React.MouseEvent, folderPath: string, name: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setFolderMenu({ x: e.clientX, y: e.clientY, folderPath, name })
   }, [])
 
   const totalHeight = rows.length * ROW_HEIGHT
@@ -550,6 +561,7 @@ function VirtualListInner({ rows, repoPath, locks, currentUserName, onNavigate, 
                   key={`folder:${row.fullPath}`}
                   name={row.name} depth={row.depth} count={row.count} collapsed={row.collapsed}
                   onToggle={row.onToggle!}
+                  onContextMenu={e => openFolderMenu(e, row.fullPath, row.name)}
                 />
               )
             }
@@ -574,7 +586,115 @@ function VirtualListInner({ rows, repoPath, locks, currentUserName, onNavigate, 
           onClose={() => setMenu(null)} onNavigate={onNavigate}
         />
       )}
+
+      {folderMenu && (
+        <FolderContextMenu
+          menu={folderMenu} repoPath={repoPath}
+          onClose={() => setFolderMenu(null)}
+        />
+      )}
     </div>
+  )
+}
+
+// ── Folder context menu — bulk lock / unlock ──────────────────────────────────
+
+function FolderContextMenu({ menu, repoPath, onClose }: {
+  menu: { x: number; y: number; folderPath: string; name: string }
+  repoPath: string
+  onClose: () => void
+}) {
+  const menuRef = useRef<HTMLDivElement>(null)
+  const opRun     = useOperationStore(s => s.run)
+  const showToast = useStatusToastStore(s => s.show)
+
+  useLayoutEffect(() => {
+    const el = menuRef.current
+    if (!el) return
+    const { right, bottom } = el.getBoundingClientRect()
+    if (right  > window.innerWidth)  el.style.left = `${menu.x - el.offsetWidth}px`
+    if (bottom > window.innerHeight) el.style.top  = `${menu.y - el.offsetHeight}px`
+  }, [menu.x, menu.y])
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent)    => { if (!menuRef.current?.contains(e.target as Node)) onClose() }
+    const onKey  = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown',   onKey)
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [onClose])
+
+  const doLock = () => {
+    onClose()
+    opRun('Locking folder…', async () => {
+      const r = await ipc.lockFolder(repoPath, menu.folderPath)
+      const parts = [`${r.locked} locked`]
+      if (r.skipped) parts.push(`${r.skipped} already locked`)
+      if (r.failed)  parts.push(`${r.failed} failed`)
+      showToast(`${menu.name}: ${parts.join(' · ')}`)
+    }).catch(e => showToast(`Lock folder failed: ${String(e)}`))
+  }
+
+  const doUnlock = () => {
+    onClose()
+    opRun('Unlocking folder…', async () => {
+      const r = await ipc.unlockFolderMine(repoPath, menu.folderPath)
+      const parts = [`${r.unlocked} unlocked`]
+      if (r.failed) parts.push(`${r.failed} failed`)
+      showToast(`${menu.name}: ${parts.join(' · ')}`)
+    }).catch(e => showToast(`Unlock folder failed: ${String(e)}`))
+  }
+
+  const items = [
+    { label: 'Lock all files in folder',  danger: false, action: doLock },
+    { label: 'Unlock my files in folder', danger: false, action: doUnlock },
+  ]
+
+  return (
+    <div
+      ref={menuRef}
+      style={{
+        position: 'fixed', left: menu.x, top: menu.y, zIndex: 9999,
+        background: '#151921', border: '1px solid #2f3a54', borderRadius: 6,
+        boxShadow: '0 8px 32px rgba(0,0,0,0.6)', padding: '3px 0', minWidth: 200,
+      }}
+    >
+      <div style={{
+        padding: '6px 12px 5px', fontFamily: 'var(--lg-font-mono)', fontSize: 10,
+        color: '#4e5870', borderBottom: '1px solid #252d42', marginBottom: 3,
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>
+        {menu.folderPath} — LFS files only
+      </div>
+      {items.map(item => (
+        <button
+          key={item.label}
+          onClick={item.action}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            width: '100%', height: 30, paddingLeft: 10, paddingRight: 12,
+            background: 'transparent', border: 'none', textAlign: 'left',
+            color: '#c4cad8', fontFamily: 'var(--lg-font-ui)', fontSize: 12, cursor: 'pointer',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = '#1e2a40' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+        >
+          <LockMenuIcon />
+          {item.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function LockMenuIcon() {
+  return (
+    <span style={{ color: '#4e5870', flexShrink: 0, display: 'flex', width: 14, justifyContent: 'center' }}>
+      <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+        <rect x="2" y="6" width="9" height="6" rx="1" stroke="currentColor" strokeWidth="1.1" />
+        <path d="M4.5 6V4.5a2 2 0 0 1 4 0V6" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
+      </svg>
+    </span>
   )
 }
 

@@ -1,12 +1,15 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { Command } from 'cmdk'
-import { ipc } from '@/ipc'
+import { ipc, RepoSearchResult, UndoInfo } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useAuthStore } from '@/stores/authStore'
+import { useDialogStore } from '@/stores/dialogStore'
 import { cn } from '@/lib/utils'
 import { markFetchPerformed } from '@/lib/fetchState'
 import { getTopBarSyncHandlers, getTopBarSyncSnapshot } from '@/lib/topBarSyncBridge'
 import { useDialogOverlayDismiss } from '@/lib/useDialogOverlayDismiss'
+
+const MOD = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'
 
 interface CommandPaletteProps {
   open: boolean
@@ -17,11 +20,31 @@ interface CommandPaletteProps {
   onAddAccount: () => void
 }
 
+const searchItemCls = cn(
+  'mx-1.5 px-2.5 py-1.5 rounded text-[12px] cursor-pointer flex items-center gap-2 font-mono',
+  'aria-selected:bg-lg-accent/15 aria-selected:text-lg-accent transition-colors',
+)
+
+function SearchGroup({ heading, children }: { heading: string; children: React.ReactNode }) {
+  return (
+    <Command.Group
+      heading={
+        <div className="px-3 py-1 text-[9px] font-mono uppercase tracking-widest text-lg-text-secondary/60">
+          {heading}
+        </div>
+      }
+    >
+      {children}
+    </Command.Group>
+  )
+}
+
 interface PaletteCommand {
   id: string
   label: string
   group: string
   keywords?: string
+  shortcut?: string
   action: () => void
   disabled?: boolean
 }
@@ -36,12 +59,54 @@ export function CommandPalette({
 }: CommandPaletteProps) {
   const { repoPath, refreshStatus, bumpSyncTick } = useRepoStore()
   const { accounts, currentAccountId } = useAuthStore()
+  const dialog = useDialogStore()
   const [syncing, setSyncing] = useState(false)
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<RepoSearchResult | null>(null)
+  const [undoInfo, setUndoInfo] = useState<UndoInfo | null>(null)
 
   const run = useCallback((fn: () => void | Promise<void>) => {
     onClose()
     void fn()
   }, [onClose])
+
+  // Load undo availability + reset search whenever the palette opens.
+  useEffect(() => {
+    if (!open) { setQuery(''); setResults(null); return }
+    if (repoPath) ipc.undoGet(repoPath).then(setUndoInfo).catch(() => setUndoInfo(null))
+    else setUndoInfo(null)
+  }, [open, repoPath])
+
+  // Debounced global search across commits / branches / files.
+  useEffect(() => {
+    if (!open || !repoPath || query.trim().length < 2) { setResults(null); return }
+    let cancelled = false
+    const t = window.setTimeout(() => {
+      ipc.searchRepo(repoPath, query.trim()).then(r => { if (!cancelled) setResults(r) }).catch(() => {})
+    }, 150)
+    return () => { cancelled = true; window.clearTimeout(t) }
+  }, [open, repoPath, query])
+
+  const doUndo = async () => {
+    if (!repoPath || !undoInfo) return
+    const label = undoInfo.label
+    onClose()
+    const ok = await dialog.confirm({
+      title: `Undo ${label.toLowerCase()}?`,
+      message: `This restores your repository to the state from before the ${label.toLowerCase()}.`,
+      detail: 'Any work in progress is re-applied from the automatic snapshot.',
+      confirmLabel: 'Undo',
+      danger: true,
+    })
+    if (!ok) return
+    await ipc.undoLast(repoPath).catch(() => {})
+    refreshStatus(); bumpSyncTick()
+  }
+
+  const revealFile = (file: string) => {
+    const full = `${repoPath}/${file}`.replace(/\//g, '\\')
+    ipc.showInFolder(full)
+  }
 
   const doFetch = async () => {
     if (!repoPath) return
@@ -88,6 +153,7 @@ export function CommandPalette({
       group: 'Repository',
       label: 'Fetch',
       keywords: 'sync remote',
+      shortcut: `${MOD}+⇧+F`,
       disabled: !repoPath || syncing,
       action: () => run(doFetch),
     },
@@ -96,6 +162,7 @@ export function CommandPalette({
       group: 'Repository',
       label: 'Pull',
       keywords: 'sync remote download',
+      shortcut: `${MOD}+⇧+L`,
       disabled: !repoPath,
       action: () => run(doPull),
     },
@@ -104,9 +171,17 @@ export function CommandPalette({
       group: 'Repository',
       label: 'Push',
       keywords: 'sync remote upload',
+      shortcut: `${MOD}+⇧+U`,
       disabled: !repoPath,
       action: () => run(doPush),
     },
+    ...(undoInfo ? [{
+      id: 'repo-undo',
+      group: 'Repository',
+      label: `Undo ${undoInfo.label.toLowerCase()}`,
+      keywords: 'undo revert back checkpoint restore safety',
+      action: () => doUndo(),
+    }] : []),
     {
       id: 'repo-refresh',
       group: 'Repository',
@@ -179,7 +254,9 @@ export function CommandPalette({
             <span className="text-lg-text-secondary text-sm mr-2">⌘</span>
             <Command.Input
               autoFocus
-              placeholder="Type a command or search…"
+              value={query}
+              onValueChange={setQuery}
+              placeholder="Type a command, or search commits / branches / files…"
               className="flex-1 bg-transparent py-3 text-[13px] outline-none placeholder-lg-text-secondary/50"
             />
           </div>
@@ -207,17 +284,60 @@ export function CommandPalette({
                       value={`${cmd.label} ${cmd.keywords ?? ''}`}
                       onSelect={cmd.action}
                       className={cn(
-                        'mx-1.5 px-2.5 py-1.5 rounded text-[12px] cursor-pointer',
+                        'mx-1.5 px-2.5 py-1.5 rounded text-[12px] cursor-pointer flex items-center gap-2',
                         'aria-selected:bg-lg-accent/15 aria-selected:text-lg-accent',
                         'transition-colors'
                       )}
                     >
-                      {cmd.label}
+                      <span className="flex-1">{cmd.label}</span>
+                      {cmd.shortcut && (
+                        <span className="text-[9px] text-lg-text-secondary/60 tracking-wide">{cmd.shortcut}</span>
+                      )}
                     </Command.Item>
                   ))}
                 </Command.Group>
               )
             })}
+
+            {/* ── Global search results ── */}
+            {results && results.branches.length > 0 && (
+              <SearchGroup heading="Branches">
+                {results.branches.map(b => (
+                  <Command.Item key={`branch-${b}`} value={`${query} branch ${b}`}
+                    onSelect={() => run(() => onNavigateTab('branches'))}
+                    className={searchItemCls}>
+                    <span className="text-lg-text-secondary/60">⎇</span>
+                    <span className="flex-1 truncate">{b}</span>
+                  </Command.Item>
+                ))}
+              </SearchGroup>
+            )}
+
+            {results && results.commits.length > 0 && (
+              <SearchGroup heading="Commits">
+                {results.commits.map(c => (
+                  <Command.Item key={`commit-${c.hash}`} value={`${query} commit ${c.hash} ${c.subject}`}
+                    onSelect={() => run(() => { navigator.clipboard.writeText(c.hash); onNavigateTab('timeline') })}
+                    className={searchItemCls}>
+                    <span className="text-lg-accent/80 shrink-0">{c.hash.slice(0, 7)}</span>
+                    <span className="flex-1 truncate">{c.subject}</span>
+                    <span className="text-[9px] text-lg-text-secondary/60 shrink-0">{c.author}</span>
+                  </Command.Item>
+                ))}
+              </SearchGroup>
+            )}
+
+            {results && results.files.length > 0 && (
+              <SearchGroup heading="Files">
+                {results.files.map(f => (
+                  <Command.Item key={`file-${f}`} value={`${query} file ${f}`}
+                    onSelect={() => run(() => revealFile(f))}
+                    className={searchItemCls}>
+                    <span className="flex-1 truncate">{f}</span>
+                  </Command.Item>
+                ))}
+              </SearchGroup>
+            )}
           </Command.List>
 
           <div className="border-t border-lg-border px-3 py-1.5 flex items-center gap-3">

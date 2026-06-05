@@ -55,6 +55,12 @@ export interface ChangelogEntry {
   body: string        // commit body without subject; empty string if none
 }
 
+export interface RepoSearchResult {
+  commits:  { hash: string; subject: string; author: string }[]
+  branches: string[]
+  files:    string[]
+}
+
 export interface ChangelogQuery {
   /** ISO date 'YYYY-MM-DD' (inclusive). Ignored if fromCommit is set. */
   fromDate?: string

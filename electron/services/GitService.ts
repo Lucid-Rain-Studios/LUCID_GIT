@@ -5,7 +5,7 @@ import path from 'path'
 import { exec, execSafe, execWithProgress, execWithStdin, gitAuthArgs, ProgressCallback } from '../util/dugite-exec'
 import { authService } from './AuthService'
 import { parseGitLog, GIT_LOG_FORMAT } from '../util/git-log-parse'
-import { FileStatus, BranchInfo, CommitEntry, ChangelogEntry, ChangelogQuery, DiffContent, StashEntry, ContributorInfo, ConflictPreviewFile, SyncStatus, LFSStatus, LfsLockCacheFile, LfsLocksMaintenanceResult, SizeBreakdown, CleanupResult, BranchActivity, BranchDiffSummary, BranchDiffFile, PotentialMergeConflictReport } from '../types'
+import { FileStatus, BranchInfo, CommitEntry, ChangelogEntry, ChangelogQuery, DiffContent, StashEntry, ContributorInfo, ConflictPreviewFile, SyncStatus, LFSStatus, LfsLockCacheFile, LfsLocksMaintenanceResult, SizeBreakdown, CleanupResult, BranchActivity, BranchDiffSummary, BranchDiffFile, PotentialMergeConflictReport, RepoSearchResult } from '../types'
 
 // ── Diff helpers ──────────────────────────────────────────────────────────────
 
@@ -767,6 +767,57 @@ class GitService {
   /** Default branch name + resolvable ref (e.g. "origin/main") for diffing against. */
   async defaultBranchRef(repoPath: string): Promise<{ name: string; ref: string }> {
     return this.remoteDefaultBranch(repoPath)
+  }
+
+  /** Paths of all Git-LFS-tracked files (the lockable set), forward-slashed. */
+  async lfsTrackedFiles(repoPath: string): Promise<string[]> {
+    const res = await execSafe(['lfs', 'ls-files', '--name-only'], repoPath)
+    if (res.exitCode !== 0 || !res.stdout.trim()) return []
+    return res.stdout.split('\n').map(l => l.trim().replace(/\\/g, '/')).filter(Boolean)
+  }
+
+  /**
+   * Global search for the command palette across commit messages/hashes,
+   * branch names, and tracked file paths. Cheap, capped result sets.
+   */
+  async searchRepo(repoPath: string, query: string): Promise<RepoSearchResult> {
+    const q = query.trim()
+    const empty: RepoSearchResult = { commits: [], branches: [], files: [] }
+    if (q.length < 2) return empty
+
+    const SEP = '\x1f'
+    const [commitsRes, branches, filesRes] = await Promise.all([
+      execSafe(['log', '--all', '-i', `--grep=${q}`, `--format=%H${SEP}%an${SEP}%s`, '-n', '8'], repoPath),
+      this.branchList(repoPath).catch(() => []),
+      execSafe(['ls-files'], repoPath),
+    ])
+
+    const commits = commitsRes.exitCode === 0 && commitsRes.stdout.trim()
+      ? commitsRes.stdout.trim().split('\n').filter(Boolean).map(line => {
+          const [hash, author, subject] = line.split(SEP)
+          return { hash, author: author ?? '', subject: subject ?? '' }
+        })
+      : []
+
+    // Also resolve a direct hash-prefix match if the query looks like one.
+    if (/^[0-9a-f]{4,40}$/i.test(q) && !commits.some(c => c.hash.startsWith(q))) {
+      const byHash = await execSafe(['log', '-1', `--format=%H${SEP}%an${SEP}%s`, q], repoPath)
+      if (byHash.exitCode === 0 && byHash.stdout.trim()) {
+        const [hash, author, subject] = byHash.stdout.trim().split(SEP)
+        commits.unshift({ hash, author: author ?? '', subject: subject ?? '' })
+      }
+    }
+
+    const ql = q.toLowerCase()
+    const branchNames = Array.from(new Set(
+      branches.map(b => b.displayName || b.name).filter(name => name && name.toLowerCase().includes(ql)),
+    )).slice(0, 8)
+
+    const files = filesRes.exitCode === 0 && filesRes.stdout.trim()
+      ? filesRes.stdout.split('\n').map(l => l.trim().replace(/\\/g, '/')).filter(p => p && p.toLowerCase().includes(ql)).slice(0, 12)
+      : []
+
+    return { commits, branches: branchNames, files }
   }
 
   /** Per-branch activity: last committer + timestamp for each local + remote branch. */

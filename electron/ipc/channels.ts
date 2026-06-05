@@ -65,6 +65,8 @@ export const CHANNELS = {
   LOCK_START_POLLING: 'lock:start-polling',
   LOCK_STOP_POLLING:  'lock:stop-polling',
   LOCK_CLEAR_CACHE:   'lock:clear-cache',
+  LOCK_FOLDER:        'lock:folder',
+  UNLOCK_FOLDER_MINE: 'lock:unlock-folder-mine',
 
   // LFS
   LFS_STATUS:     'lfs:status',
@@ -198,6 +200,13 @@ export const CHANNELS = {
   PR_MONITOR_STATUS: 'pr-monitor:status',
   PR_MONITOR_RESOLVE:'pr-monitor:resolve',
 
+  // Undo / checkpoint
+  UNDO_GET:           'undo:get',
+  UNDO_LAST:          'undo:last',
+
+  // Global search
+  SEARCH_REPO:        'search:repo',
+
   // OS dialogs + shell
   DIALOG_OPEN_DIRECTORY: 'dialog:open-directory',
   DIALOG_OPEN_FILE:      'dialog:open-file',
@@ -226,6 +235,7 @@ export const CHANNELS = {
   EVT_NOTIFICATION:       'evt:notification',
   EVT_UPDATE_AVAILABLE:   'evt:update-available',
   EVT_STATUS_CHANGED:     'evt:status-changed',
+  EVT_UNDO_AVAILABLE:     'evt:undo-available',
 
   // Window controls (frameless)
   WIN_MINIMIZE:          'win:minimize',

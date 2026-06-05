@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { useLockStore } from '@/stores/lockStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { usePRUnlockStore } from '@/stores/prUnlockStore'
+import { getTopBarSyncHandlers, getTopBarSyncSnapshot } from '@/lib/topBarSyncBridge'
 import { useStatusToastStore } from '@/stores/statusToastStore'
 import { StatusToastStack } from '@/components/notifications/StatusToastStack'
 import { useErrorStore } from '@/stores/errorStore'
@@ -236,14 +237,54 @@ export function AppShell() {
     window.addEventListener('mouseup', onUp)
   }, [filePanelWidth])
 
-  // ── Keyboard shortcut — command palette ────────────────────────────────────
+  // ── Keyboard shortcuts — command palette + sync verbs ──────────────────────
   useEffect(() => {
+    const typingInField = (t: EventTarget | null): boolean => {
+      const el = t as HTMLElement | null
+      if (!el) return false
+      const tag = el.tagName
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable
+    }
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setCmdOpen(o => !o) }
+      const mod = e.metaKey || e.ctrlKey
+      if (!mod) return
+      // Command palette — allowed even while typing.
+      if (!e.shiftKey && e.key.toLowerCase() === 'k') { e.preventDefault(); setCmdOpen(o => !o); return }
+      // Sync verbs — Mod+Shift+{F,L,U} ; Go to Changes — Mod+Shift+C. Skip while typing.
+      if (!e.shiftKey || typingInField(e.target)) return
+      const handlers = getTopBarSyncHandlers()
+      const onCurrentRepo = getTopBarSyncSnapshot().repoPath === repoPath
+      switch (e.key.toLowerCase()) {
+        case 'f': if (repoPath && onCurrentRepo && handlers) { e.preventDefault(); void handlers.fetch() } break
+        case 'l': if (repoPath && onCurrentRepo && handlers) { e.preventDefault(); void handlers.pull() }  break
+        case 'u': if (repoPath && onCurrentRepo && handlers) { e.preventDefault(); void handlers.push() }  break
+        case 'c': if (repoPath) { e.preventDefault(); setLeftTab('timeline') } break
+      }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [])
+  }, [repoPath])
+
+  // ── Undo last operation — offer an Undo toast after a risky op completes ────
+  useEffect(() => {
+    const unsub = ipc.onUndoAvailable(({ repoPath: opRepo, label }) => {
+      if (!opRepo || opRepo !== repoPath) return
+      showStatusToast(`${label} done`, {
+        durationMs: 12_000,
+        action: {
+          label: 'Undo',
+          onClick: async () => {
+            const res = await ipc.undoLast(opRepo).catch(() => null)
+            showStatusToast(res?.ok ? res.message : (res?.message ?? 'Undo failed.'))
+            useRepoStore.getState().refreshStatus()
+            useRepoStore.getState().bumpSyncTick()
+            loadLocks(opRepo)
+          },
+        },
+      })
+    })
+    return unsub
+  }, [repoPath, showStatusToast, loadLocks])
 
   // ── IPC events ────────────────────────────────────────────────────────────
   useEffect(() => {
