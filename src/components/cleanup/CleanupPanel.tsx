@@ -185,7 +185,7 @@ export function CleanupPanel({ repoPath }: CleanupPanelProps) {
               <div className="space-y-2">
                 <SizeRow label="Pack files"  bytes={size.packsBytes}    total={size.totalBytes} color="bg-[#4a9eff]" />
                 <SizeRow label="Loose objects" bytes={Math.max(0, size.objectsBytes - size.packsBytes)} total={size.totalBytes} color="bg-lg-accent" />
-                <SizeRow label="LFS cache"   bytes={size.lfsCacheBytes} total={size.totalBytes} color="bg-lg-success" />
+                <SizeRow label={size.approximate ? "LFS cache (approx)" : "LFS cache"}   bytes={size.lfsCacheBytes} total={size.totalBytes} color="bg-lg-success" />
                 <SizeRow label="Logs"        bytes={size.logsBytes}     total={size.totalBytes} color="bg-lg-text-secondary" />
               </div>
             </div>

@@ -159,6 +159,9 @@ export interface SizeBreakdown {
   packsBytes: number
   lfsCacheBytes: number
   logsBytes: number
+  /** True when the LFS/logs walk hit its time budget and the byte totals are a
+   *  lower bound (large UE LFS caches can't be fully scanned in time). */
+  approximate?: boolean
 }
 
 export interface CleanupResult {

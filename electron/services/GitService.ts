@@ -1506,9 +1506,23 @@ class GitService {
   private _lfsCache  = new Map<string, { ts: number; result: LFSStatus }>()
   private static readonly SIZE_TTL = 2  * 60 * 1000 // 2 minutes
   private static readonly LFS_TTL  = 5  * 60 * 1000 // 5 minutes
+  private static readonly SIZE_WALK_BUDGET_MS = 12_000 // cap LFS/logs walk — handler aborts at 30s
 
-  /** Walk a small directory tree and sum file sizes. Only for LFS/logs — NOT for .git/objects. */
-  private async _dirBytes(dirPath: string): Promise<number> {
+  /**
+   * Walk a directory tree and sum file sizes, stopping early once `deadline`
+   * (epoch ms) passes. Only for LFS/logs — NOT for .git/objects.
+   *
+   * A UE project's .git/lfs cache holds tens of thousands of objects, and an
+   * unbounded recursive stat there is what pushed cleanupSize past its 30s
+   * handler timeout. When the walk is cut short, `budget.truncated` is set and
+   * the returned total is a lower bound rather than an error.
+   */
+  private async _dirBytes(
+    dirPath: string,
+    deadline: number,
+    budget: { truncated: boolean },
+  ): Promise<number> {
+    if (budget.truncated) return 0
     let entries: fs.Dirent[]
     try {
       entries = await fs.promises.readdir(dirPath, { withFileTypes: true })
@@ -1518,10 +1532,11 @@ class GitService {
     let total = 0
     // Process in batches of 32 to avoid exhausting OS file descriptors
     for (let i = 0; i < entries.length; i += 32) {
+      if (Date.now() > deadline) { budget.truncated = true; return total }
       const batch = entries.slice(i, i + 32)
       const sizes = await Promise.all(batch.map(async entry => {
         const full = path.join(dirPath, entry.name)
-        if (entry.isDirectory()) return this._dirBytes(full)
+        if (entry.isDirectory()) return this._dirBytes(full, deadline, budget)
         if (entry.isFile() || entry.isSymbolicLink()) {
           try { return (await fs.promises.stat(full)).size } catch { return 0 }
         }
@@ -1561,16 +1576,21 @@ class GitService {
       packsBytes   = kib('size-pack')
     } catch { /* no objects yet */ }
 
+    // Cap the directory walks well under the handler's 30s timeout so a giant
+    // LFS cache yields an approximate size instead of failing outright.
+    const budget = { truncated: false }
+    const deadline = Date.now() + GitService.SIZE_WALK_BUDGET_MS
+
     onProgress?.({ id: 'size', label: 'Measuring repository', status: 'running', progress: 60, detail: 'Measuring LFS cache…' })
-    const lfsCacheBytes = await this._dirBytes(lfsDir)
+    const lfsCacheBytes = await this._dirBytes(lfsDir, deadline, budget)
 
     onProgress?.({ id: 'size', label: 'Measuring repository', status: 'running', progress: 85, detail: 'Scanning reflog…' })
-    const logsBytes = await this._dirBytes(logsDir)
+    const logsBytes = await this._dirBytes(logsDir, deadline, budget)
 
     const totalBytes = objectsBytes + packsBytes + lfsCacheBytes + logsBytes
     onProgress?.({ id: 'size', label: 'Measuring repository', status: 'done', progress: 100, detail: 'Done' })
 
-    const result: SizeBreakdown = { totalBytes, objectsBytes, packsBytes, lfsCacheBytes, logsBytes }
+    const result: SizeBreakdown = { totalBytes, objectsBytes, packsBytes, lfsCacheBytes, logsBytes, approximate: budget.truncated }
     this._sizeCache.set(repoPath, { ts: Date.now(), result })
     return result
   }
