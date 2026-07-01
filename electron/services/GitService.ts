@@ -450,8 +450,8 @@ class GitService {
     return results
   }
 
-  private async changedFilesSinceMergeBase(repoPath: string, targetRef: string): Promise<string[]> {
-    const baseRes = await execSafe(['merge-base', 'HEAD', targetRef], repoPath)
+  private async changedFilesSinceMergeBase(repoPath: string, targetRef: string, ourRef: string = 'HEAD'): Promise<string[]> {
+    const baseRes = await execSafe(['merge-base', ourRef, targetRef], repoPath)
     if (baseRes.exitCode !== 0) return []
     const base = baseRes.stdout.trim()
     if (!base) return []
@@ -488,6 +488,13 @@ class GitService {
     // what `git pull` is going to apply, not conflicts with a sibling branch.
     const currentUpstream = branches.find(b => b.current)?.upstream
 
+    // Anchor merge-base on the upstream ref (already fresh from the fetch) rather
+    // than local HEAD. If HEAD hasn't been pulled yet, merge-base(HEAD, target)
+    // lands further back in history than merge-base(upstream, target), which
+    // pulls in unrelated files that only changed in the commits we haven't
+    // pulled yet — not real overlaps with our own changes.
+    const ourRef = currentUpstream ?? 'HEAD'
+
     const candidates = branches
       .filter(branch =>
         !branch.current &&
@@ -511,7 +518,7 @@ class GitService {
           if (files.length === 0) {
             const targetRef = await this.resolveBranchRef(repoPath, branch.name).catch(() => null)
             files = targetRef
-              ? (await this.changedFilesSinceMergeBase(repoPath, targetRef)).filter(file => changedSet.has(file))
+              ? (await this.changedFilesSinceMergeBase(repoPath, targetRef, ourRef)).filter(file => changedSet.has(file))
               : []
           }
           const uniqueFiles = [...new Set(files)].sort()
@@ -528,7 +535,7 @@ class GitService {
 
         const targetRef = await this.resolveBranchRef(repoPath, branch.name).catch(() => null)
         if (!targetRef) continue
-        const branchFiles = await this.changedFilesSinceMergeBase(repoPath, targetRef)
+        const branchFiles = await this.changedFilesSinceMergeBase(repoPath, targetRef, ourRef)
         const overlap = branchFiles.filter(file => changedSet.has(file))
         const uniqueFiles = [...new Set(overlap)].sort()
         if (uniqueFiles.length > 0) {

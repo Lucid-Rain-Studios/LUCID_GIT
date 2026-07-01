@@ -40,7 +40,10 @@ export function ClearLockCacheButton({ repoPath }: { repoPath: string }) {
     <button
       onClick={onClick}
       disabled={busy}
-      className="lg-toolbar-control lg-icon-control flex items-center justify-center w-8 h-8 rounded text-lg-text-secondary hover:text-lg-text-primary hover:bg-lg-bg-elevated transition-colors disabled:opacity-50 disabled:cursor-default"
+      className="lg-toolbar-control lg-icon-control flex items-center justify-center w-8 h-8 rounded transition-colors disabled:opacity-50 disabled:cursor-default"
+      style={{ color: '#e84545' }}
+      onMouseEnter={e => { if (!busy) e.currentTarget.style.background = 'rgba(232,69,69,0.10)' }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
       title="Clear lock cache"
     >
       {busy ? (
