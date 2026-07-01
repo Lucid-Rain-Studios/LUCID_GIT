@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react'
 import { ipc, BlameEntry, CommitEntry, DiffContent } from '@/ipc'
 import { TextDiff } from '@/components/diff/TextDiff'
 import { FilePathText } from '@/components/ui/FilePathText'
+import { CommitContextMenu } from '@/components/shared/CommitContextMenu'
+import { CommitFilesModal } from '@/components/shared/CommitFilesModal'
 
 const ASSET_EXTS = new Set([
   'uasset', 'umap', 'upk', 'udk',
@@ -151,22 +153,27 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-function FileDetails({ repoPath, filePath, hash }: { repoPath: string; filePath: string; hash: string }) {
+function FileDetails({ repoPath, filePath, hash, remoteUrl = null }: { repoPath: string; filePath: string; hash: string; remoteUrl?: string | null }) {
   const [history, setHistory] = useState<CommitEntry[]>([])
   const [histLoading, setHistLoading] = useState(true)
   const [metadata, setMetadata] = useState<Record<string, string>>({})
   const [sizeBytes, setSizeBytes] = useState<number | null>(null)
+  const [ctxMenu, setCtxMenu] = useState<{ commit: CommitEntry; x: number; y: number } | null>(null)
+  const [filesModalCommit, setFilesModalCommit] = useState<CommitEntry | null>(null)
+
+  const loadHistory = React.useCallback(() => {
+    setHistLoading(true)
+    return ipc.gitFileLog(repoPath, filePath, 12)
+      .then(setHistory)
+      .catch(() => setHistory([]))
+      .finally(() => setHistLoading(false))
+  }, [repoPath, filePath])
 
   useEffect(() => {
     setHistory([])
     setMetadata({})
     setSizeBytes(null)
-    setHistLoading(true)
-
-    ipc.gitFileLog(repoPath, filePath, 12)
-      .then(setHistory)
-      .catch(() => setHistory([]))
-      .finally(() => setHistLoading(false))
+    loadHistory()
 
     ipc.assetExtractMetadata(repoPath, filePath, hash)
       .then(meta => {
@@ -175,7 +182,7 @@ function FileDetails({ repoPath, filePath, hash }: { repoPath: string; filePath:
         if (Number.isFinite(parsedSize)) setSizeBytes(parsedSize)
       })
       .catch(() => {})
-  }, [repoPath, filePath, hash])
+  }, [repoPath, filePath, hash, loadHistory])
 
   const fileName = filePath.split(/[/\\]/).pop() ?? filePath
   const ext = (filePath.split('.').pop() ?? '').toLowerCase()
@@ -212,12 +219,20 @@ function FileDetails({ repoPath, filePath, hash }: { repoPath: string; filePath:
       ) : history.map((c, i) => {
         const col = authorColor(c.author)
         return (
-          <div key={c.hash} style={{
-            display: 'flex', alignItems: 'center', gap: 9,
-            minHeight: 38, padding: '7px 12px',
-            borderBottom: '1px solid #0f1320',
-            background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)',
-          }}>
+          <div
+            key={c.hash}
+            onClick={() => setFilesModalCommit(c)}
+            onContextMenu={e => { e.preventDefault(); setCtxMenu({ commit: c, x: e.clientX, y: e.clientY }) }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 9,
+              minHeight: 38, padding: '7px 12px',
+              borderBottom: '1px solid #0f1320',
+              background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)',
+              cursor: 'pointer',
+            }}
+            onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.03)')}
+            onMouseLeave={e => (e.currentTarget.style.background = i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)')}
+          >
             <span style={{
               width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
               background: `linear-gradient(135deg, ${col}55, ${col}22)`,
@@ -240,11 +255,32 @@ function FileDetails({ repoPath, filePath, hash }: { repoPath: string; filePath:
           </div>
         )
       })}
+
+      {ctxMenu && (
+        <CommitContextMenu
+          commit={ctxMenu.commit}
+          repoPath={repoPath}
+          remoteUrl={remoteUrl}
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          onClose={() => setCtxMenu(null)}
+          onRefresh={loadHistory}
+        />
+      )}
+
+      {filesModalCommit && (
+        <CommitFilesModal
+          repoPath={repoPath}
+          commit={filesModalCommit}
+          remoteUrl={remoteUrl}
+          onClose={() => setFilesModalCommit(null)}
+        />
+      )}
     </div>
   )
 }
 
-function AssetPanel({ repoPath, filePath, hash }: { repoPath: string; filePath: string; hash: string }) {
+function AssetPanel({ repoPath, filePath, hash, remoteUrl }: { repoPath: string; filePath: string; hash: string; remoteUrl: string | null }) {
   const [thumbSrc, setThumbSrc] = useState<string | null>(null)
   const [thumbLoading, setThumbLoading] = useState(true)
 
@@ -277,7 +313,7 @@ function AssetPanel({ repoPath, filePath, hash }: { repoPath: string; filePath: 
           </svg>
         )}
       </div>
-      <FileDetails repoPath={repoPath} filePath={filePath} hash={hash} />
+      <FileDetails repoPath={repoPath} filePath={filePath} hash={hash} remoteUrl={remoteUrl} />
     </div>
   )
 }
@@ -292,10 +328,12 @@ export function FileDetailsSidePanel({
   blameLoading,
   mode = 'preview',
   emptyMessage = 'Select a file to preview',
+  remoteUrl = null,
 }: {
   repoPath: string
   filePath: string | null
   hash?: string
+  remoteUrl?: string | null
   diff?: DiffContent | null
   diffLoading?: boolean
   blame: BlameEntry[]
@@ -308,14 +346,14 @@ export function FileDetailsSidePanel({
   if (mode === 'details') {
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <FileDetails repoPath={repoPath} filePath={filePath} hash={hash} />
+        <FileDetails repoPath={repoPath} filePath={filePath} hash={hash} remoteUrl={remoteUrl} />
         <BlameSection entries={blame} loading={blameLoading} />
       </div>
     )
   }
 
   if (isPreviewAsset(filePath)) {
-    return <AssetPanel repoPath={repoPath} filePath={filePath} hash={hash} />
+    return <AssetPanel repoPath={repoPath} filePath={filePath} hash={hash} remoteUrl={remoteUrl} />
   }
 
   return (

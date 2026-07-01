@@ -315,6 +315,7 @@ export function ContentBrowserPanel({ repoPath, onNavigate }: ContentBrowserPane
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [blame, setBlame] = useState<BlameEntry[]>([])
   const [blameLoading, setBlameLoading] = useState(false)
+  const [remoteUrl, setRemoteUrl] = useState<string | null>(null)
 
   const { locks }           = useLockStore()
   const { accounts, currentAccountId } = useAuthStore()
@@ -325,6 +326,7 @@ export function ContentBrowserPanel({ repoPath, onNavigate }: ContentBrowserPane
     setSelectedFile(null)
     setBlame([])
     ipc.gitLsFiles(repoPath).then(setFiles).catch(() => setFiles([]))
+    ipc.getRemoteUrl(repoPath).then(setRemoteUrl).catch(() => setRemoteUrl(null))
   }, [repoPath])
 
   useEffect(() => {
@@ -490,6 +492,7 @@ export function ContentBrowserPanel({ repoPath, onNavigate }: ContentBrowserPane
           blameLoading={blameLoading}
           mode="details"
           emptyMessage="Select a file for details"
+          remoteUrl={remoteUrl}
         />
       </div>
     </div>

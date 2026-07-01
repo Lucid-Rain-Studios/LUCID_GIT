@@ -2623,6 +2623,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
         blame={blame}
         blameLoading={blameLoading}
         emptyMessage="Select a file to preview"
+        remoteUrl={remoteUrl}
       />
     </div>
   )
