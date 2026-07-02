@@ -140,6 +140,7 @@ export function CommandPalette({
     { id: 'nav-changes',  group: 'Navigate', label: 'Go to Changes',       action: () => run(() => onNavigateTab('changes'))  },
     { id: 'nav-branches', group: 'Navigate', label: 'Go to Branches',      action: () => run(() => onNavigateTab('branches')) },
     { id: 'nav-history',  group: 'Navigate', label: 'Go to History',       action: () => run(() => onNavigateTab('history'))  },
+    { id: 'nav-activity', group: 'Navigate', label: 'Go to Activity',      action: () => run(() => onNavigateTab('activity')) },
     { id: 'nav-lfs',      group: 'Navigate', label: 'Go to LFS',           action: () => run(() => onNavigateTab('lfs'))      },
     { id: 'nav-hooks',    group: 'Navigate', label: 'Go to Hooks',         action: () => run(() => onNavigateTab('hooks'))    },
     { id: 'nav-unreal',   group: 'Navigate', label: 'Go to Unreal Engine', action: () => run(() => onNavigateTab('unreal'))   },

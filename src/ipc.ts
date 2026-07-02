@@ -391,6 +391,19 @@ export interface DesktopNotifyRequest {
   urgent?: boolean
 }
 
+/**
+ * Visibility mode for an optional feature area (Unreal, LFS).
+ *  - 'auto': show only when the open repo actually uses the feature
+ *  - 'show': always show, even on plain repos
+ *  - 'hide': always hide, even when the repo uses the feature
+ */
+export type FeatureVisibility = 'auto' | 'show' | 'hide'
+
+export interface FeatureVisibilitySettings {
+  unreal: FeatureVisibility
+  lfs:    FeatureVisibility
+}
+
 export interface AppSettings {
   autoFetchIntervalMinutes: number
   updateCheckIntervalMinutes: number
@@ -413,6 +426,7 @@ export interface AppSettings {
   accentColor?: string
   defaultBranchName?: string
   desktopNotificationEvents?: DesktopNotificationEvents
+  featureVisibility?: FeatureVisibilitySettings
 }
 
 export interface TeamConfig {

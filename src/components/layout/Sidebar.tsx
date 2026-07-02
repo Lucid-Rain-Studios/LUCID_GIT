@@ -2,15 +2,16 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useRepoStore } from '@/stores/repoStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useLockStore } from '@/stores/lockStore'
-import { ipc } from '@/ipc'
+import { ipc, FeatureVisibility } from '@/ipc'
 import { AppTooltip } from '@/components/ui/AppTooltip'
 import { AppCheckbox } from '@/components/ui/AppCheckbox'
+import { SETTINGS_CHANGED_EVENT } from '@/components/settings/GeneralSettings'
 
 export type TabId =
   | 'dashboard' | 'timeline' | 'branches'
   | 'tools'     | 'presence' | 'map'      | 'heatmap'  | 'forecast' | 'locks'
   | 'lfs'       | 'cleanup'  | 'unreal'   | 'hooks'    | 'overview' | 'changelog'
-  | 'settings'  | 'content'  | 'logs'
+  | 'settings'  | 'content'  | 'logs'     | 'activity'
 
 interface SidebarProps {
   active: TabId
@@ -42,6 +43,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'tools',    label: 'Tools',            Icon: ToolsIcon },
       { id: 'presence', label: 'Team',             Icon: PresenceIcon },
+      { id: 'activity', label: 'Activity',         Icon: ActivityIcon },
       { id: 'locks',    label: 'Locked Files',     Icon: LocksIcon },
       { id: 'content',  label: 'Content Browser',  Icon: ContentBrowserIcon },
       { id: 'map',      label: 'File Map',         Icon: MapIcon },
@@ -68,7 +70,7 @@ const VISIBILITY_KEY  = 'lucid-git:sidebar-visibility'
 
 const VISIBILITY_DEFAULTS: Record<string, string[]> = {
   workspace: ['dashboard', 'timeline', 'branches'],
-  tools:     ['tools', 'locks', 'content', 'logs'],
+  tools:     ['tools', 'activity', 'locks', 'content', 'logs'],
   admin:     ['overview', 'changelog', 'lfs', 'cleanup', 'unreal', 'hooks'],
 }
 
@@ -173,6 +175,57 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
       window.clearInterval(id)
     }
   }, [repoPath, isAdmin, prTick])
+
+  // ── Optional-feature visibility (Unreal / LFS): auto-detect + manual override ──
+  const [featureVis, setFeatureVis]   = useState<{ unreal: FeatureVisibility; lfs: FeatureVisibility }>({ unreal: 'auto', lfs: 'auto' })
+  const [featureDetected, setFeatureDetected] = useState<{ unreal: boolean; lfs: boolean }>({ unreal: false, lfs: false })
+
+  // Load the visibility preferences, and reload when settings are saved.
+  useEffect(() => {
+    const load = () => {
+      ipc.settingsGet()
+        .then(s => setFeatureVis(s.featureVisibility ?? { unreal: 'auto', lfs: 'auto' }))
+        .catch(() => {})
+    }
+    load()
+    window.addEventListener(SETTINGS_CHANGED_EVENT, load)
+    return () => window.removeEventListener(SETTINGS_CHANGED_EVENT, load)
+  }, [])
+
+  // Detect whether the open repo actually uses Unreal / LFS (drives 'auto' mode).
+  useEffect(() => {
+    let cancelled = false
+    if (!repoPath) {
+      setFeatureDetected({ unreal: false, lfs: false })
+      return
+    }
+    ;(async () => {
+      const [ue, lfs] = await Promise.allSettled([
+        ipc.ueDetect(repoPath),
+        ipc.lfsStatus(repoPath),
+      ])
+      if (cancelled) return
+      const unreal = ue.status === 'fulfilled' && ue.value != null
+      const lfsUsed = lfs.status === 'fulfilled'
+        && ((lfs.value?.tracked?.length ?? 0) > 0 || (lfs.value?.objects ?? 0) > 0)
+      setFeatureDetected({ unreal, lfs: lfsUsed })
+    })()
+    return () => { cancelled = true }
+  }, [repoPath, syncTick])
+
+  // Resolve a nav item to whether the feature gate allows it (non-gated items pass).
+  const featureAllows = useCallback((id: TabId): boolean => {
+    const resolve = (mode: FeatureVisibility, detected: boolean) =>
+      mode === 'show' ? true : mode === 'hide' ? false : detected
+    if (id === 'unreal') return resolve(featureVis.unreal, featureDetected.unreal)
+    if (id === 'lfs')    return resolve(featureVis.lfs,    featureDetected.lfs)
+    return true
+  }, [featureVis, featureDetected])
+
+  // If the active tab gets gated away (e.g. user hides the feature), fall back.
+  useEffect(() => {
+    if (!featureAllows(active)) onChange('dashboard')
+  }, [active, featureAllows, onChange])
 
   const [groupsCollapsed,   setGroupsCollapsed]   = useState<Record<string, boolean>>(loadCollapsed)
   const [sectionVisibility, setSectionVisibility] = useState<Record<string, string[]>>(loadVisibility)
@@ -364,6 +417,7 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
                 {/* Group items */}
                 {(!isGroupCollapsed || collapsed) && group.items
                   .filter(item => (sectionVisibility[group.key] ?? VISIBILITY_DEFAULTS[group.key]).includes(item.id))
+                  .filter(item => featureAllows(item.id))
                   .map(item => (
                     <NavBtn
                       key={item.id}
@@ -460,7 +514,7 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
             </div>
 
             {/* Items */}
-            {group.items.map(item => {
+            {group.items.filter(item => featureAllows(item.id)).map(item => {
               const visible = visibleIds.includes(item.id)
               return (
                 <button
@@ -719,6 +773,12 @@ function PresenceIcon({ size = 16 }) {
     <circle cx="11" cy="5.5" r="1.5" stroke="currentColor" strokeWidth="1.2" strokeOpacity="0.7" />
     <path d="M2 12c0-2.2 1.8-4 4-4s4 1.8 4 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
     <path d="M11 9c1.5 0 3 1 3 2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeOpacity="0.7" />
+  </svg>
+}
+
+function ActivityIcon({ size = 16 }) {
+  return <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+    <path d="M1.5 8h3l1.5-4 2.5 9 1.5-5 1 2h3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 }
 

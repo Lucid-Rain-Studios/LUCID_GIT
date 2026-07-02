@@ -1,9 +1,14 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { app } from 'electron'
-import type { AppSettings, DesktopNotificationEvents } from '../types'
+import type { AppSettings, DesktopNotificationEvents, FeatureVisibilitySettings } from '../types'
 
 export type { AppSettings } from '../types'
+
+export const FEATURE_VISIBILITY_DEFAULTS: FeatureVisibilitySettings = {
+  unreal: 'auto',
+  lfs:    'auto',
+}
 
 export const DESKTOP_NOTIFICATION_DEFAULTS: DesktopNotificationEvents = {
   // Tier 1 — high signal
@@ -37,6 +42,7 @@ const DEFAULTS: AppSettings = {
   borderRadius: 'default',
   defaultBranchName: 'main',
   desktopNotificationEvents: { ...DESKTOP_NOTIFICATION_DEFAULTS },
+  featureVisibility: { ...FEATURE_VISIBILITY_DEFAULTS },
 }
 
 type SettingsListener = (settings: AppSettings) => void
@@ -61,9 +67,17 @@ class SettingsService {
           ...DESKTOP_NOTIFICATION_DEFAULTS,
           ...(stored.desktopNotificationEvents ?? {}),
         },
+        featureVisibility: {
+          ...FEATURE_VISIBILITY_DEFAULTS,
+          ...(stored.featureVisibility ?? {}),
+        },
       }
     } catch {
-      return { ...DEFAULTS, desktopNotificationEvents: { ...DESKTOP_NOTIFICATION_DEFAULTS } }
+      return {
+        ...DEFAULTS,
+        desktopNotificationEvents: { ...DESKTOP_NOTIFICATION_DEFAULTS },
+        featureVisibility: { ...FEATURE_VISIBILITY_DEFAULTS },
+      }
     }
   }
 
@@ -75,6 +89,10 @@ class SettingsService {
       desktopNotificationEvents: {
         ...DESKTOP_NOTIFICATION_DEFAULTS,
         ...(settings.desktopNotificationEvents ?? {}),
+      },
+      featureVisibility: {
+        ...FEATURE_VISIBILITY_DEFAULTS,
+        ...(settings.featureVisibility ?? {}),
       },
     }
     fs.writeFileSync(this.filePath(), JSON.stringify(normalized, null, 2), 'utf8')

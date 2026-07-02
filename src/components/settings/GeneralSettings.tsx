@@ -24,7 +24,14 @@ const DEFAULTS: AppSettings = {
   fontWeight: 500,
   borderRadius: 'default',
   defaultBranchName: 'main',
+  featureVisibility: {
+    unreal: 'auto',
+    lfs:    'auto',
+  },
 }
+
+/** Broadcast so live UI (e.g. the sidebar) can react without a full reload. */
+export const SETTINGS_CHANGED_EVENT = 'lucid-git:settings-changed'
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -98,11 +105,20 @@ export function GeneralSettings() {
     setSaved(false)
   }
 
+  const updateFeatureVisibility = (patch: Partial<NonNullable<AppSettings['featureVisibility']>>) => {
+    setSettings(s => ({
+      ...s,
+      featureVisibility: { ...(s.featureVisibility ?? DEFAULTS.featureVisibility!), ...patch },
+    }))
+    setSaved(false)
+  }
+
   const handleSave = async () => {
     setSaving(true)
     try {
       await ipc.settingsSave(settings)
       setSaved(true)
+      window.dispatchEvent(new Event(SETTINGS_CHANGED_EVENT))
     } catch {}
     finally { setSaving(false) }
   }
@@ -155,6 +171,37 @@ export function GeneralSettings() {
               <option value={15}>Every 15 min</option>
               <option value={30}>Every 30 min</option>
               <option value={60}>Every hour</option>
+            </select>
+          </Row>
+        </Section>
+
+        <Section title="Features">
+          <Row
+            label="Unreal Engine tools"
+            hint="Show the Unreal panel and asset tools. Auto shows them only when the repo has a .uproject."
+          >
+            <select
+              value={settings.featureVisibility?.unreal ?? 'auto'}
+              onChange={e => updateFeatureVisibility({ unreal: e.target.value as 'auto' | 'show' | 'hide' })}
+              className="bg-lg-bg-primary border border-lg-border rounded px-2 py-1 text-[11px] font-mono text-lg-text-primary focus:outline-none focus:border-lg-accent"
+            >
+              <option value="auto">Auto (detect)</option>
+              <option value="show">Always show</option>
+              <option value="hide">Always hide</option>
+            </select>
+          </Row>
+          <Row
+            label="Git LFS tools"
+            hint="Show the LFS panel. Auto shows it only when the repo tracks files with Git LFS."
+          >
+            <select
+              value={settings.featureVisibility?.lfs ?? 'auto'}
+              onChange={e => updateFeatureVisibility({ lfs: e.target.value as 'auto' | 'show' | 'hide' })}
+              className="bg-lg-bg-primary border border-lg-border rounded px-2 py-1 text-[11px] font-mono text-lg-text-primary focus:outline-none focus:border-lg-accent"
+            >
+              <option value="auto">Auto (detect)</option>
+              <option value="show">Always show</option>
+              <option value="hide">Always hide</option>
             </select>
           </Row>
         </Section>

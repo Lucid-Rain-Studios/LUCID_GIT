@@ -32,6 +32,7 @@ import { UnrealPanel } from '@/components/unreal/UnrealPanel'
 import { HooksManager } from '@/components/hooks/HooksManager'
 import { ToolsPanel } from '@/components/tools/ToolsPanel'
 import { PresencePanel } from '@/components/presence/PresencePanel'
+import { ActivityPanel } from '@/components/activity/ActivityPanel'
 import { OverviewPanel } from '@/components/overview/OverviewPanel'
 import { DashboardPanel } from '@/components/dashboard/DashboardPanel'
 import { ChangelogPanel } from '@/components/changelog/ChangelogPanel'
@@ -55,7 +56,7 @@ import { PanelErrorBoundary } from '@/components/ui/PanelErrorBoundary'
 import { BugLogsPanel } from '@/components/logs/BugLogsPanel'
 import { GlobalLoadingCursor } from '@/components/ui/GlobalLoadingCursor'
 
-type TabId = 'timeline' | 'branches' | 'lfs' | 'cleanup' | 'unreal' | 'hooks' | 'settings' | 'tools' | 'presence' | 'overview' | 'changelog' | 'map' | 'content' | 'heatmap' | 'forecast' | 'dashboard' | 'locks' | 'logs'
+type TabId = 'timeline' | 'branches' | 'lfs' | 'cleanup' | 'unreal' | 'hooks' | 'settings' | 'tools' | 'presence' | 'overview' | 'changelog' | 'map' | 'content' | 'heatmap' | 'forecast' | 'dashboard' | 'locks' | 'logs' | 'activity'
 
 const ASSET_EXTS = new Set([
   'uasset', 'umap', 'upk', 'udk',
@@ -664,6 +665,11 @@ export function AppShell() {
             /* ── Team Presence — full width ── */
             <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
               <PresencePanel repoPath={repoPath} />
+            </PanelErrorBoundary>
+          ) : leftTab === 'activity' ? (
+            /* ── Activity feed — full width ── */
+            <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
+              <ActivityPanel repoPath={repoPath} />
             </PanelErrorBoundary>
           ) : leftTab === 'heatmap' ? (
             /* ── Lock Heatmap — full width ── */
