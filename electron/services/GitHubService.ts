@@ -59,31 +59,65 @@ export class GitHubApiError extends Error {
   }
 }
 
-async function ghFetch(token: string, path: string, method = 'GET', body?: object): Promise<unknown> {
-  let res: Response
-  try {
-    res = await fetch(`https://api.github.com${path}`, {
-      method,
-      headers: {
-        Authorization: `token ${token}`,
-        Accept: 'application/vnd.github.v3+json',
-        'Content-Type': 'application/json',
-        'User-Agent': 'LucidGit',
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    })
-  } catch (error) {
-    throw new GitHubApiError(
-      `GitHub API unreachable: ${error instanceof Error ? error.message : String(error)}`,
-    )
-  }
+const GH_READ_RETRY_DELAYS_MS = [1_000, 2_000, 4_000]
+const GH_REQUEST_TIMEOUT_MS = 15_000
 
-  if (!res.ok) {
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function retryDelayMs(res: Response, attempt: number): number {
+  const retryAfter = Number(res.headers.get('retry-after'))
+  if (Number.isFinite(retryAfter) && retryAfter > 0) return retryAfter * 1_000
+  // A little jitter prevents several independent clients retrying in lockstep.
+  return GH_READ_RETRY_DELAYS_MS[attempt] + Math.floor(Math.random() * 250)
+}
+
+async function ghFetch(token: string, path: string, method = 'GET', body?: object): Promise<unknown> {
+  const maxAttempts = method === 'GET' ? GH_READ_RETRY_DELAYS_MS.length + 1 : 1
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), GH_REQUEST_TIMEOUT_MS)
+    let res: Response
+    try {
+      res = await fetch(`https://api.github.com${path}`, {
+        method,
+        headers: {
+          Authorization: `token ${token}`,
+          Accept: 'application/vnd.github.v3+json',
+          'Content-Type': 'application/json',
+          'User-Agent': 'LucidGit',
+        },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      })
+    } catch (error) {
+      if (attempt < maxAttempts - 1) {
+        await sleep(GH_READ_RETRY_DELAYS_MS[attempt] + Math.floor(Math.random() * 250))
+        continue
+      }
+      throw new GitHubApiError(
+        `GitHub API unreachable: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    } finally {
+      clearTimeout(timeout)
+    }
+
+    if (res.ok) return res.json()
+
+    const transient = res.status === 429 || res.status >= 500
+    if (transient && attempt < maxAttempts - 1) {
+      await sleep(retryDelayMs(res, attempt))
+      continue
+    }
+
     const err = await res.json().catch(() => ({})) as { message?: string; errors?: Array<{ message: string }> }
     const msg = err.errors?.[0]?.message ?? err.message ?? `GitHub API error ${res.status}`
     throw new GitHubApiError(msg, res.status)
   }
-  return res.json()
+
+  throw new GitHubApiError('GitHub API unavailable')
 }
 
 // Successful PR-list responses are reused for this long. Several UI surfaces

@@ -57,6 +57,48 @@ function parseGitHubSlug(url: string): string | null {
   return m ? m[1] : null
 }
 
+type PRLoadErrorKind = 'unavailable' | 'rate-limited' | 'auth' | 'not-found' | 'unknown'
+
+interface PRLoadError {
+  kind: PRLoadErrorKind
+  technical: string
+}
+
+function classifyPRLoadError(error: unknown): PRLoadError {
+  const technical = error instanceof Error ? error.message : String(error)
+  if (/\b429\b|rate.?limit/i.test(technical)) return { kind: 'rate-limited', technical }
+  if (/\b401\b|bad credentials|requires authentication/i.test(technical)) return { kind: 'auth', technical }
+  if (/\b403\b|resource not accessible|forbidden/i.test(technical)) return { kind: 'auth', technical }
+  if (/\b404\b|not found/i.test(technical)) return { kind: 'not-found', technical }
+  if (/\b50[0-9]\b|unreachable|fetch failed|network|timed?\s*out|abort/i.test(technical)) {
+    return { kind: 'unavailable', technical }
+  }
+  return { kind: 'unknown', technical }
+}
+
+const PR_ERROR_COPY: Record<PRLoadErrorKind, { title: string; message: string }> = {
+  unavailable: {
+    title: 'GitHub is temporarily unavailable',
+    message: 'GitHub returned a service or network error while loading pull requests. Your repository and local changes are safe. Lucid Git will try again automatically.',
+  },
+  'rate-limited': {
+    title: 'GitHub request limit reached',
+    message: 'GitHub has temporarily limited requests. Your local work is safe, and Lucid Git will try again automatically.',
+  },
+  auth: {
+    title: 'GitHub access needs attention',
+    message: 'Lucid Git could not authenticate with GitHub or does not have permission to view this repository. Check your GitHub sign-in and repository access.',
+  },
+  'not-found': {
+    title: 'GitHub repository not found',
+    message: 'The configured repository could not be found. Check the GitHub remote and confirm that your account can access it.',
+  },
+  unknown: {
+    title: 'Could not load pull requests',
+    message: 'Lucid Git could not retrieve pull requests. Your repository and local changes are safe. Try again, or expand the technical details below.',
+  },
+}
+
 // ── Card ──────────────────────────────────────────────────────────────────────
 
 function Card({
@@ -771,7 +813,7 @@ function AdminPRsCard({ prs, ghSlug, repoPath, loading, error, onRefresh }: {
   ghSlug: string | null
   repoPath: string
   loading: boolean
-  error: string | null
+  error: PRLoadError | null
   onRefresh: () => void
 }) {
   const [resolving, setResolving] = useState<PullRequest | null>(null)
@@ -834,8 +876,27 @@ function AdminPRsCard({ prs, ghSlug, repoPath, loading, error, onRefresh }: {
               No GitHub remote configured
             </div>
           ) : error ? (
-            <div style={{ padding: '14px 14px', fontFamily: 'var(--lg-font-ui)', fontSize: 12, color: '#e84545' }}>
-              {error}
+            <div style={{ padding: '16px 14px', fontFamily: 'var(--lg-font-ui)' }}>
+              <div style={{ color: '#f5a832', fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>
+                {PR_ERROR_COPY[error.kind].title}
+              </div>
+              <div style={{ color: '#8b98ad', fontSize: 12, lineHeight: 1.5, maxWidth: 560 }}>
+                {PR_ERROR_COPY[error.kind].message}
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <button type="button" onClick={onRefresh} style={{ padding: '6px 10px', borderRadius: 5, border: '1px solid rgba(162,126,240,0.45)', background: 'rgba(162,126,240,0.12)', color: '#b99cf5', fontSize: 11.5, cursor: 'pointer' }}>
+                  Try again
+                </button>
+                {(error.kind === 'unavailable' || error.kind === 'rate-limited') && (
+                  <button type="button" onClick={() => ipc.openExternal('https://www.githubstatus.com/')} style={{ padding: '6px 10px', borderRadius: 5, border: '1px solid #283248', background: 'transparent', color: '#7f8da4', fontSize: 11.5, cursor: 'pointer' }}>
+                    Check GitHub Status
+                  </button>
+                )}
+              </div>
+              <details style={{ marginTop: 10, color: '#56637a', fontSize: 10.5 }}>
+                <summary style={{ cursor: 'pointer' }}>Technical details</summary>
+                <div style={{ marginTop: 5, overflowWrap: 'anywhere', userSelect: 'text' }}>{error.technical}</div>
+              </details>
             </div>
           ) : loading && visiblePRs.length === 0 ? (
             <div style={{ padding: '14px 14px', fontFamily: 'var(--lg-font-ui)', fontSize: 12, color: '#344057' }}>
@@ -951,7 +1012,7 @@ export function OverviewPanel({ repoPath, onNavigate, onRefresh }: OverviewPanel
   const [refreshing, setRefreshing] = useState(false)
   const [lastUpdate, setLastUpdate] = useState<number | null>(null)
   const [prs,        setPrs]        = useState<PullRequest[]>([])
-  const [prsError,   setPrsError]   = useState<string | null>(null)
+  const [prsError,   setPrsError]   = useState<PRLoadError | null>(null)
   const [prsLoading, setPrsLoading] = useState(true)
   const [ghSlug,     setGhSlug]     = useState<string | null>(null)
   const [sizeLoading, setSizeLoading] = useState(false)
@@ -995,8 +1056,7 @@ export function OverviewPanel({ repoPath, onNavigate, onRefresh }: OverviewPanel
           const prList = await ipc.githubListPRs({ owner, repo })
           if (mounted.current) { setPrs(prList); setPrsError(null) }
         } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : 'Failed to load pull requests'
-          if (mounted.current) setPrsError(message)
+          if (mounted.current) setPrsError(classifyPRLoadError(err))
         }
       } else if (mounted.current) {
         setPrs([])
@@ -1009,6 +1069,14 @@ export function OverviewPanel({ repoPath, onNavigate, onRefresh }: OverviewPanel
     }
     if (mounted.current) setPrsLoading(false)
   }, [repoPath])
+
+  // Transient GitHub failures recover without requiring users to repeatedly
+  // press Refresh. Auth/configuration errors wait for explicit user action.
+  useEffect(() => {
+    if (prsError?.kind !== 'unavailable' && prsError?.kind !== 'rate-limited') return
+    const retry = window.setTimeout(() => loadAll(), 30_000)
+    return () => window.clearTimeout(retry)
+  }, [prsError, loadAll])
 
   // Refresh when history or PR state changes (fetch, pull, push, PR merge/close, branch switch)
   const historyTick    = useRepoStore(s => s.historyTick)
