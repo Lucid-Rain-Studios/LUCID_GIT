@@ -193,7 +193,14 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): 
 // ── gitAuthArgs — injects token via git http extraheader (avoids credential manager) ──
 
 export function gitAuthArgs(token: string | null, remoteUrl?: string | null): string[] {
-  if (!token) return []
+  // Always reset git's cumulative credential-helper list (an empty value
+  // clears it). Without this, a missing/expired token falls through to the
+  // system credential manager (GCM), which pops a GUI login dialog that
+  // GIT_TERMINAL_PROMPT/GIT_ASKPASS cannot suppress — and password auth is
+  // dead on GitHub anyway, so that dialog can never succeed. This -c setting
+  // also reaches `git lfs` subprocesses via GIT_CONFIG_PARAMETERS.
+  const noCredentialHelper = ['-c', 'credential.helper=']
+  if (!token) return noCredentialHelper
   const b64 = Buffer.from(`x-access-token:${token}`).toString('base64')
 
   // Scope auth header to the git remote host so it is not forwarded to signed
@@ -202,13 +209,13 @@ export function gitAuthArgs(token: string | null, remoteUrl?: string | null): st
     try {
       const u = new URL(remoteUrl)
       const origin = `${u.protocol}//${u.host}/`
-      return ['-c', `http.${origin}.extraheader=AUTHORIZATION: basic ${b64}`]
+      return [...noCredentialHelper, '-c', `http.${origin}.extraheader=AUTHORIZATION: basic ${b64}`]
     } catch {
       // fall through to global header as compatibility fallback
     }
   }
 
-  return ['-c', `http.extraheader=AUTHORIZATION: basic ${b64}`]
+  return [...noCredentialHelper, '-c', `http.extraheader=AUTHORIZATION: basic ${b64}`]
 }
 
 // ── execSafe (never throws — returns exitCode instead) ────────────────────────
@@ -218,7 +225,11 @@ export async function execSafe(
   repoPath: string
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const result = await GitProcess.exec(args, repoPath, {
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    env: {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_ASKPASS: 'echo',
+    },
   })
   return {
     stdout: result.stdout,

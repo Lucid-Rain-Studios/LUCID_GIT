@@ -9,6 +9,13 @@ const CLIENT_ID    = 'Ov23licKyg1mhOAj2nRc'
 const KEYTAR_SVC   = 'lucid-git'
 const SCOPES       = 'repo read:user'
 const EXPIRY_SKEW_MS = 5 * 60 * 1000
+// How long a successful scope validation of a non-expiring token is trusted
+// before re-checking against the GitHub API. Keeps the lock/PR pollers from
+// hitting GET /user on every cycle (which can trip secondary rate limits).
+const SCOPE_VALIDATION_TTL_MS = 10 * 60 * 1000
+// After an inconclusive validation (GitHub outage / rate limit), wait this
+// long before trying to validate again instead of re-fetching on every call.
+const INDETERMINATE_RETRY_MS = 60 * 1000
 
 // ── Tiny JSON store for non-secret account metadata ───────────────────────────
 
@@ -57,7 +64,20 @@ function hasRequiredScopes(scopes: Set<string>): boolean {
   return scopes.has('repo')
 }
 
+// Outcome of checking a token against the GitHub API. 'indeterminate' means
+// we could not get a definitive answer (network failure, rate limiting, or a
+// GitHub outage) — callers must NOT treat that as a revoked token.
+type TokenValidity = 'valid' | 'invalid' | 'indeterminate'
+
 class AuthService {
+  // userId → timestamp of last successful scope validation (in-memory only)
+  private scopeValidatedAt = new Map<string, number>()
+  // userId → timestamp of last inconclusive validation (cooldown before retry)
+  private lastIndeterminateAt = new Map<string, number>()
+  // userId → in-flight validation, shared by concurrent getToken calls so a
+  // burst of callers (pollers, panel loads) produces one GET /user, not many
+  private validationInFlight = new Map<string, Promise<TokenValidity>>()
+
   async startDeviceFlow(): Promise<DeviceFlowStart> {
     const res = await fetch('https://github.com/login/device/code', {
       method: 'POST',
@@ -174,6 +194,8 @@ class AuthService {
     if (!data.currentAccountId) data.currentAccountId = userId
     writeData(data)
 
+    this.scopeValidatedAt.set(userId, Date.now())
+
     logService.info('auth.deviceFlow', `Authenticated successfully as ${u.login} (userId: ${userId})`)
     return { token: d.access_token, userId }
   }
@@ -187,6 +209,8 @@ class AuthService {
     logService.info('auth', `Logging out userId: ${userId}`)
     await keytar.deletePassword(KEYTAR_SVC, tokenKey(userId))
     await keytar.deletePassword(KEYTAR_SVC, refreshKey(userId))
+    this.scopeValidatedAt.delete(userId)
+    this.lastIndeterminateAt.delete(userId)
     const data = readData()
     data.accounts = data.accounts.filter(a => a.userId !== userId)
     if (data.currentAccountId === userId) {
@@ -211,8 +235,36 @@ class AuthService {
 
     const expiresAt = data.tokenMetaByUserId?.[userId]?.expiresAt ?? null
     if (!expiresAt) {
-      const validScopes = await this.validateTokenScopes(token)
-      if (!validScopes) return null
+      const lastValidated = this.scopeValidatedAt.get(userId) ?? 0
+      if (Date.now() - lastValidated < SCOPE_VALIDATION_TTL_MS) return token
+
+      // During a GitHub outage, don't re-attempt validation on every call —
+      // back off and trust the stored token until the cooldown lapses.
+      const lastIndeterminate = this.lastIndeterminateAt.get(userId) ?? 0
+      if (Date.now() - lastIndeterminate < INDETERMINATE_RETRY_MS) return token
+
+      let inFlight = this.validationInFlight.get(userId)
+      if (!inFlight) {
+        inFlight = this.validateTokenScopes(token)
+          .finally(() => this.validationInFlight.delete(userId))
+        this.validationInFlight.set(userId, inFlight)
+      }
+      const validity = await inFlight
+
+      if (validity === 'invalid') {
+        this.scopeValidatedAt.delete(userId)
+        logService.warn('auth.token', `GitHub token for userId ${userId} is revoked or missing required scopes`)
+        return null
+      }
+      if (validity === 'valid') {
+        this.scopeValidatedAt.set(userId, Date.now())
+        this.lastIndeterminateAt.delete(userId)
+      } else {
+        // 'indeterminate' (network failure, rate limit, GitHub outage): fail
+        // open with the stored token — if it is truly bad, the git operation
+        // itself will fail with a clear auth error instead of us guessing.
+        this.lastIndeterminateAt.set(userId, Date.now())
+      }
       return token
     }
     if ((expiresAt - Date.now()) > EXPIRY_SKEW_MS) return token
@@ -239,18 +291,32 @@ class AuthService {
   }
 
 
-  private async validateTokenScopes(accessToken: string): Promise<boolean> {
-    const userRes = await fetch('https://api.github.com/user', {
-      headers: {
-        Authorization:          `Bearer ${accessToken}`,
-        Accept:                 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-      },
-    })
-    if (!userRes.ok) return false
+  private async validateTokenScopes(accessToken: string): Promise<TokenValidity> {
+    let userRes: Response
+    try {
+      userRes = await fetch('https://api.github.com/user', {
+        headers: {
+          Authorization:          `Bearer ${accessToken}`,
+          Accept:                 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+      })
+    } catch (error) {
+      logService.warn('auth.token', `Token validation skipped — GitHub API unreachable: ${error instanceof Error ? error.message : String(error)}`)
+      return 'indeterminate'
+    }
+
+    // Only a 401 definitively means the token is revoked. 403 can be a
+    // secondary rate limit or org SSO enforcement, and 5xx is a GitHub
+    // outage — none of those prove the token itself is bad.
+    if (userRes.status === 401) return 'invalid'
+    if (!userRes.ok) {
+      logService.warn('auth.token', `Token validation inconclusive — GitHub API returned ${userRes.status}`)
+      return 'indeterminate'
+    }
 
     const grantedScopes = parseScopes(userRes.headers.get('x-oauth-scopes'))
-    return hasRequiredScopes(grantedScopes)
+    return hasRequiredScopes(grantedScopes) ? 'valid' : 'invalid'
   }
 
   private async refreshAccessToken(refreshToken: string): Promise<{ accessToken: string; refreshToken?: string; expiresIn?: number } | null> {
