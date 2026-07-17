@@ -139,6 +139,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.LOCK_FILE, repoPath, filePath),
   unlockFile: (repoPath: string, filePath: string, force?: boolean, lockId?: string) =>
     ipcRenderer.invoke(CHANNELS.LOCK_UNLOCK, repoPath, filePath, force, lockId),
+  unlockFiles: (repoPath: string, targets: Array<{ filePath: string; force?: boolean; lockId?: string }>) =>
+    ipcRenderer.invoke(CHANNELS.LOCK_UNLOCK_BATCH, repoPath, targets),
   watchLock: (repoPath: string, filePath: string) =>
     ipcRenderer.invoke(CHANNELS.LOCK_WATCH, repoPath, filePath),
   startLockPolling: (repoPath: string) =>

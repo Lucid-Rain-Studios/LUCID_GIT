@@ -60,6 +60,7 @@ export const CHANNELS = {
   // Locks
   LOCK_FILE:          'lock:file',
   LOCK_UNLOCK:        'lock:unlock',
+  LOCK_UNLOCK_BATCH:  'lock:unlock-batch',
   LOCK_LIST:          'lock:list',
   LOCK_WATCH:         'lock:watch',
   LOCK_START_POLLING: 'lock:start-polling',

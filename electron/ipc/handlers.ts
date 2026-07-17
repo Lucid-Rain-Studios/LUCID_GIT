@@ -542,6 +542,11 @@ export function registerHandlers(): void {
     return gitService.lfsLocksMaintenance(repoPath, true)
   })
 
+  handle(CHANNELS.LOCK_UNLOCK_BATCH, async (_event, repoPath: string, targets: Array<{ filePath: string; force?: boolean; lockId?: string }>) => {
+    if (targets.some(target => target.force)) await requireAdmin(repoPath)
+    return lockService.unlockFiles(repoPath, targets)
+  })
+
   handle(CHANNELS.LFS_MIGRATE, async (event, repoPath: string, patterns: string[]) => {
     await requireAdmin(repoPath)
     return gitService.lfsMigrate(repoPath, patterns, (step) => {

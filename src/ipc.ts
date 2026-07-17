@@ -11,6 +11,17 @@ export interface DeviceFlowStart {
   interval: number
 }
 
+export interface UnlockTarget {
+  filePath: string
+  force?: boolean
+  lockId?: string
+}
+
+export interface BulkUnlockResult {
+  unlocked: string[]
+  failed: Array<{ filePath: string; error: string }>
+}
+
 export interface Account {
   userId: string
   login: string
@@ -680,6 +691,7 @@ export interface LucidGitAPI {
   listLocks: (repoPath: string) => Promise<Lock[]>
   lockFile: (repoPath: string, filePath: string) => Promise<Lock>
   unlockFile: (repoPath: string, filePath: string, force?: boolean, lockId?: string) => Promise<void>
+  unlockFiles: (repoPath: string, targets: UnlockTarget[]) => Promise<BulkUnlockResult>
   watchLock: (repoPath: string, filePath: string) => Promise<void>
   startLockPolling: (repoPath: string) => Promise<void>
   stopLockPolling: (repoPath: string) => Promise<void>

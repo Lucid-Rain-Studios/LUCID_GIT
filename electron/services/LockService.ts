@@ -15,6 +15,18 @@ import { gitService } from './GitService'
 // attributed to that unlock rather than to an external force-unlock. Generous
 // because `git lfs unlock` + the next poll cycle can be slow.
 const SELF_UNLOCK_GRACE_MS = 60_000
+const BULK_UNLOCK_CONCURRENCY = 8
+
+export interface UnlockTarget {
+  filePath: string
+  force?: boolean
+  lockId?: string
+}
+
+export interface BulkUnlockResult {
+  unlocked: string[]
+  failed: Array<{ filePath: string; error: string }>
+}
 
 class LockService {
   private pollTimers  = new Map<string, ReturnType<typeof setInterval>>()
@@ -74,9 +86,44 @@ class LockService {
   }
 
   async unlockFile(repoPath: string, filePath: string, force = false, lockId?: string, actorLogin = '', actorName = ''): Promise<void> {
+    const token = await authService.getCurrentToken()
+    await this.unlockFileWithToken(repoPath, filePath, force, lockId, token, actorLogin, actorName)
+  }
+
+  async unlockFiles(repoPath: string, targets: UnlockTarget[]): Promise<BulkUnlockResult> {
+    if (targets.length === 0) return { unlocked: [], failed: [] }
+
+    // Keychain access and Git authentication setup happen once for the entire batch.
+    // A small worker pool avoids both the serial path and spawning thousands of
+    // competing git-lfs processes at once.
+    const token = await authService.getCurrentToken()
+    const unlocked: string[] = []
+    const failed: BulkUnlockResult['failed'] = []
+    let nextIndex = 0
+
+    const worker = async () => {
+      while (true) {
+        const index = nextIndex++
+        if (index >= targets.length) return
+        const target = targets[index]
+        try {
+          await this.unlockFileWithToken(repoPath, target.filePath, target.force ?? false, target.lockId, token)
+          unlocked.push(target.filePath.replace(/\\/g, '/'))
+        } catch (error) {
+          failed.push({ filePath: target.filePath, error: String(error) })
+        }
+      }
+    }
+
+    await Promise.all(
+      Array.from({ length: Math.min(BULK_UNLOCK_CONCURRENCY, targets.length) }, () => worker()),
+    )
+    return { unlocked, failed }
+  }
+
+  private async unlockFileWithToken(repoPath: string, filePath: string, force: boolean, lockId: string | undefined, token: string | null, actorLogin = '', actorName = ''): Promise<void> {
     const normalized = filePath.replace(/\\/g, '/')
     const fullPath = path.join(repoPath, normalized)
-    const token = await authService.getCurrentToken()
     // Prefer --id when available: works even when the file no longer exists on disk (ghost file).
     // If the caller did not provide a lockId, resolve one from current LFS locks.
     let resolvedLockId = lockId
@@ -209,22 +256,15 @@ class LockService {
   async unlockFolderMine(repoPath: string, folderPath: string): Promise<{ unlocked: number; failed: number }> {
     const login = this.currentUserLogin()
     const currentLocks = await this.listLocks(repoPath)
-    const mine = this.filesUnderFolder(
-      currentLocks.filter(l => login && l.owner.login === login).map(l => l.path),
-      folderPath,
+    const mine = currentLocks.filter(l =>
+      login && l.owner.login === login && this.filesUnderFolder([l.path], folderPath).length > 0,
     )
-
-    let unlocked = 0, failed = 0
-    for (const filePath of mine) {
-      try {
-        await this.unlockFile(repoPath, filePath)
-        unlocked++
-      } catch {
-        failed++
-      }
-    }
+    const result = await this.unlockFiles(
+      repoPath,
+      mine.map(lock => ({ filePath: lock.path, lockId: lock.id })),
+    )
     await this.refresh(repoPath)
-    return { unlocked, failed }
+    return { unlocked: result.unlocked.length, failed: result.failed.length }
   }
 
   // ── Private ─────────────────────────────────────────────────────────────────

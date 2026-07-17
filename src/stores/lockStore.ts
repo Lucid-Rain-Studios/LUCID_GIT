@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { ipc, Lock } from '@/ipc'
+import { ipc, Lock, type BulkUnlockResult, type UnlockTarget } from '@/ipc'
 
 function parseGitHubSlug(url: string): string | null {
   const ssh = url.match(/^git@github\.com:(.+?)\/(.+?)(?:\.git)?$/i)
@@ -17,6 +17,7 @@ interface LockState {
   loadLocks:   (repoPath: string) => Promise<void>
   lockFile:    (repoPath: string, filePath: string) => Promise<void>
   unlockFile:  (repoPath: string, filePath: string, force?: boolean, lockId?: string) => Promise<void>
+  unlockFiles: (repoPath: string, targets: UnlockTarget[]) => Promise<BulkUnlockResult>
   watchFile:   (repoPath: string, filePath: string) => Promise<void>
   setLocks:    (locks: Lock[]) => void
   clearLocks:  () => void
@@ -108,6 +109,37 @@ export const useLockStore = create<LockState>((set, get) => ({
       const locks = await ipc.listLocks(repoPath).catch(() => [])
       set({ locks, error: String(e) })
       throw e
+    }
+  },
+
+  unlockFiles: async (repoPath, targets) => {
+    const realTargets = targets.filter(target => !target.lockId?.startsWith('ghost-pr-'))
+    if (realTargets.length === 0) return { unlocked: [], failed: [] }
+
+    const targetPaths = new Set(realTargets.map(target => target.filePath.replace(/\\/g, '/')))
+    const removedLocks = get().locks.filter(lock => targetPaths.has(lock.path.replace(/\\/g, '/')))
+    set(state => ({
+      error: null,
+      locks: state.locks.filter(lock => !targetPaths.has(lock.path.replace(/\\/g, '/'))),
+    }))
+
+    try {
+      const result = await ipc.unlockFiles(repoPath, realTargets)
+      if (result.failed.length > 0) {
+        const failedPaths = new Set(result.failed.map(item => item.filePath.replace(/\\/g, '/')))
+        const failedLocks = removedLocks.filter(lock => failedPaths.has(lock.path.replace(/\\/g, '/')))
+        set(state => ({
+          locks: [...state.locks.filter(lock => !failedPaths.has(lock.path.replace(/\\/g, '/'))), ...failedLocks],
+          error: `${result.failed.length} file${result.failed.length === 1 ? '' : 's'} failed to unlock`,
+        }))
+      }
+      return result
+    } catch (error) {
+      set(state => ({
+        locks: [...state.locks.filter(lock => !targetPaths.has(lock.path.replace(/\\/g, '/'))), ...removedLocks],
+        error: String(error),
+      }))
+      throw error
     }
   },
 

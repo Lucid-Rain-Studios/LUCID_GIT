@@ -38,7 +38,7 @@ function initials(name: string): string {
 }
 
 export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }: LockedFilesPanelProps) {
-  const { locks, loadLocks, unlockFile } = useLockStore()
+  const { locks, loadLocks, unlockFile, unlockFiles } = useLockStore()
   const { accounts, currentAccountId } = useAuthStore()
   const isAdmin = useAuthStore(s => s.isAdmin(repoPath))
   const dialog  = useDialogStore()
@@ -188,15 +188,11 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
     setUnlocking('__bulk__')
     try {
       op.start(`Unlocking ${selectedLocks.length} file${selectedLocks.length === 1 ? '' : 's'}`)
-      const total = selectedLocks.length
-      const jobs = selectedLocks.map(async (lock, idx) => {
+      const result = await unlockFiles(repoPath, selectedLocks.map(lock => {
         const force = !currentLogin || lock.owner.login !== currentLogin
-        op.updateStep({ id: `unlock-${lock.id}`, label: 'Unlocking files', status: 'running', detail: lock.path, progress: Math.round(((idx + 1) / total) * 100) })
-        await unlockFile(repoPath, lock.path, force, lock.id)
-      })
-      const results = await Promise.allSettled(jobs)
-      const failed = results.filter(r => r.status === 'rejected') as PromiseRejectedResult[]
-      if (failed.length > 0) throw failed[0].reason
+        return { filePath: lock.path, force, lockId: lock.id }
+      }))
+      if (result.failed.length > 0) throw new Error(`${result.failed.length} of ${selectedLocks.length} files failed to unlock. ${result.failed[0].error}`)
       setSelectedLockIds(new Set())
     } catch (e) {
       await dialog.alert({ title: 'Error', message: String(e) })
@@ -217,14 +213,8 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
     setUnlocking('__bulk__')
     try {
       op.start(`Unlocking ${myLocks.length} file${myLocks.length === 1 ? '' : 's'}`)
-      const total = myLocks.length
-      const jobs = myLocks.map(async (lock, idx) => {
-        op.updateStep({ id: `unlock-${lock.id}`, label: 'Unlocking files', status: 'running', detail: lock.path, progress: Math.round(((idx + 1) / total) * 100) })
-        await unlockFile(repoPath, lock.path, false, lock.id)
-      })
-      const results = await Promise.allSettled(jobs)
-      const failed = results.filter(r => r.status === 'rejected') as PromiseRejectedResult[]
-      if (failed.length > 0) throw failed[0].reason
+      const result = await unlockFiles(repoPath, myLocks.map(lock => ({ filePath: lock.path, lockId: lock.id })))
+      if (result.failed.length > 0) throw new Error(`${result.failed.length} of ${myLocks.length} files failed to unlock. ${result.failed[0].error}`)
       setSelectedLockIds(new Set())
     } catch (e) {
       await dialog.alert({ title: 'Error', message: String(e) })
