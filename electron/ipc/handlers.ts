@@ -537,9 +537,9 @@ export function registerHandlers(): void {
   })
 
   handle(CHANNELS.LFS_LOCKS_REPAIR, async (_event, repoPath: string) => {
-    const result = await gitService.lfsLocksMaintenance(repoPath, true)
-    await lockService.refresh(repoPath)
-    return result
+    // The renderer reloads locks immediately after this returns. Avoid a
+    // duplicate remote `git lfs locks --json` round trip here.
+    return gitService.lfsLocksMaintenance(repoPath, true)
   })
 
   handle(CHANNELS.LFS_MIGRATE, async (event, repoPath: string, patterns: string[]) => {

@@ -1663,6 +1663,10 @@ class GitService {
       for (const entry of entries) {
         const full = path.join(dir, entry.name)
         if (entry.isDirectory()) {
+          // Object storage can contain hundreds of thousands of fan-out
+          // directories and never contains the lock database. Traversing it
+          // made a cache repair scale with the entire LFS object store.
+          if (depth === 0 && entry.name.toLowerCase() === 'objects') continue
           await walk(full, depth + 1)
         } else if (entry.isFile() && entry.name.toLowerCase() === 'lockcache.db') {
           found.push(full)
@@ -1777,7 +1781,13 @@ class GitService {
 
   async lfsLocksMaintenance(repoPath: string, repair: boolean): Promise<LfsLocksMaintenanceResult> {
     const beforePaths = await this.findLfsLockCacheFiles(repoPath)
-    const before = await Promise.all(beforePaths.map(filePath => this.inspectLfsLockCacheFile(filePath)))
+    // A repair deletes every cache database, so running SQLite's full
+    // integrity_check first only adds work (and can be very slow for a large
+    // lock cache). Checks still inspect the existing files; repairs validate
+    // only the cache rebuilt by Git LFS below.
+    const before = repair
+      ? []
+      : await Promise.all(beforePaths.map(filePath => this.inspectLfsLockCacheFile(filePath)))
     const deletedLockCacheFiles: string[] = []
 
     if (repair) {
