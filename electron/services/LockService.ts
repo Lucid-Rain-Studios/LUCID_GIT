@@ -90,7 +90,7 @@ class LockService {
     await this.unlockFileWithToken(repoPath, filePath, force, lockId, token, actorLogin, actorName)
   }
 
-  async unlockFiles(repoPath: string, targets: UnlockTarget[]): Promise<BulkUnlockResult> {
+  async unlockFiles(repoPath: string, targets: UnlockTarget[], actorLogin = '', actorName = ''): Promise<BulkUnlockResult> {
     if (targets.length === 0) return { unlocked: [], failed: [] }
 
     // Keychain access and Git authentication setup happen once for the entire batch.
@@ -107,7 +107,7 @@ class LockService {
         if (index >= targets.length) return
         const target = targets[index]
         try {
-          await this.unlockFileWithToken(repoPath, target.filePath, target.force ?? false, target.lockId, token)
+          await this.unlockFileWithToken(repoPath, target.filePath, target.force ?? false, target.lockId, token, actorLogin, actorName)
           unlocked.push(target.filePath.replace(/\\/g, '/'))
         } catch (error) {
           failed.push({ filePath: target.filePath, error: String(error) })

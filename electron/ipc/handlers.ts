@@ -220,12 +220,7 @@ export function registerHandlers(): void {
   })
 
   handle(CHANNELS.GIT_PUSH, async (event, repoPath: string) => {
-    const [branch, filesAhead] = await Promise.all([
-      gitService.currentBranch(repoPath),
-      gitService.aheadFilePaths(repoPath),
-    ])
-
-    const result = await gitService.push(repoPath, (step) => {
+    const { branch, filesAhead } = await gitService.push(repoPath, (step) => {
       if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
     })
 
@@ -236,10 +231,13 @@ export function registerHandlers(): void {
         if (currentLogin) {
           const locks = await lockService.listLocks(repoPath)
           const pushedFiles = new Set(filesAhead)
-          await Promise.allSettled(
+          await lockService.unlockFiles(
+            repoPath,
             locks
               .filter(lock => lock.owner.login === currentLogin && pushedFiles.has(lock.path))
-              .map(lock => lockService.unlockFile(repoPath, lock.path, false, lock.id, currentLogin, currentLogin))
+              .map(lock => ({ filePath: lock.path, lockId: lock.id })),
+            currentLogin,
+            currentLogin,
           )
         }
       } catch {
@@ -247,7 +245,6 @@ export function registerHandlers(): void {
       }
     }
 
-    return result
   })
 
   handle(CHANNELS.GIT_PULL, async (event, repoPath: string) => {

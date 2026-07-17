@@ -27,17 +27,21 @@ class UndoService {
 
   async recordCheckpoint(repoPath: string, op: UndoableOp, label: string): Promise<void> {
     try {
-      const head = await execSafe(['rev-parse', 'HEAD'], repoPath)
+      // Independent read-only queries can run together. On very large working
+      // trees this removes two serial process round-trips before pull begins.
+      const [head, branchRes, status] = await Promise.all([
+        execSafe(['rev-parse', 'HEAD'], repoPath),
+        execSafe(['rev-parse', '--abbrev-ref', 'HEAD'], repoPath),
+        execSafe(['status', '--porcelain'], repoPath),
+      ])
       if (head.exitCode !== 0 || !head.stdout.trim()) { this.checkpoints.delete(repoPath); return }
 
-      const branchRes = await execSafe(['rev-parse', '--abbrev-ref', 'HEAD'], repoPath)
       const branch = branchRes.stdout.trim()
       const detached = branch === 'HEAD' || branch === ''
 
       // Snapshot uncommitted work as a dangling commit — does not touch the tree
       // or the stash list, so it never interferes with the operation about to run.
       let stashRef: string | undefined
-      const status = await execSafe(['status', '--porcelain'], repoPath)
       if (status.exitCode === 0 && status.stdout.trim()) {
         const created = await execSafe(['stash', 'create', `lucid-undo:${label}`], repoPath)
         if (created.exitCode === 0 && created.stdout.trim()) stashRef = created.stdout.trim()

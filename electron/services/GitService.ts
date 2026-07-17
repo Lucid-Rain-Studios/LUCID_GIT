@@ -297,20 +297,34 @@ class GitService {
     return aheadRes.stdout.trim() === '0'
   }
 
-  /** Push current branch to its upstream. Streams progress. */
-  async push(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
-    const token = await authService.getCurrentToken()
-    const remoteUrl = await this.getRemoteUrl(repoPath)
-    const upstreamRes = await execSafe(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], repoPath)
-    if (upstreamRes.exitCode !== 0) {
-      const branch = await this.currentBranch(repoPath)
-      if (!branch || branch === 'HEAD' || branch === 'unknown') {
-        throw new Error('Cannot push from a detached HEAD. Switch to a branch first.')
+  /** Push current branch to its upstream. Streams progress and returns the pre-push metadata. */
+  async push(repoPath: string, onProgress?: ProgressCallback): Promise<{ branch: string; filesAhead: string[] }> {
+    // These lookups are independent. Keeping them here means the push handler does
+    // not repeat branch/upstream discovery before starting the real operation.
+    const [token, remoteUrl, branch, upstreamRes] = await Promise.all([
+      authService.getCurrentToken(),
+      this.getRemoteUrl(repoPath),
+      this.currentBranch(repoPath),
+      execSafe(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], repoPath),
+    ])
+    if (!branch || branch === 'HEAD' || branch === 'unknown') {
+      throw new Error('Cannot push from a detached HEAD. Switch to a branch first.')
+    }
+
+    let filesAhead: string[] = []
+    if (upstreamRes.exitCode === 0 && upstreamRes.stdout.trim()) {
+      const diffRes = await execSafe(['diff', '--name-only', `${upstreamRes.stdout.trim()}..HEAD`], repoPath)
+      if (diffRes.exitCode === 0) {
+        filesAhead = diffRes.stdout.split('\n').map(line => line.trim().replace(/\\/g, '/')).filter(Boolean)
       }
+    }
+
+    if (upstreamRes.exitCode !== 0) {
       await execWithProgress([...gitAuthArgs(token, remoteUrl), 'push', '--progress', '--set-upstream', 'origin', branch], repoPath, onProgress)
-      return
+      return { branch, filesAhead }
     }
     await execWithProgress([...gitAuthArgs(token, remoteUrl), 'push', '--progress'], repoPath, onProgress)
+    return { branch, filesAhead }
   }
 
   /** Files changed in commits that are ahead of upstream (what push would publish). */

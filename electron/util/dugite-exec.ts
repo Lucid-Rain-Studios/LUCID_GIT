@@ -94,6 +94,23 @@ export async function execWithProgress(
 
     let stdout = ''
     let stderr = ''
+    let lastProgressAt = 0
+    let lastProgressId = ''
+    let pendingProgress: OperationStep | null = null
+
+    const emitProgress = (step: OperationStep, force = false) => {
+      if (!onProgress) return
+      const now = Date.now()
+      pendingProgress = step
+      // Phase changes and completion are delivered immediately. Repetitive
+      // percentage updates are capped to reduce Electron IPC/render churn.
+      if (force || step.id !== lastProgressId || step.status === 'done' || now - lastProgressAt >= 75) {
+        onProgress(step)
+        pendingProgress = null
+        lastProgressAt = now
+        lastProgressId = step.id
+      }
+    }
 
     proc.stdout?.on('data', (chunk: Buffer) => {
       stdout += chunk.toString()
@@ -107,7 +124,7 @@ export async function execWithProgress(
         // Git writes multiple progress lines per chunk, separated by \r or \n
         for (const line of text.split(/[\r\n]+/)) {
           const step = parseGitProgress(line)
-          if (step) onProgress(step)
+          if (step) emitProgress(step)
         }
       }
     })
@@ -115,6 +132,7 @@ export async function execWithProgress(
     proc.on('error', reject)
 
     proc.on('close', (code: number | null) => {
+      if (pendingProgress) emitProgress(pendingProgress, true)
       if (code === 0 || code === null) {
         resolve({ stdout, stderr })
       } else {
