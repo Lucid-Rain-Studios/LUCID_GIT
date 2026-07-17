@@ -27,6 +27,8 @@ const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'S
 
 export function ContributionGraph({ repoPath }: ContributionGraphProps) {
   const [commits, setCommits] = useState<CommitEntry[]>([])
+  const [identity, setIdentity] = useState<{ name: string; email: string }>({ name: '', email: '' })
+  const [view, setView] = useState<'you' | 'team'>('you')
   const [loading, setLoading] = useState(true)
   const [currentYear, setCurrentYear] = useState(() => new Date().getFullYear())
 
@@ -35,10 +37,14 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
     let mounted = true
     setLoading(true)
 
-    ipc.log(repoPath, { all: true, limit: 10000 })
-      .then(data => {
+    Promise.all([
+      ipc.log(repoPath, { all: true, limit: 10000 }),
+      ipc.gitGetIdentity(repoPath).catch(() => ({ name: '', email: '' })),
+    ])
+      .then(([data, gitIdentity]) => {
         if (mounted) {
           setCommits(data)
+          setIdentity(gitIdentity)
         }
       })
       .catch((err) => {
@@ -52,8 +58,19 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
     return () => { mounted = false }
   }, [repoPath])
 
+  const visibleCommits = useMemo(() => {
+    if (view === 'team') return commits
+
+    const email = identity.email.trim().toLocaleLowerCase()
+    const name = identity.name.trim().toLocaleLowerCase()
+    return commits.filter(commit =>
+      (email && commit.email.trim().toLocaleLowerCase() === email) ||
+      (name && commit.author.trim().toLocaleLowerCase() === name)
+    )
+  }, [commits, identity, view])
+
   // Compute activity data for the last 1825 days
-  const activity = useMemo(() => computeActivity(commits, 1825), [commits])
+  const activity = useMemo(() => computeActivity(visibleCommits, 1825), [visibleCommits])
 
   const goToPreviousYear = useCallback(() => setCurrentYear(y => y - 1), [])
   const goToNextYear     = useCallback(() => setCurrentYear(y => y + 1), [])
@@ -136,7 +153,7 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
   }
 
   return (
-    <Card title="Contribution Graph" icon={<GraphIcon />}>
+    <Card title="Contribution Graph" icon={<GraphIcon />} actions={<ViewToggle view={view} onChange={setView} />}>
       <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {/* Header with stats and navigation */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -352,7 +369,39 @@ function NavButton({ children, onClick }: { children: React.ReactNode; onClick: 
   )
 }
 
-function Card({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+function ViewToggle({ view, onChange }: { view: 'you' | 'team'; onChange: (view: 'you' | 'team') => void }) {
+  return (
+    <div role="group" aria-label="Contribution view" style={{ display: 'flex', padding: 2, gap: 2, borderRadius: 6, background: '#0d1119', border: '1px solid #20283a' }}>
+      {(['you', 'team'] as const).map(option => {
+        const selected = view === option
+        return (
+          <button
+            key={option}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => onChange(option)}
+            style={{
+              height: 20,
+              padding: '0 8px',
+              border: 0,
+              borderRadius: 4,
+              background: selected ? '#25324a' : 'transparent',
+              color: selected ? '#c8d0e8' : '#56647a',
+              fontFamily: 'var(--lg-font-ui)',
+              fontSize: 9.5,
+              fontWeight: 650,
+              cursor: 'pointer',
+            }}
+          >
+            {option === 'you' ? 'Your view' : 'Team view'}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function Card({ title, icon, actions, children }: { title: string; icon: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div style={{
       background: '#131720',
@@ -386,6 +435,7 @@ function Card({ title, icon, children }: { title: string; icon: React.ReactNode;
         }}>
           {title}
         </span>
+        {actions}
       </div>
       {children}
     </div>
