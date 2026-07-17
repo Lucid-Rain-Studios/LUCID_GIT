@@ -17,9 +17,11 @@ const ROLE_LABELS: Record<string, string> = { admin: 'Admin', write: 'Collaborat
 
 export function StatusBar() {
   const { currentBranch, repoPath } = useRepoStore()
-  const { isRunning, label, latestStep } = useOperationStore()
+  const { isRunning, label, latestStep, startedAt, latestStepAt, feedback } = useOperationStore()
   const { repoPermissions, permissionFetching, fetchRepoPermission, viewAsRole, setViewAsRole } = useAuthStore()
   const [roleMenuOpen, setRoleMenuOpen] = useState(false)
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const [clock, setClock] = useState(Date.now())
   const roleMenuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -37,12 +39,21 @@ export function StatusBar() {
     return () => document.removeEventListener('mousedown', onMouseDown)
   }, [roleMenuOpen])
 
+  useEffect(() => {
+    if (!isRunning) return
+    const timer = setInterval(() => setClock(Date.now()), 1_000)
+    return () => clearInterval(timer)
+  }, [isRunning])
+
+  useEffect(() => setDetailsOpen(false), [feedback])
+
   const realPermission  = repoPath ? repoPermissions[repoPath] : undefined
   const isRealAdmin     = realPermission === 'admin'
   const isOverriding    = isRealAdmin && viewAsRole !== null
   const effectiveRole   = isRealAdmin && viewAsRole ? viewAsRole : realPermission
 
   const progress   = latestStep?.progress
+  const overallProgress = latestStep?.overallProgress ?? progress
   const current    = latestStep?.current
   const total      = latestStep?.total
   const stepLabel  = latestStep?.label ?? label
@@ -50,9 +61,7 @@ export function StatusBar() {
 
   // Smoother bar fill when we have per-item counts: 1200 distinct
   // values instead of 100 percentage steps.
-  const barFill = current !== undefined && total !== undefined && total > 0
-    ? (current / total) * 100
-    : progress
+  const barFill = overallProgress
 
   const countText =
     current !== undefined && total !== undefined ? `${current.toLocaleString()}/${total.toLocaleString()}`
@@ -60,6 +69,19 @@ export function StatusBar() {
     : null
 
   const pctText = progress !== undefined ? `${progress}%` : null
+  const overallPctText = overallProgress !== undefined && (progress === undefined || Math.abs(overallProgress - progress) >= 1)
+    ? `${Math.round(overallProgress)}% overall`
+    : null
+  const elapsedSeconds = startedAt ? Math.max(0, Math.floor((clock - startedAt) / 1000)) : 0
+  const elapsedText = elapsedSeconds >= 60 ? `${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s` : `${elapsedSeconds}s`
+  const etaSeconds = overallProgress !== undefined && overallProgress >= 5 && overallProgress < 100 && elapsedSeconds >= 2
+    ? Math.max(1, Math.round(elapsedSeconds * (100 - overallProgress) / overallProgress))
+    : null
+  const etaText = etaSeconds === null ? null : etaSeconds >= 60
+    ? `~${Math.floor(etaSeconds / 60)}m ${etaSeconds % 60}s left`
+    : `~${etaSeconds}s left`
+  const waiting = latestStepAt !== null && clock - latestStepAt > 2_500
+    && /connect|remote|credential|prepar/i.test(stepLabel)
 
   // Detail strings that look like file paths get compacted (parent/.../file)
   // so the status bar stays readable even for deeply-nested paths.
@@ -74,13 +96,26 @@ export function StatusBar() {
 
   // Prefer structured count when present; otherwise fall back to the
   // raw detail (e.g. "5.2 MB / 12.4 MB · 1.5 MB/s" from the auto-updater).
-  const displayText = countText
+  const baseDisplayText = countText
     ? [stepLabel, pctText, countText].filter(Boolean).join('  ·  ')
     : displayDetail
       ? (pctText && !displayDetail.includes('%')) ? `${displayDetail}  ${pctText}` : displayDetail
       : pctText
         ? `${stepLabel}  ${pctText}`
         : stepLabel
+
+  const transferDetail = displayDetail && /(?:[KMGT]i?B|bytes)(?:\/s|\/sec)?/i.test(displayDetail) ? displayDetail : null
+  const contextualDetail = transferDetail ?? (isPathLikeDetail ? displayDetail : null)
+  const phaseLabel = waiting ? 'Waiting for remote' : stepLabel
+  const displayText = [
+    phaseLabel,
+    pctText,
+    countText,
+    contextualDetail,
+    overallPctText,
+    elapsedText,
+    etaText,
+  ].filter(Boolean).join('  ·  ') || baseDisplayText
 
   // Tooltip shows the full, un-compacted detail (e.g. the original file path)
   // plus the operation label so the user can hover to see exactly what's
@@ -208,6 +243,32 @@ export function StatusBar() {
             >
               {displayText}
             </span>
+          ) : feedback ? (
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={() => feedback.kind === 'error' && setDetailsOpen(v => !v)}
+                title={feedback.details}
+                style={{
+                  border: 'none', background: 'transparent', padding: 0,
+                  fontFamily: 'var(--lg-font-mono)', fontSize: 10.5,
+                  color: feedback.kind === 'error' ? '#ef6b73' : '#5fbf7f',
+                  cursor: feedback.kind === 'error' ? 'pointer' : 'default',
+                }}
+              >
+                {feedback.kind === 'error' ? '✕' : '✓'} {feedback.text}{feedback.kind === 'error' ? ' · Details' : ''}
+              </button>
+              {detailsOpen && feedback.details && (
+                <div style={{
+                  position: 'absolute', bottom: 'calc(100% + 7px)', right: 0, width: 420, maxHeight: 180,
+                  overflow: 'auto', padding: '10px 12px', borderRadius: 6,
+                  background: '#171b27', border: '1px solid #44303a', color: '#d8a2a7',
+                  boxShadow: '0 8px 28px rgba(0,0,0,0.5)', whiteSpace: 'pre-wrap',
+                  fontFamily: 'var(--lg-font-mono)', fontSize: 10, lineHeight: 1.45, zIndex: 120,
+                }}>
+                  {feedback.details}
+                </div>
+              )}
+            </div>
           ) : (
             <span style={{ fontFamily: 'var(--lg-font-mono)', fontSize: 10, color: '#1e2a3a', letterSpacing: '0.03em' }}>
               Ready

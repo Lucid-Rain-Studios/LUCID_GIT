@@ -95,6 +95,12 @@ export function registerHandlers(): void {
         return await fn(event, ...(args as TArgs))
       } catch (error) {
         logService.error(`ipc.${channel}`, formatIpcFailure(channel, args, error))
+        if ((channel === CHANNELS.GIT_PUSH || channel === CHANNELS.GIT_PULL) && !event.sender.isDestroyed()) {
+          event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, {
+            id: `${channel}-error`, label: channel === CHANNELS.GIT_PUSH ? 'Push failed' : 'Pull failed',
+            status: 'error', detail: error instanceof Error ? error.message : String(error),
+          })
+        }
         throw error
       }
     })
@@ -220,6 +226,7 @@ export function registerHandlers(): void {
   })
 
   handle(CHANNELS.GIT_PUSH, async (event, repoPath: string) => {
+    if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, { id: 'push-prepare', label: 'Preparing push', status: 'running', progress: 3 })
     const { branch, filesAhead } = await gitService.push(repoPath, (step) => {
       if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
     })
@@ -238,6 +245,9 @@ export function registerHandlers(): void {
               .map(lock => ({ filePath: lock.path, lockId: lock.id })),
             currentLogin,
             currentLogin,
+            step => {
+              if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
+            },
           )
         }
       } catch {
@@ -245,14 +255,18 @@ export function registerHandlers(): void {
       }
     }
 
+    if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, { id: 'push-complete', label: 'Push complete', status: 'done', progress: 100, overallProgress: 100 })
+
   })
 
   handle(CHANNELS.GIT_PULL, async (event, repoPath: string) => {
+    if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, { id: 'pull-checkpoint', label: 'Preparing pull', status: 'running', progress: 3 })
     const result = await withUndo(repoPath, 'pull', 'Pull', () => gitService.pull(repoPath, (step) => {
       if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
     }))
     // After pulling, locked files whose work just landed in main can be unlocked.
     prMonitorService.checkMainMerges(repoPath).catch(() => {})
+    if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, { id: 'pull-complete', label: 'Pull complete', status: 'done', progress: 100, overallProgress: 100 })
     return result
   })
 
@@ -480,13 +494,27 @@ export function registerHandlers(): void {
     return lockService.listLocks(repoPath)
   })
 
-  handle(CHANNELS.LOCK_FILE, async (_event, repoPath: string, filePath: string) => {
-    return lockService.lockFile(repoPath, filePath)
+  handle(CHANNELS.LOCK_FILE, async (event, repoPath: string, filePath: string) => {
+    try {
+      return await lockService.lockFile(repoPath, filePath, '', '', step => {
+        if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
+      })
+    } catch (error) {
+      if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, { id: 'lock-file', label: 'Lock failed', status: 'error', detail: String(error) })
+      throw error
+    }
   })
 
-  handle(CHANNELS.LOCK_UNLOCK, async (_event, repoPath: string, filePath: string, force?: boolean, lockId?: string) => {
+  handle(CHANNELS.LOCK_UNLOCK, async (event, repoPath: string, filePath: string, force?: boolean, lockId?: string) => {
     if (force) await requireAdmin(repoPath)
-    return lockService.unlockFile(repoPath, filePath, force, lockId)
+    try {
+      return await lockService.unlockFile(repoPath, filePath, force, lockId, '', '', step => {
+        if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
+      })
+    } catch (error) {
+      if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, { id: 'unlock-file', label: 'Unlock failed', status: 'error', detail: String(error) })
+      throw error
+    }
   })
 
   handle(CHANNELS.LOCK_WATCH, async (_event, repoPath: string, filePath: string) => {
@@ -505,12 +533,16 @@ export function registerHandlers(): void {
     return lockService.clearCacheAndRefresh(repoPath)
   })
 
-  handle(CHANNELS.LOCK_FOLDER, async (_event, repoPath: string, folderPath: string) => {
-    return lockService.lockFolder(repoPath, folderPath)
+  handle(CHANNELS.LOCK_FOLDER, async (event, repoPath: string, folderPath: string) => {
+    return lockService.lockFolder(repoPath, folderPath, step => {
+      if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
+    })
   })
 
-  handle(CHANNELS.UNLOCK_FOLDER_MINE, async (_event, repoPath: string, folderPath: string) => {
-    return lockService.unlockFolderMine(repoPath, folderPath)
+  handle(CHANNELS.UNLOCK_FOLDER_MINE, async (event, repoPath: string, folderPath: string) => {
+    return lockService.unlockFolderMine(repoPath, folderPath, step => {
+      if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
+    })
   })
 
   handle(CHANNELS.LFS_STATUS, async (_event, repoPath: string) => {
@@ -539,9 +571,15 @@ export function registerHandlers(): void {
     return gitService.lfsLocksMaintenance(repoPath, true)
   })
 
-  handle(CHANNELS.LOCK_UNLOCK_BATCH, async (_event, repoPath: string, targets: Array<{ filePath: string; force?: boolean; lockId?: string }>) => {
+  handle(CHANNELS.LOCK_UNLOCK_BATCH, async (event, repoPath: string, targets: Array<{ filePath: string; force?: boolean; lockId?: string }>) => {
     if (targets.some(target => target.force)) await requireAdmin(repoPath)
-    return lockService.unlockFiles(repoPath, targets)
+    const result = await lockService.unlockFiles(repoPath, targets, '', '', step => {
+      if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
+    })
+    if (result.failed.length > 0 && !event.sender.isDestroyed()) {
+      event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, { id: 'unlock-batch', label: 'Some unlocks failed', status: 'error', detail: `${result.failed.length} of ${targets.length} files failed to unlock` })
+    }
+    return result
   })
 
   handle(CHANNELS.LFS_MIGRATE, async (event, repoPath: string, patterns: string[]) => {

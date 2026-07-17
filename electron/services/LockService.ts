@@ -4,7 +4,7 @@ import { BrowserWindow } from 'electron'
 import { execSafe, exec, gitAuthArgs } from '../util/dugite-exec'
 import { authService } from './AuthService'
 import { CHANNELS } from '../ipc/channels'
-import type { Lock } from '../types'
+import type { Lock, OperationStep } from '../types'
 import { notificationService } from './NotificationService'
 import { desktopNotificationService } from './DesktopNotificationService'
 import { webhookService } from './WebhookService'
@@ -27,6 +27,8 @@ export interface BulkUnlockResult {
   unlocked: string[]
   failed: Array<{ filePath: string; error: string }>
 }
+
+type ProgressCallback = (step: OperationStep) => void
 
 class LockService {
   private pollTimers  = new Map<string, ReturnType<typeof setInterval>>()
@@ -67,10 +69,13 @@ class LockService {
     }
   }
 
-  async lockFile(repoPath: string, filePath: string, actorLogin = '', actorName = ''): Promise<Lock> {
+  async lockFile(repoPath: string, filePath: string, actorLogin = '', actorName = '', onProgress?: ProgressCallback): Promise<Lock> {
     const normalized = filePath.replace(/\\/g, '/')
+    onProgress?.({ id: 'lock-auth', label: 'Preparing lock', status: 'running', progress: 10, detail: normalized })
     const token = await authService.getCurrentToken()
+    onProgress?.({ id: 'lock-file', label: 'Locking file', status: 'running', progress: 40, detail: normalized })
     await exec([...gitAuthArgs(token), 'lfs', 'lock', normalized], repoPath)
+    onProgress?.({ id: 'lock-refresh', label: 'Confirming lock', status: 'running', progress: 80, detail: normalized })
     const locks = await this.listLocks(repoPath)
     const lock  = locks.find(l => l.path === normalized)
     if (!lock) throw new Error(`Lock not found for "${normalized}" after locking`)
@@ -82,24 +87,31 @@ class LockService {
       actorName:  actorName  || lock.owner.name,
       timestamp: now, durationMs: 0,
     })
+    onProgress?.({ id: 'lock-file', label: 'File locked', status: 'done', progress: 100, detail: normalized })
     return lock
   }
 
-  async unlockFile(repoPath: string, filePath: string, force = false, lockId?: string, actorLogin = '', actorName = ''): Promise<void> {
+  async unlockFile(repoPath: string, filePath: string, force = false, lockId?: string, actorLogin = '', actorName = '', onProgress?: ProgressCallback): Promise<void> {
+    const normalized = filePath.replace(/\\/g, '/')
+    onProgress?.({ id: 'unlock-auth', label: 'Preparing unlock', status: 'running', progress: 10, detail: normalized })
     const token = await authService.getCurrentToken()
+    onProgress?.({ id: 'unlock-file', label: 'Unlocking file', status: 'running', progress: 40, detail: normalized })
     await this.unlockFileWithToken(repoPath, filePath, force, lockId, token, actorLogin, actorName)
+    onProgress?.({ id: 'unlock-file', label: 'File unlocked', status: 'done', progress: 100, detail: normalized })
   }
 
-  async unlockFiles(repoPath: string, targets: UnlockTarget[], actorLogin = '', actorName = ''): Promise<BulkUnlockResult> {
+  async unlockFiles(repoPath: string, targets: UnlockTarget[], actorLogin = '', actorName = '', onProgress?: ProgressCallback): Promise<BulkUnlockResult> {
     if (targets.length === 0) return { unlocked: [], failed: [] }
 
     // Keychain access and Git authentication setup happen once for the entire batch.
     // A small worker pool avoids both the serial path and spawning thousands of
     // competing git-lfs processes at once.
+    onProgress?.({ id: 'unlock-batch', label: 'Preparing unlocks', status: 'running', progress: 5, current: 0, total: targets.length })
     const token = await authService.getCurrentToken()
     const unlocked: string[] = []
     const failed: BulkUnlockResult['failed'] = []
     let nextIndex = 0
+    let completed = 0
 
     const worker = async () => {
       while (true) {
@@ -111,6 +123,13 @@ class LockService {
           unlocked.push(target.filePath.replace(/\\/g, '/'))
         } catch (error) {
           failed.push({ filePath: target.filePath, error: String(error) })
+        } finally {
+          completed++
+          onProgress?.({
+            id: 'unlock-batch', label: 'Unlocking files', status: completed === targets.length ? 'done' : 'running',
+            progress: Math.round(5 + (completed / targets.length) * 95), current: completed, total: targets.length,
+            detail: target.filePath.replace(/\\/g, '/'),
+          })
         }
       }
     }
@@ -229,7 +248,8 @@ class LockService {
   }
 
   // Lock every LFS-tracked file under a folder that isn't already locked by anyone.
-  async lockFolder(repoPath: string, folderPath: string): Promise<{ locked: number; skipped: number; failed: number }> {
+  async lockFolder(repoPath: string, folderPath: string, onProgress?: ProgressCallback): Promise<{ locked: number; skipped: number; failed: number }> {
+    onProgress?.({ id: 'lock-folder-scan', label: 'Scanning folder', status: 'running', progress: 5 })
     const [lfsFiles, currentLocks] = await Promise.all([
       gitService.lfsTrackedFiles(repoPath),
       this.listLocks(repoPath),
@@ -238,22 +258,34 @@ class LockService {
     const candidates = this.filesUnderFolder(lfsFiles, folderPath)
 
     let locked = 0, skipped = 0, failed = 0
-    for (const filePath of candidates) {
-      if (lockedPaths.has(filePath)) { skipped++; continue }
-      try {
-        await this.lockFile(repoPath, filePath)
-        locked++
-      } catch {
-        failed++
+    for (let index = 0; index < candidates.length; index++) {
+      const filePath = candidates[index]
+      if (lockedPaths.has(filePath)) {
+        skipped++
+      } else {
+        try {
+          await this.lockFile(repoPath, filePath)
+          locked++
+        } catch {
+          failed++
+        }
       }
+      const completed = index + 1
+      onProgress?.({
+        id: 'lock-folder', label: 'Locking files', status: 'running',
+        progress: Math.round(10 + (completed / Math.max(candidates.length, 1)) * 85),
+        current: completed, total: candidates.length, detail: filePath,
+      })
     }
     // One broadcast after the batch keeps the UI snappy and avoids per-file churn.
     await this.refresh(repoPath)
+    onProgress?.({ id: 'lock-folder', label: 'Folder locked', status: 'done', progress: 100, current: candidates.length, total: candidates.length })
     return { locked, skipped, failed }
   }
 
   // Unlock only the files under a folder that the current user owns.
-  async unlockFolderMine(repoPath: string, folderPath: string): Promise<{ unlocked: number; failed: number }> {
+  async unlockFolderMine(repoPath: string, folderPath: string, onProgress?: ProgressCallback): Promise<{ unlocked: number; failed: number }> {
+    onProgress?.({ id: 'unlock-folder-scan', label: 'Finding your locks', status: 'running', progress: 5 })
     const login = this.currentUserLogin()
     const currentLocks = await this.listLocks(repoPath)
     const mine = currentLocks.filter(l =>
@@ -262,8 +294,12 @@ class LockService {
     const result = await this.unlockFiles(
       repoPath,
       mine.map(lock => ({ filePath: lock.path, lockId: lock.id })),
+      '',
+      '',
+      onProgress,
     )
     await this.refresh(repoPath)
+    onProgress?.({ id: 'unlock-folder', label: 'Folder unlocked', status: 'done', progress: 100, current: mine.length, total: mine.length })
     return { unlocked: result.unlocked.length, failed: result.failed.length }
   }
 

@@ -310,6 +310,7 @@ class GitService {
     if (!branch || branch === 'HEAD' || branch === 'unknown') {
       throw new Error('Cannot push from a detached HEAD. Switch to a branch first.')
     }
+    onProgress?.({ id: 'push-scan', label: 'Scanning outgoing changes', status: 'running', progress: 8 })
 
     let filesAhead: string[] = []
     if (upstreamRes.exitCode === 0 && upstreamRes.stdout.trim()) {
@@ -320,9 +321,11 @@ class GitService {
     }
 
     if (upstreamRes.exitCode !== 0) {
+      onProgress?.({ id: 'push-connect', label: 'Connecting to remote', status: 'running', progress: 12 })
       await execWithProgress([...gitAuthArgs(token, remoteUrl), 'push', '--progress', '--set-upstream', 'origin', branch], repoPath, onProgress)
       return { branch, filesAhead }
     }
+    onProgress?.({ id: 'push-connect', label: 'Connecting to remote', status: 'running', progress: 12 })
     await execWithProgress([...gitAuthArgs(token, remoteUrl), 'push', '--progress'], repoPath, onProgress)
     return { branch, filesAhead }
   }
@@ -343,9 +346,11 @@ class GitService {
 
   /** Pull current branch. Streams progress. */
   async pull(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
+    onProgress?.({ id: 'pull-auth', label: 'Preparing credentials', status: 'running', progress: 6 })
     const token = await authService.getCurrentToken()
     try {
       const remoteUrl = await this.getRemoteUrl(repoPath)
+      onProgress?.({ id: 'pull-connect', label: 'Connecting to remote', status: 'running', progress: 12 })
       await execWithProgress([...gitAuthArgs(token, remoteUrl), 'pull', '--progress'], repoPath, onProgress)
     } catch (error) {
       if (!this.shouldRunLfsRecovery(error)) throw error
