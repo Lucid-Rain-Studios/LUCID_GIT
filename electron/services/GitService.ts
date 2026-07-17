@@ -209,38 +209,37 @@ class GitService {
   async stage(repoPath: string, paths: string[], onProgress?: ProgressCallback): Promise<void> {
     if (paths.length === 0) return
 
-    // git add -A fails with "pathspec did not match" when a path is gone from
-    // both the working tree AND the index (i.e. the deletion is already staged).
-    // Split by on-disk existence and use git rm --cached --ignore-unmatch for the
-    // missing ones, which handles both unstaged deletions and already-staged ones.
-    const existing: string[] = []
-    const missing: string[] = []
-    for (const p of paths) {
-      if (fs.existsSync(path.join(repoPath, p))) existing.push(p)
-      else missing.push(p)
-    }
-
     const total = paths.length
     let processed = 0
-    const report = (status: 'running' | 'done' = 'running') =>
-      onProgress?.({ id: 'stage', label: 'Staging files', status, current: processed, total })
+    const startedAt = Date.now()
+    const report = (status: 'running' | 'done' = 'running', detail?: string) =>
+      onProgress?.({ id: 'stage', label: 'Staging files', status, current: processed, total, detail })
 
-    report()
-    if (existing.length > 0) {
-      await runInPathChunks(existing, c => exec(['add', '-A', '--', ...c], repoPath), (p) => {
-        processed = p
-        report()
-      })
+    report('running', 'Preparing one index update…')
+
+    // Passing thousands of paths on the command line requires many chunks on
+    // Windows. Every `git add` chunk can rewrite the full index, making large
+    // selections progressively slower. Git's pathspec file input avoids the
+    // command-line limit and stages additions, modifications, and deletions in
+    // one process. NUL delimiters preserve every valid Git path verbatim.
+    const pathspec = `${paths.join('\0')}\0`
+    const heartbeat = setInterval(() => {
+      const elapsed = Math.max(1, Math.floor((Date.now() - startedAt) / 1000))
+      report('running', `Updating Git index… ${elapsed}s elapsed`)
+    }, 2_000)
+
+    try {
+      await execWithStdin(
+        ['add', '-A', '--pathspec-from-file=-', '--pathspec-file-nul'],
+        repoPath,
+        pathspec,
+      )
+    } finally {
+      clearInterval(heartbeat)
     }
-    if (missing.length > 0) {
-      const baseline = processed
-      await runInPathChunks(missing, c => exec(['rm', '--cached', '--ignore-unmatch', '-r', '--', ...c], repoPath), (p) => {
-        processed = baseline + p
-        report()
-      })
-    }
+
     processed = total
-    report('done')
+    report('done', `Staged ${total} file${total === 1 ? '' : 's'}`)
   }
 
   /** Unstage specific paths (moves them back to working tree). */
