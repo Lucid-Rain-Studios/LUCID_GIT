@@ -107,8 +107,8 @@ export function FileRow({
     try {
       if (file.staged) await ipc.unstage(repoPath, [file.path])
       else             await ipc.stage(repoPath, [file.path])
-      onRefresh()
-    } catch { /* ignore */ }
+    } catch { /* a failure usually means the file changed on disk */ }
+    finally { onRefresh() }
   }
 
   const close = () => setCtx(null)

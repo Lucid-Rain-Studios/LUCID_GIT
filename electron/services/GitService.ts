@@ -4,6 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import { exec, execSafe, execWithProgress, execWithStdin, gitAuthArgs, ProgressCallback } from '../util/dugite-exec'
 import { authService } from './AuthService'
+import { logService } from './LogService'
 import { parseGitLog, GIT_LOG_FORMAT } from '../util/git-log-parse'
 import { FileStatus, BranchInfo, CommitEntry, ChangelogEntry, ChangelogQuery, DiffContent, StashEntry, ContributorInfo, ConflictPreviewFile, SyncStatus, LFSStatus, LfsLockCacheFile, LfsLocksMaintenanceResult, SizeBreakdown, CleanupResult, BranchActivity, BranchDiffSummary, BranchDiffFile, PotentialMergeConflictReport, RepoSearchResult } from '../types'
 
@@ -188,8 +189,12 @@ class GitService {
 
   /** git status --porcelain=v1 */
   async status(repoPath: string): Promise<FileStatus[]> {
+    // -uall lists every untracked file individually instead of collapsing a
+    // new directory into one "dir/" entry. stage() feeds these paths to
+    // `git update-index`, which takes literal file paths and cannot expand
+    // directories, so file granularity here is load-bearing.
     const { exitCode, stdout, stderr } = await execSafe(
-      ['status', '--porcelain=v1', '-z'],
+      ['status', '--porcelain=v1', '-z', '--untracked-files=all'],
       repoPath
     )
     if (exitCode !== 0) throw new Error(stderr || `git status failed (exit ${exitCode})`)
@@ -217,40 +222,75 @@ class GitService {
 
     report('running', 'Preparing one index update…')
 
-    // Passing thousands of paths on the command line requires many chunks on
-    // Windows. Every `git add` chunk can rewrite the full index, making large
-    // selections progressively slower. Git's pathspec file input avoids the
-    // command-line limit and stages additions, modifications, and deletions in
-    // one process. NUL delimiters preserve every valid Git path verbatim.
-    const pathspec = `${paths.join('\0')}\0`
+    // `git update-index --stdin` takes literal paths, not pathspecs: nothing
+    // is glob-matched, and a path that vanished between the last status
+    // refresh and the click (assets renamed in Unreal / Explorer) is a silent
+    // per-path no-op instead of the fatal "pathspec did not match any files"
+    // that aborts an entire `git add` batch. --add stages new files, --remove
+    // stages deletions, --replace resolves file↔directory swaps; unmerged
+    // paths collapse to a resolved stage-0 entry, and unlike `add` it works
+    // before the first commit. Stdin avoids Windows' command-line limit and
+    // one process means one index rewrite. Literal paths cannot expand
+    // directories, so status() must list untracked files with -uall.
     const heartbeat = setInterval(() => {
       const elapsed = Math.max(1, Math.floor((Date.now() - startedAt) / 1000))
       report('running', `Updating Git index… ${elapsed}s elapsed`)
     }, 2_000)
 
+    // update-index aborts on the first path it cannot read — typically an
+    // asset the game editor holds an exclusive write lock on mid-save. Paths
+    // before the fatal one are already staged; drop the unreadable path, retry
+    // the rest, and report skips instead of failing the whole batch. The cap
+    // guards against systemic failures (e.g. an unreadable network mount)
+    // degenerating into one retry per file.
+    const MAX_SKIPS = 20
+    const skipped: string[] = []
+    let remaining = paths
     try {
-      await execWithStdin(
-        ['add', '-A', '--pathspec-from-file=-', '--pathspec-file-nul'],
-        repoPath,
-        pathspec,
-      )
+      while (remaining.length > 0) {
+        try {
+          await execWithStdin(
+            ['update-index', '--add', '--remove', '--replace', '-z', '--stdin'],
+            repoPath,
+            `${remaining.join('\0')}\0`,
+          )
+          break
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          const bad = msg.match(/Unable to process path (.+?)\s*$/m)?.[1]
+          if (bad === undefined || !remaining.includes(bad) || skipped.length >= MAX_SKIPS) throw err
+          skipped.push(bad)
+          remaining = remaining.filter(p => p !== bad)
+        }
+      }
     } finally {
       clearInterval(heartbeat)
     }
 
-    processed = total
-    report('done', `Staged ${total} file${total === 1 ? '' : 's'}`)
+    processed = total - skipped.length
+    if (skipped.length > 0) {
+      logService.warn('git.stage', `Skipped ${skipped.length} unreadable path(s) while staging:\n${skipped.join('\n')}`)
+      report('done', `Staged ${processed} of ${total} files — ${skipped.length} in use by another program`)
+    } else {
+      report('done', `Staged ${total} file${total === 1 ? '' : 's'}`)
+    }
   }
 
   /** Unstage specific paths (moves them back to working tree). */
   async unstage(repoPath: string, paths: string[], onProgress?: ProgressCallback): Promise<void> {
     if (paths.length === 0) return
-    onProgress?.({ id: 'unstage', label: 'Unstaging files', status: 'running', current: 0, total: paths.length })
-    await runInPathChunks(
-      paths,
-      c => exec(['restore', '--staged', '--', ...c], repoPath),
-      (processed, total) => onProgress?.({ id: 'unstage', label: 'Unstaging files', status: processed >= total ? 'done' : 'running', current: processed, total }),
+    const total = paths.length
+    onProgress?.({ id: 'unstage', label: 'Unstaging files', status: 'running', current: 0, total })
+    // `git reset` silently skips pathspecs that no longer match anything and,
+    // unlike `restore --staged`, works before the first commit (unborn HEAD).
+    // :(literal) disables glob magic so paths with [ ] * ? are taken verbatim,
+    // and pathspec file input keeps one process regardless of selection size.
+    await execWithStdin(
+      ['reset', '-q', '--pathspec-from-file=-', '--pathspec-file-nul'],
+      repoPath,
+      `${paths.map(p => `:(literal)${p}`).join('\0')}\0`,
     )
+    onProgress?.({ id: 'unstage', label: 'Unstaging files', status: 'done', current: total, total })
   }
 
   /** Create a commit with the given message. Pass noVerify=true to skip hooks. */

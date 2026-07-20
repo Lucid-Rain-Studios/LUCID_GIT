@@ -134,6 +134,9 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
       const s = String(e)
       setError(s)
       pushError(s)
+      // The failure may stem from files that changed on disk since the last
+      // refresh — reconcile the list so stale rows don't linger.
+      refreshStatus()
     } finally {
       setIsCommitting(false)
     }
@@ -165,6 +168,7 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
     } catch (e) {
       setHookState('idle')
       setError(String(e))
+      refreshStatus()
     }
   }
 
@@ -179,7 +183,13 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
     if (!confirmed) return
     setHookState('idle')
     setHookOutput('')
-    await prepareDeferredStage()
+    try {
+      await prepareDeferredStage()
+    } catch (e) {
+      setError(String(e))
+      refreshStatus()
+      return
+    }
     await runCommit(true)
   }
 

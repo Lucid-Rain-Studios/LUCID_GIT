@@ -420,6 +420,17 @@ export function AppShell() {
     }
   }, [repoPath])
 
+  // ── Refresh on window focus ────────────────────────────────────────────────
+  // The watcher can miss changes made while the app was backgrounded (renames
+  // in Unreal / Explorer, network drives). Focus is the moment the user is
+  // about to act on the changes list, so make sure it is fresh.
+  useEffect(() => {
+    if (!repoPath) return
+    const onFocus = () => { silentRefresh() }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [repoPath])
+
   // ── Forecast — subscribe to conflict events ────────────────────────────────
   useEffect(() => {
     const unsub = ipc.onForecastConflict((conflicts) => {
