@@ -5,7 +5,6 @@ import { dependencyService } from '../services/DependencyService'
 import { heatmapService } from '../services/HeatmapService'
 import { forecastService } from '../services/ForecastService'
 import { assetDiffService } from '../services/AssetDiffService'
-import { spawn } from 'child_process'
 import { presenceService } from '../services/PresenceService'
 import type { PresenceEntry } from '../types'
 import { CHANNELS } from './channels'
@@ -20,6 +19,7 @@ import { webhookService } from '../services/WebhookService'
 import { unrealService } from '../services/UnrealService'
 import { hookService } from '../services/HookService'
 import { settingsService } from '../services/SettingsService'
+import { terminalService } from '../services/TerminalService'
 import { teamConfigService } from '../services/TeamConfigService'
 import { gitHubService } from '../services/GitHubService'
 import type { PRCreateArgs, PRListArgs, PRActionArgs } from '../services/GitHubService'
@@ -63,20 +63,6 @@ function formatIpcFailure(channel: string, args: unknown[], error: unknown): str
   ].filter(Boolean).join('\n')
 }
 
-function spawnDetachedLogged(source: string, command: string, args: string[], cwd?: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { detached: true, stdio: 'ignore', cwd })
-    child.once('error', (error) => {
-      logService.error(source, `Failed to launch ${command}\nCwd: ${cwd ?? process.cwd()}\nArgs: ${JSON.stringify(args)}\nMessage: ${error.message}\nStack:\n${error.stack ?? ''}`)
-      reject(error)
-    })
-    child.once('spawn', () => {
-      child.unref()
-      resolve()
-    })
-  })
-}
-
 async function requireAdmin(repoPath: string): Promise<void> {
   const cached = permissionService.getCachedPermission(repoPath)
   if (cached === 'admin') return
@@ -86,6 +72,24 @@ async function requireAdmin(repoPath: string): Promise<void> {
   // Cache miss — fetch and check
   const perm = await permissionService.fetchPermission(repoPath)
   if (perm !== 'admin') throw new Error('PERMISSION_DENIED: Admin access required for this operation')
+}
+
+/**
+ * Gate for operations any collaborator may perform — branch deletion included.
+ * Only read-only users are turned away.
+ *
+ * `fetchPermission` fails open to 'write' on network or API trouble, so a
+ * flaky connection leaves ordinary work unblocked; the remote is still the
+ * final authority on anything that leaves the machine.
+ */
+async function requireWrite(repoPath: string): Promise<void> {
+  const cached = permissionService.getCachedPermission(repoPath)
+  if (cached === 'admin' || cached === 'write') return
+  if (cached === 'read') {
+    throw new Error('PERMISSION_DENIED: Write access required for this operation')
+  }
+  const perm = await permissionService.fetchPermission(repoPath)
+  if (perm === 'read') throw new Error('PERMISSION_DENIED: Write access required for this operation')
 }
 
 export function registerHandlers(): void {
@@ -143,29 +147,13 @@ export function registerHandlers(): void {
     if (message) throw new Error(`Could not open path "${fullPath}": ${message}`)
   })
 
-  handle(CHANNELS.SHELL_OPEN_TERMINAL, async (_event, cwd?: string) => {
+  handle(CHANNELS.SHELL_LIST_TERMINALS, async () => terminalService.list())
+
+  handle(CHANNELS.SHELL_OPEN_TERMINAL, async (_event, cwd?: string, terminalId?: string) => {
     const dir = cwd ?? process.cwd()
-    if (process.platform === 'win32') {
-      try {
-        await spawnDetachedLogged('shell.openTerminal', 'wt.exe', ['-d', dir])
-      } catch {
-        await spawnDetachedLogged('shell.openTerminal', 'cmd.exe', ['/K', `cd /d "${dir}"`])
-      }
-    } else if (process.platform === 'darwin') {
-      await spawnDetachedLogged('shell.openTerminal', 'open', ['-a', 'Terminal', dir])
-    } else {
-      const terms = ['gnome-terminal', 'xterm', 'konsole', 'xfce4-terminal']
-      let lastError: unknown = null
-      for (const term of terms) {
-        try {
-          await spawnDetachedLogged('shell.openTerminal', term, ['--working-directory', dir])
-          return
-        } catch (error) {
-          lastError = error
-        }
-      }
-      throw lastError instanceof Error ? lastError : new Error(`No supported terminal emulator could be launched for ${dir}`)
-    }
+    // An explicit id (from the picker) wins; otherwise use the saved preference.
+    const chosen = terminalId ?? settingsService.getAll().preferredTerminal ?? 'auto'
+    await terminalService.open(dir, chosen)
   })
 
   // ── OS Dialogs ─────────────────────────────────────────────────────────────
@@ -301,12 +289,17 @@ export function registerHandlers(): void {
   })
 
   handle(CHANNELS.GIT_BRANCH_DELETE, async (_event, repoPath: string, name: string, force: boolean) => {
-    if (force) await requireAdmin(repoPath)
+    // Force-delete only discards local commits; any collaborator may clean up
+    // their own branches. The UI still confirms before the unmerged-work case.
+    if (force) await requireWrite(repoPath)
     return gitService.deleteBranch(repoPath, name, force)
   })
 
   handle(CHANNELS.GIT_BRANCH_DELETE_REMOTE, async (_event, repoPath: string, remoteName: string, branch: string) => {
-    await requireAdmin(repoPath)
+    // Branch protection and push rules are enforced by the remote, which is the
+    // authority here — a local admin check only hid the button from people the
+    // remote would have allowed.
+    await requireWrite(repoPath)
     return gitService.deleteRemoteBranch(repoPath, remoteName, branch)
   })
 
@@ -343,8 +336,10 @@ export function registerHandlers(): void {
     })
   })
 
-  handle(CHANNELS.GIT_DISCARD_ALL, async (_event, repoPath: string) => {
-    return gitService.discardAll(repoPath)
+  handle(CHANNELS.GIT_DISCARD_ALL, async (event, repoPath: string) => {
+    return gitService.discardAll(repoPath, (step) => {
+      if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
+    })
   })
 
   handle(CHANNELS.GIT_COMMIT_FILES, async (_event, repoPath: string, hash: string) => {

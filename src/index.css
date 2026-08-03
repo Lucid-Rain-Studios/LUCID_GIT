@@ -117,7 +117,18 @@ html.lg-appearance-applied #root :where([style*="JetBrains Mono"], [style*="Casc
   font-family: var(--lg-font-mono) !important;
 }
 
-html.lg-appearance-applied #root :where(button:not(.lg-toolbar-control), input, select, textarea) {
+/*
+  Row-height sizing is for text-entry controls. Checkboxes and radios are
+  fixed-size square swatches: forcing --lg-row-height as a min-height stretches
+  them into tall rectangles (min-height beats an inline height), and the control
+  radius rounds off a radio's circle.
+*/
+html.lg-appearance-applied #root :where(
+  button:not(.lg-toolbar-control),
+  input:not([type='checkbox']):not([type='radio']),
+  select,
+  textarea
+) {
   min-height: var(--lg-row-height) !important;
   border-radius: var(--lg-radius) !important;
 }

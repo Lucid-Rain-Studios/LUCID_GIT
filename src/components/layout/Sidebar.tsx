@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useRepoStore } from '@/stores/repoStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useLockStore } from '@/stores/lockStore'
-import { ipc, FeatureVisibility } from '@/ipc'
+import { ipc, FeatureVisibility, TerminalProfile } from '@/ipc'
 import { AppTooltip } from '@/components/ui/AppTooltip'
 import { AppCheckbox } from '@/components/ui/AppCheckbox'
 import { SETTINGS_CHANGED_EVENT } from '@/components/settings/GeneralSettings'
@@ -21,7 +21,8 @@ interface SidebarProps {
   width: number
   onWidthChange: (w: number) => void
   repoPath: string | null
-  onOpenTerminal: () => void
+  /** `terminalId` picks a specific terminal; omitted uses the saved preference. */
+  onOpenTerminal: (terminalId?: string) => void
   onOpenRepo: () => void
   onOpenExplorer: () => void
 }
@@ -180,17 +181,53 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
   const [featureVis, setFeatureVis]   = useState<{ unreal: FeatureVisibility; lfs: FeatureVisibility }>({ unreal: 'auto', lfs: 'auto' })
   const [featureDetected, setFeatureDetected] = useState<{ unreal: boolean; lfs: boolean }>({ unreal: false, lfs: false })
 
-  // Load the visibility preferences, and reload when settings are saved.
+  // ── Terminal picker ──────────────────────────────────────────────────────────
+  const [preferredTerminal, setPreferredTerminal] = useState('auto')
+  const [terminals, setTerminals] = useState<TerminalProfile[]>([])
+  const [terminalMenu, setTerminalMenu] = useState<{ x: number; bottom: number } | null>(null)
+  const terminalMenuRef = useRef<HTMLDivElement>(null)
+
+  // Load the visibility + terminal preferences, and reload when settings are saved.
   useEffect(() => {
     const load = () => {
       ipc.settingsGet()
-        .then(s => setFeatureVis(s.featureVisibility ?? { unreal: 'auto', lfs: 'auto' }))
+        .then(s => {
+          setFeatureVis(s.featureVisibility ?? { unreal: 'auto', lfs: 'auto' })
+          setPreferredTerminal(s.preferredTerminal ?? 'auto')
+        })
         .catch(() => {})
     }
     load()
     window.addEventListener(SETTINGS_CHANGED_EVENT, load)
     return () => window.removeEventListener(SETTINGS_CHANGED_EVENT, load)
   }, [])
+
+  useEffect(() => {
+    if (!terminalMenu) return
+    const handler = (e: MouseEvent) => {
+      if (terminalMenuRef.current && !terminalMenuRef.current.contains(e.target as Node)) setTerminalMenu(null)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [terminalMenu])
+
+  // Detection touches the filesystem, so only probe when the picker is opened.
+  const openTerminalMenu = useCallback((anchor: DOMRect) => {
+    setTerminalMenu({ x: anchor.right + 6, bottom: window.innerHeight - anchor.bottom })
+    ipc.listTerminals().then(setTerminals).catch(() => setTerminals([]))
+  }, [])
+
+  // Picking a terminal launches it and makes it the new default for this button.
+  const chooseTerminal = useCallback(async (id: string) => {
+    setTerminalMenu(null)
+    setPreferredTerminal(id)
+    onOpenTerminal(id)
+    try {
+      const settings = await ipc.settingsGet()
+      await ipc.settingsSave({ ...settings, preferredTerminal: id })
+      window.dispatchEvent(new Event(SETTINGS_CHANGED_EVENT))
+    } catch { /* the terminal still opened — a failed save just isn't sticky */ }
+  }, [onOpenTerminal])
 
   // Detect whether the open repo actually uses Unreal / LFS (drives 'auto' mode).
   useEffect(() => {
@@ -466,7 +503,38 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
             label="Open Terminal"
             collapsed={collapsed}
             disabled={!repoPath}
-            onClick={onOpenTerminal}
+            onClick={() => onOpenTerminal()}
+            onContextMenu={e => {
+              if (!repoPath) return
+              e.preventDefault()
+              openTerminalMenu(e.currentTarget.getBoundingClientRect())
+            }}
+            trailing={
+              <button
+                className="lg-compact-icon-button"
+                title="Choose terminal"
+                aria-label="Choose terminal"
+                disabled={!repoPath}
+                onClick={e => {
+                  e.stopPropagation()
+                  openTerminalMenu(e.currentTarget.getBoundingClientRect())
+                }}
+                onMouseEnter={e => { if (repoPath) e.currentTarget.style.opacity = '1' }}
+                onMouseLeave={e => { if (repoPath) e.currentTarget.style.opacity = '0.75' }}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  width: 20, height: 20, padding: 0, borderRadius: 4,
+                  background: 'transparent', border: 'none',
+                  color: 'var(--lg-text-secondary)',
+                  cursor: repoPath ? 'pointer' : 'default',
+                  opacity: repoPath ? 0.75 : 0.25,
+                }}
+              >
+                <svg width="11" height="11" viewBox="0 0 10 10" fill="none">
+                  <path d="M2 3.5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            }
           />
           <BottomBtn
             Icon={SwitchRepoIcon}
@@ -570,6 +638,77 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
           </div>
         )
       })()}
+
+      {/* ── Terminal picker ── */}
+      {terminalMenu && (
+        <div
+          ref={terminalMenuRef}
+          style={{
+            position: 'fixed', bottom: terminalMenu.bottom, left: terminalMenu.x, zIndex: 200,
+            background: '#1a2030', border: '1px solid #283047',
+            borderRadius: 8, boxShadow: '0 10px 36px rgba(0,0,0,0.6)',
+            minWidth: 190, paddingTop: 6, paddingBottom: 6,
+          }}
+        >
+          <div style={{
+            paddingLeft: 12, paddingRight: 12, paddingBottom: 6,
+            fontFamily: 'var(--lg-font-ui)', fontSize: 9.5, fontWeight: 700,
+            color: '#344057', letterSpacing: '0.12em', textTransform: 'uppercase',
+            borderBottom: '1px solid #202838', marginBottom: 4,
+          }}>
+            Open Terminal In
+          </div>
+
+          {terminals.length === 0 && (
+            <div style={{ padding: '6px 12px', fontFamily: 'var(--lg-font-ui)', fontSize: 11.5, color: '#4a566a' }}>
+              Detecting…
+            </div>
+          )}
+
+          {[{ id: 'auto', label: 'Auto (first installed)', available: true } as TerminalProfile, ...terminals].map(term => {
+            const selected = preferredTerminal === term.id
+            return (
+              <button
+                key={term.id}
+                disabled={!term.available}
+                onClick={() => chooseTerminal(term.id)}
+                title={term.available ? term.path : 'Not installed'}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  width: '100%', padding: '5px 12px',
+                  background: 'transparent', border: 'none',
+                  cursor: term.available ? 'pointer' : 'default',
+                  color: !term.available ? '#3b4657' : selected ? 'var(--lg-accent)' : 'var(--lg-text-primary)',
+                  fontFamily: 'var(--lg-font-ui)', fontSize: 12, textAlign: 'left',
+                  transition: 'background 0.1s',
+                }}
+                onMouseEnter={e => { if (term.available) e.currentTarget.style.background = 'rgba(255,255,255,0.04)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+              >
+                <span style={{ width: 10, flexShrink: 0, display: 'flex', color: 'var(--lg-accent)' }}>
+                  {selected && (
+                    <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                      <path d="M2 6.3l2.6 2.6L10 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
+                </span>
+                <span style={{ flex: 1, whiteSpace: 'nowrap' }}>{term.label}</span>
+                {!term.available && (
+                  <span style={{ fontSize: 9.5, color: '#3b4657', whiteSpace: 'nowrap' }}>not found</span>
+                )}
+              </button>
+            )
+          })}
+
+          <div style={{
+            borderTop: '1px solid #202838', marginTop: 4, paddingTop: 5,
+            paddingLeft: 12, paddingRight: 12,
+            fontFamily: 'var(--lg-font-ui)', fontSize: 10, color: '#344057',
+          }}>
+            Your pick becomes the default.
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -681,9 +820,12 @@ function NavBtn({ item, isActive, collapsed, badge, showBadge, timelineAhead, ti
 
 // ── Bottom action button ───────────────────────────────────────────────────────
 
-function BottomBtn({ Icon, label, collapsed, disabled, onClick, active, accent }: {
+function BottomBtn({ Icon, label, collapsed, disabled, onClick, active, accent, trailing, onContextMenu }: {
   Icon: React.FC<{ size?: number }>; label: string; collapsed: boolean
   disabled?: boolean; onClick: () => void; active?: boolean; accent?: boolean
+  /** Overlaid at the row's right edge — kept a sibling so it isn't a nested button. */
+  trailing?: React.ReactNode
+  onContextMenu?: (e: React.MouseEvent<HTMLElement>) => void
 }) {
   const [hover, setHover] = React.useState(false)
   const color = active
@@ -695,12 +837,13 @@ function BottomBtn({ Icon, label, collapsed, disabled, onClick, active, accent }
   const btn = (
     <button
       onClick={disabled ? undefined : onClick}
+      onContextMenu={onContextMenu}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
         display: 'flex', alignItems: 'center', gap: collapsed ? 0 : 8,
         width: '100%', height: 'var(--lg-row-height)',
-        paddingLeft: collapsed ? 0 : 11, paddingRight: collapsed ? 0 : 9,
+        paddingLeft: collapsed ? 0 : 11, paddingRight: collapsed ? 0 : (trailing ? 28 : 9),
         justifyContent: collapsed ? 'center' : 'flex-start',
         background: active
           ? 'linear-gradient(90deg, rgba(var(--lg-accent-rgb), 0.12) 0%, transparent 100%)'
@@ -724,9 +867,24 @@ function BottomBtn({ Icon, label, collapsed, disabled, onClick, active, accent }
     </button>
   )
 
-  return collapsed ? (
-    <AppTooltip content={label} side="right" delay={300}>{btn}</AppTooltip>
-  ) : btn
+  if (collapsed) return <AppTooltip content={label} side="right" delay={300}>{btn}</AppTooltip>
+  if (!trailing) return btn
+
+  return (
+    <div
+      style={{ position: 'relative' }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
+      {btn}
+      <div style={{
+        position: 'absolute', right: 7, top: 0, height: 'var(--lg-row-height)',
+        display: 'flex', alignItems: 'center',
+      }}>
+        {trailing}
+      </div>
+    </div>
+  )
 }
 
 // ── SVG icons ──────────────────────────────────────────────────────────────────

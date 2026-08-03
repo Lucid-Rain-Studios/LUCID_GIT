@@ -151,7 +151,13 @@ export const useRepoStore = create<RepoState>((set, get) => ({
     })
   },
 
-  bumpSyncTick:    () => set(s => ({ syncTick: s.syncTick + 1, historyTick: s.historyTick + 1 })),
+  // Every sync-affecting operation funnels through here, and a fetch prunes
+  // branches other people deleted. Reloading the list on the same signal keeps
+  // each panel reading `branches` from showing branches that are already gone.
+  bumpSyncTick:    () => {
+    set(s => ({ syncTick: s.syncTick + 1, historyTick: s.historyTick + 1 }))
+    void get().loadBranches()
+  },
   bumpHistoryTick: () => set(s => ({ historyTick: s.historyTick + 1 })),
   bumpPrTick:      () => set(s => ({ prTick: s.prTick + 1 })),
 

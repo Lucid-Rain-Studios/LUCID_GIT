@@ -523,7 +523,7 @@ export function AppShell() {
             width={sidebarWidth}
             onWidthChange={setSidebarWidth}
             repoPath={repoPath}
-            onOpenTerminal={() => { if (repoPath) ipc.openTerminal(repoPath) }}
+            onOpenTerminal={terminalId => { if (repoPath) ipc.openTerminal(repoPath, terminalId) }}
             onOpenRepo={handleOpenRepo}
             onOpenExplorer={() => { if (repoPath) ipc.showInFolder(repoPath) }}
           />

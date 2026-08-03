@@ -1,4 +1,4 @@
-// Git error parsing library — 14 error codes
+// Git error parsing library — 20 error codes
 // Each error is matched from raw git stderr output.
 
 export type ErrorSeverity = 'warning' | 'error' | 'fatal'
@@ -252,6 +252,24 @@ const DEFS: ErrorDef[] = [
     docsUrl: 'https://docs.github.com/en/billing/managing-billing-for-git-large-file-storage',
   },
   {
+    code: 'STALE_PACK_INDEX',
+    test: /objects[\\/]+pack[\\/]+pack-[0-9a-f]+\.(idx|pack).*(cannot find the file|no such file|does not exist)/i,
+    title: 'Repository was repacked mid-operation',
+    description:
+      "Git's background housekeeping repacked the object store while this operation was scanning it, so a pack file it had already listed no longer exists. Nothing is corrupted — the operation just needs to run against the new pack set.",
+    causes: [
+      'Git ran `gc --auto` in the background after your last pull or update from main',
+      'The push started while that repack was still in progress',
+      'Another Git client (GitHub Desktop, a terminal, an IDE) repacked the repo at the same time',
+    ],
+    severity: 'error',
+    canAutoFix: true,
+    fixes: [
+      { label: 'Finish housekeeping now, then push again', action: { type: 'clean-pack-files' } },
+      { label: 'Verify the object store is intact', command: 'git fsck --connectivity-only' },
+    ],
+  },
+  {
     code: 'PACK_CORRUPT',
     test: /pack.*corrupt|packfile.*corrupt|bad object|loose object.*missing|object.*corrupt|index-pack failed/i,
     title: 'Pack file corrupted',
@@ -263,6 +281,25 @@ const DEFS: ErrorDef[] = [
       { label: 'Run fsck and gc to repair', action: { type: 'clean-pack-files' } },
       { label: 'Check repository integrity', command: 'git fsck --full' },
       { label: 'Re-clone if repair fails', command: 'git clone <url> <dir>' },
+    ],
+  },
+  {
+    code: 'BRANCH_CASE_CONFLICT',
+    test: /a branch named .* already exists|cannot lock ref .*refs\/heads.*: .*exists|refname .* is ambiguous/i,
+    title: 'Branch name differs only by letter case',
+    description:
+      'Windows and macOS store refs on a case-insensitive filesystem, so branches like "dev_ben2" and "dev_Ben2" are the same ref. Git cannot keep both, and switching between them moves commits onto the wrong branch.',
+    causes: [
+      'A branch with the same name in different casing already exists locally',
+      'A teammate on Linux pushed two branches differing only by case',
+      'A case-only rename was attempted (git refuses this in one step)',
+    ],
+    severity: 'error',
+    canAutoFix: false,
+    fixes: [
+      { label: 'List branches that collide, ignoring case', command: 'git branch --format="%(refname:short)" | sort -f | uniq -Di' },
+      { label: 'Rename the existing branch to a distinct name', command: 'git branch -m <old> <new>' },
+      { label: 'Delete the local branch and check the other one out fresh', command: 'git branch -D <branch>' },
     ],
   },
   {

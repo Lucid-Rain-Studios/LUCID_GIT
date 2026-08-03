@@ -6,7 +6,7 @@ import { useRepoStore } from '@/stores/repoStore'
 import { useLockStore } from '@/stores/lockStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useDialogStore } from '@/stores/dialogStore'
-import { computeGraph, GraphNode, ROW_H, DOT_R, GRAPH_PAD, LineSegment } from '@/components/history/graphLayout'
+import { computeGraph, branchColor, GraphNode, ROW_H, DOT_R, GRAPH_PAD, LineSegment } from '@/components/history/graphLayout'
 import { TextDiff } from '@/components/diff/TextDiff'
 import { FileTree } from '@/components/changes/FileTree'
 import { CommitBox } from '@/components/changes/CommitBox'
@@ -99,6 +99,147 @@ function linePath(seg: LineSegment, isTop: boolean): string {
   return `M ${x1} ${y1} C ${x1} ${y2} ${x2} ${y1} ${x2} ${y2}`
 }
 
+// ── Commit node glyphs ────────────────────────────────────────────────────────
+
+/** Node background — the graph column's own backdrop, so hollow shapes read as hollow. */
+const NODE_FILL = '#10131c'
+/** Stand-in colour for legend swatches, where no single branch colour applies. */
+const LEGEND_NEUTRAL = '#8b93a3'
+
+type GlyphKind = 'commit' | 'tip' | 'merge' | 'working'
+
+function diamondPoints(cx: number, cy: number, r: number): string {
+  return `${cx},${cy - r} ${cx + r},${cy} ${cx},${cy + r} ${cx - r},${cy}`
+}
+
+/**
+ * The commit node shapes. Both the graph and the legend draw through this, so
+ * the legend cannot drift out of sync with what the graph actually renders —
+ * which is exactly how it ended up advertising a green dot for branches and a
+ * house for the working tree.
+ *
+ * Shape carries meaning; colour carries branch identity.
+ */
+function CommitGlyph({ kind, color, cx, cy, r = DOT_R + 0.5, strokeBoost = 0, glow = false, fillOpacity = 1 }: {
+  kind: GlyphKind
+  color: string
+  cx: number
+  cy: number
+  r?: number
+  strokeBoost?: number
+  glow?: boolean
+  fillOpacity?: number
+}) {
+  const filter = glow ? 'url(#tl-glow-main)' : undefined
+  switch (kind) {
+    case 'merge':
+      return (
+        <>
+          <polygon points={diamondPoints(cx, cy, r + 1)}
+            fill={NODE_FILL} stroke={color} strokeWidth={1.8 + strokeBoost} filter={filter} />
+          <circle cx={cx} cy={cy} r={2} fill={color} />
+        </>
+      )
+    case 'working':
+      // Filled diamond — deliberately the inverse of a merge, which is hollow.
+      return (
+        <polygon points={diamondPoints(cx, cy, r + 1)} fill={color} fillOpacity={fillOpacity} />
+      )
+    case 'tip':
+      return (
+        <>
+          <circle cx={cx} cy={cy} r={r + 3} fill="none" stroke={color} strokeWidth={1.2} strokeOpacity={0.75} />
+          <circle cx={cx} cy={cy} r={r}
+            fill={NODE_FILL} stroke={color} strokeWidth={2 + strokeBoost} filter={filter} />
+        </>
+      )
+    default:
+      return (
+        <circle cx={cx} cy={cy} r={r}
+          fill={NODE_FILL} stroke={color} strokeWidth={2 + strokeBoost} filter={filter} />
+      )
+  }
+}
+
+/** Working tree accent: orange while dirty, green once clean. */
+function workingTreeAccent(changeCount: number): string {
+  return changeCount > 0 ? '#e8622f' : '#2ec573'
+}
+
+const SYNC_BADGE = {
+  up:   { rgb: '125, 211, 252', color: '#c4eeff', arrow: '↑' },
+  down: { rgb: '252, 165, 165', color: '#ffd1d1', arrow: '↓' },
+} as const
+
+/** The ahead/behind badge shown on a commit row — and in the legend, from here. */
+function SyncBadge({ dir, title }: { dir: 'up' | 'down'; title?: string }) {
+  const s = SYNC_BADGE[dir]
+  return (
+    <span
+      title={title}
+      style={{
+        width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        background: `rgba(${s.rgb}, 0.14)`,
+        border: `1px solid rgba(${s.rgb}, 0.5)`,
+        color: s.color, fontSize: 11, fontWeight: 700, lineHeight: 1,
+        boxShadow: '0 0 0 1px rgba(9, 12, 19, 0.35) inset',
+      }}
+    >{s.arrow}</span>
+  )
+}
+
+/**
+ * One legend entry: the real glyph, drawn by the same code the graph uses,
+ * beside its label. Swatches that stand for a whole class of branches use a
+ * neutral colour, because in the graph the colour identifies *which* branch.
+ */
+function LegendItem({ children, label }: { children: React.ReactNode; label: string }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <svg width={16} height={16} style={{ flexShrink: 0, display: 'block', overflow: 'visible' }}>
+        {children}
+      </svg>
+      {label}
+    </span>
+  )
+}
+
+/** Branch tip pill, as it appears on a commit row — and in the legend, from here. */
+function BranchPill({ label, color, icon, isDefault = false }: {
+  label: string; color: string; icon: string; isDefault?: boolean
+}) {
+  const tone = isDefault ? MAIN_BRANCH_COLOR : color
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0,
+      background: isDefault ? `${MAIN_BRANCH_COLOR}22` : `${color}16`,
+      color: tone,
+      border: `1px solid ${tone}${isDefault ? '80' : '40'}`,
+      borderRadius: 3, padding: '0 5px',
+      fontFamily: 'var(--lg-font-mono)', fontSize: 9, fontWeight: isDefault ? 800 : 500,
+      boxShadow: isDefault ? '0 0 8px rgba(125,211,252,0.2)' : 'none',
+    }}>
+      <span style={{ fontSize: 8 }}>{icon}</span>
+      {label}
+    </span>
+  )
+}
+
+/** The icon a branch pill carries, by role. */
+function branchPillIcon(branch: { name: string; current?: boolean }, defaultBranch: string): string {
+  return branch.name === defaultBranch ? '★' : branch.current ? '◉' : '•'
+}
+
+function LegendBadge({ dir, label }: { dir: 'up' | 'down'; label: string }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <SyncBadge dir={dir} />
+      {label}
+    </span>
+  )
+}
+
 function firstParentHashes(commits: CommitEntry[], tipHash: string | undefined): Set<string> {
   const hashes = new Set<string>()
   if (!tipHash) return hashes
@@ -163,6 +304,7 @@ function remapGraphWithMainLeft(graph: GraphNode[], mainHashes: Set<string>): Gr
       ...node,
       lane,
       color: isMain ? MAIN_BRANCH_COLOR : node.color,
+      branchKey: isMain ? 'main' : node.branchKey,
       isMain,
       topLines,
       bottomLines,
@@ -206,15 +348,15 @@ function pruneGraphToBranchKeys(graph: GraphNode[], allowedBranchKeys: Set<strin
     const selectedBranchKeys = new Set([...allowedBranchKeys].filter(key => key !== 'main'))
     const branchLane = new Map<string, number>()
     for (const node of graph) {
-      if (selectedBranchKeys.has(node.color) && !branchLane.has(node.color)) {
-        branchLane.set(node.color, node.lane)
+      if (selectedBranchKeys.has(node.branchKey) && !branchLane.has(node.branchKey)) {
+        branchLane.set(node.branchKey, node.lane)
       }
     }
 
     const collapsed = graph.map(node => {
-      const keepOwnLane = node.isMain || selectedBranchKeys.has(node.color)
+      const keepOwnLane = node.isMain || selectedBranchKeys.has(node.branchKey)
       const canonicalLane = (branchKey: string) => branchLane.get(branchKey) ?? 0
-      const lane = keepOwnLane && !node.isMain ? canonicalLane(node.color) : 0
+      const lane = keepOwnLane && !node.isMain ? canonicalLane(node.branchKey) : 0
       const mapSegment = (seg: LineSegment, isTop: boolean): LineSegment => {
         const branchKey = seg.branchKey ?? seg.color
         const keepSegmentLane = seg.isMain || selectedBranchKeys.has(branchKey)
@@ -246,6 +388,7 @@ function pruneGraphToBranchKeys(graph: GraphNode[], allowedBranchKeys: Set<strin
         ...node,
         lane,
         color,
+        branchKey: keepOwnLane ? node.branchKey : 'main',
         isMain,
         topLines,
         bottomLines,
@@ -277,7 +420,7 @@ function pruneGraphToBranchKeys(graph: GraphNode[], allowedBranchKeys: Set<strin
 
   const rows = allowedBranchKeys.size === 0
     ? graph.filter(node => node.isMain)
-    : graph.filter(node => node.isMain || allowedBranchKeys.has(node.color))
+    : graph.filter(node => node.isMain || allowedBranchKeys.has(node.branchKey))
 
   return compactGraphLanes(rows
     .map(node => {
@@ -304,12 +447,13 @@ function pruneGraphToBranchKeys(graph: GraphNode[], allowedBranchKeys: Set<strin
     }))
 }
 
-function GraphCell({ node, graphColW, hoveredBranchKey, branchHoverLabels, onHoverBranch }: {
+function GraphCell({ node, graphColW, hoveredBranchKey, branchHoverLabels, onHoverBranch, isTip }: {
   node: GraphNode
   graphColW: number
   hoveredBranchKey: string | null
   branchHoverLabels: Map<string, string>
   onHoverBranch: (branchKey: string | null) => void
+  isTip: boolean
 }) {
   // Tooltip is rendered through a portal at viewport coordinates so it can never
   // be clipped or stacked under the scrollable timeline / graph column.
@@ -318,6 +462,17 @@ function GraphCell({ node, graphColW, hoveredBranchKey, branchHoverLabels, onHov
   const cx = GRAPH_PAD + node.lane * TL_LANE_W + TL_LANE_W / 2
   const cy = ROW_H / 2
   const dotR = DOT_R + 0.5
+
+  // Trace state for this commit's own node, so dots follow the same emphasis as
+  // the lines: hovering a branch mutes every commit that isn't on it.
+  const nodeHovered = hoveredBranchKey === node.branchKey
+  const nodeDimmed  = !!hoveredBranchKey && !nodeHovered
+  const nodeOpacity = nodeDimmed ? 0.18 : 1
+  const nodeLabel   = branchHoverLabels.get(node.branchKey) ?? (node.isMain ? 'Main branch' : 'Branch lane')
+  const enterNode = (e: React.MouseEvent) => {
+    setHoveredSeg({ x: e.clientX, y: e.clientY, label: nodeLabel, border: node.isMain ? MAIN_BRANCH_COLOR : '#3b4b6d' })
+    onHoverBranch(node.branchKey)
+  }
   const renderLine = (seg: LineSegment, isTop: boolean, key: string) => {
     const branchKey = seg.branchKey ?? seg.color
     const branchLabel = branchHoverLabels.get(branchKey) ?? (seg.isMain ? 'Main branch' : 'Selected branch lane')
@@ -367,22 +522,35 @@ function GraphCell({ node, graphColW, hoveredBranchKey, branchHoverLabels, onHov
     <svg width={graphColW} height={ROW_H} style={{ flexShrink: 0, overflow: 'visible', display: 'block', position: 'relative' }}>
       {node.topLines.map((seg, i) => renderLine(seg, true, `t${i}`))}
       {node.bottomLines.map((seg, i) => renderLine(seg, false, `b${i}`))}
-      {isMerge ? (
-        <g>
-          <polygon
-            points={`${cx},${cy - dotR - 1} ${cx + dotR + 1},${cy} ${cx},${cy + dotR + 1} ${cx - dotR - 1},${cy}`}
-            fill="#10131c" stroke={node.color} strokeWidth={node.isMain ? 2.6 : 1.8}
-            filter={node.isMain ? 'url(#tl-glow-main)' : undefined}
-          />
-          <circle cx={cx} cy={cy} r={2} fill={node.color} />
-        </g>
-      ) : (
-        <circle cx={cx} cy={cy} r={dotR}
-          fill="#10131c" stroke={node.color}
-          strokeWidth={node.isMain ? 3 : 2}
-          filter={node.isMain ? 'url(#tl-glow-main)' : undefined}
+      {/* Shape encodes commit type: diamond = merge, ringed dot = branch tip,
+          plain dot = ordinary commit. Readable before colour is even parsed.
+          Drawn through CommitGlyph so the legend stays in step. */}
+      <g
+        opacity={nodeOpacity}
+        style={{ transition: 'opacity 90ms ease' }}
+      >
+        <CommitGlyph
+          kind={isMerge ? 'merge' : isTip ? 'tip' : 'commit'}
+          color={node.color}
+          cx={cx} cy={cy} r={dotR}
+          strokeBoost={(node.isMain ? 1 : 0) + (nodeHovered ? 1 : 0)}
+          glow={!!node.isMain}
         />
-      )}
+      </g>
+      {/* Invisible hit area so the dot traces its branch on hover too, not just
+          the thin connecting lines. Sized to cover the tip ring and no further:
+          lanes sit TL_LANE_W apart, so a wider target would swallow hover from
+          the neighbouring lane's line. Painted last, so at the dot itself the
+          commit wins over any line passing behind it. */}
+      <circle cx={cx} cy={cy} r={dotR + 3.5} fill="transparent"
+        style={{ cursor: 'help' }}
+        onMouseEnter={enterNode}
+        onMouseMove={(e) => {
+          setHoveredSeg(prev => (prev ? { ...prev, x: e.clientX, y: e.clientY } : prev))
+          if (hoveredBranchKey !== node.branchKey) onHoverBranch(node.branchKey)
+        }}
+        onMouseLeave={() => { setHoveredSeg(null); onHoverBranch(null) }}
+      />
       {hoveredSeg && <BranchHoverTooltip x={hoveredSeg.x} y={hoveredSeg.y} label={hoveredSeg.label} border={hoveredSeg.border} />}
     </svg>
   )
@@ -563,28 +731,34 @@ function BlameModal({ filePath, commitHash, repoPath, onClose }: {
 
 // ── Working tree graph row ────────────────────────────────────────────────────
 
-const WT_ROW_H = 58
+const WT_ROW_H = 66
 
 function WorkingTreeGraphRow({ selected, changeCount, graphColW, lane = 0, onClick }: {
   selected: boolean; changeCount: number; graphColW: number; lane?: number; onClick: () => void
 }) {
   const [hover, setHover] = useState(false)
   const hasChanges = changeCount > 0
-  const accent = hasChanges ? '#e8622f' : '#2ec573'
+  const accent = workingTreeAccent(changeCount)
+  const rgb = hasChanges ? '232,98,47' : '46,197,115'
+  const active = selected || hover
   const cx = GRAPH_PAD + lane * TL_LANE_W + TL_LANE_W / 2
-  const cy = Math.round(WT_ROW_H * 0.40)
+  const cy = Math.round(WT_ROW_H * 0.42)
 
   return (
     <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
+      title="Open the working tree — review and stage uncommitted changes"
       style={{
         display: 'flex', alignItems: 'center', height: WT_ROW_H, flexShrink: 0,
         borderLeft: `2px solid ${selected ? accent : 'transparent'}`,
         borderBottom: '1px solid #1e2436',
-        background: selected ? 'rgba(232,98,47,0.06)' : hover ? '#191d2a' : 'transparent',
-        cursor: 'pointer', transition: 'background 0.1s',
+        background: selected ? `rgba(${rgb},0.05)` : 'transparent',
+        cursor: 'pointer', outline: 'none',
       }}
     >
       {/* Graph column — diamond + connecting line down to first commit */}
@@ -593,45 +767,76 @@ function WorkingTreeGraphRow({ selected, changeCount, graphColW, lane = 0, onCli
           x1={cx} y1={cy + 6} x2={cx} y2={WT_ROW_H}
           stroke={accent} strokeWidth={1.75} strokeOpacity={0.45}
         />
-        <polygon
-          points={`${cx},${cy - 6} ${cx + 5.5},${cy} ${cx},${cy + 6} ${cx - 5.5},${cy}`}
-          fill={accent} fillOpacity={selected ? 0.9 : 0.65}
-        />
+        {hasChanges && (
+          <circle cx={cx} cy={cy} r={10} fill={accent} fillOpacity={active ? 0.18 : 0.1} />
+        )}
+        <CommitGlyph kind="working" color={accent} cx={cx} cy={cy} r={5}
+          fillOpacity={active ? 1 : 0.75} />
       </svg>
 
-      {/* Content */}
-      <div style={{ flex: 1, minWidth: 0, paddingLeft: 5, paddingRight: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 4 }}>
-          <span style={{
-            fontFamily: 'var(--lg-font-ui)', fontSize: 12.5, fontWeight: 600,
-            color: selected ? '#dde1f0' : '#9ba4bc',
-          }}>Working Tree</span>
-          {hasChanges && (
+      {/* Content — styled as a pressable card so it reads as a button */}
+      <div style={{
+        flex: 1, minWidth: 0, marginLeft: 2, marginRight: 8,
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '7px 9px 7px 10px', borderRadius: 6,
+        border: `1px solid ${active ? `rgba(${rgb},0.55)` : `rgba(${rgb},0.28)`}`,
+        background: active
+          ? `linear-gradient(180deg, rgba(${rgb},0.16), rgba(${rgb},0.07))`
+          : `linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015))`,
+        boxShadow: active
+          ? `0 0 0 1px rgba(${rgb},0.12), 0 2px 10px rgba(0,0,0,0.35)`
+          : '0 1px 2px rgba(0,0,0,0.3)',
+        transition: 'background 0.12s, border-color 0.12s, box-shadow 0.12s',
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 3 }}>
             <span style={{
-              fontFamily: 'var(--lg-font-mono)', fontSize: 9.5, fontWeight: 700,
-              background: 'rgba(232,98,47,0.15)', color: '#e8622f',
-              border: '1px solid rgba(232,98,47,0.3)', borderRadius: 8,
-              minWidth: 18, height: 16, paddingLeft: 5, paddingRight: 5,
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            }}>{changeCount}</span>
-          )}
+              fontFamily: 'var(--lg-font-ui)', fontSize: 12.5, fontWeight: 700,
+              letterSpacing: '0.01em',
+              color: active ? '#eef1fa' : '#c3cade',
+            }}>Working Tree</span>
+            {hasChanges && (
+              <span style={{
+                fontFamily: 'var(--lg-font-mono)', fontSize: 9.5, fontWeight: 700,
+                background: `rgba(${rgb},0.2)`, color: accent,
+                border: `1px solid rgba(${rgb},0.4)`, borderRadius: 8,
+                minWidth: 18, height: 16, paddingLeft: 5, paddingRight: 5,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              }}>{changeCount}</span>
+            )}
+          </div>
+          <span style={{
+            fontFamily: 'var(--lg-font-ui)', fontSize: 10.5,
+            color: hasChanges ? `${accent}cc` : '#5d6883',
+          }}>
+            {hasChanges
+              ? `${changeCount} uncommitted change${changeCount !== 1 ? 's' : ''}`
+              : 'Nothing to commit'}
+          </span>
         </div>
+
+        {/* Affordance — label appears on hover/selection, chevron always visible */}
         <span style={{
-          fontFamily: 'var(--lg-font-ui)', fontSize: 10.5,
-          color: hasChanges ? `${accent}bb` : '#2e3a4e',
+          fontFamily: 'var(--lg-font-ui)', fontSize: 10, fontWeight: 600,
+          letterSpacing: '0.04em', textTransform: 'uppercase',
+          color: accent, opacity: active ? 0.9 : 0,
+          transition: 'opacity 0.12s', flexShrink: 0, whiteSpace: 'nowrap',
         }}>
-          {hasChanges
-            ? `${changeCount} uncommitted change${changeCount !== 1 ? 's' : ''}`
-            : 'Nothing to commit'}
+          {hasChanges ? 'Review' : 'Open'}
         </span>
+        <svg width={14} height={14} viewBox="0 0 14 14" style={{ flexShrink: 0, display: 'block' }}>
+          <path
+            d="M5.25 3 L9 7 L5.25 11"
+            fill="none" stroke={active ? accent : '#5d6883'} strokeWidth={1.6}
+            strokeLinecap="round" strokeLinejoin="round"
+          />
+        </svg>
       </div>
     </div>
   )
 }
 
 // ── Branch filter components ──────────────────────────────────────────────────
-
-const TL_BRANCH_COLORS = ['#4d9dff', '#e8622f', '#2ec573', '#a27ef0', '#f5a832', '#1abc9c', '#e91e63', '#00bcd4']
 
 function isLiveOriginBranch(branch: BranchInfo): boolean {
   return branch.isRemote && (branch.remoteName === 'origin' || branch.name.startsWith('origin/'))
@@ -669,6 +874,7 @@ function TLBranchDropdownRow({ branch, checked, isDefault, bCol, onToggle }: {
   const [hover, setHover] = useState(false)
   return (
     <div
+      onClick={onToggle}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
@@ -681,6 +887,7 @@ function TLBranchDropdownRow({ branch, checked, isDefault, bCol, onToggle }: {
       }}
     >
       <label
+        onClick={e => e.stopPropagation()}
         style={{ width: 16, height: 16, position: 'relative', flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
       >
         <input
@@ -710,17 +917,16 @@ function TLBranchDropdownRow({ branch, checked, isDefault, bCol, onToggle }: {
         )}
       </label>
       <span style={{ width: 3, height: 16, borderRadius: 2, background: bCol, flexShrink: 0 }} />
-      <button
-        type="button"
-        onClick={onToggle}
+      {/* Plain label, not a <button>: the whole row is the click target (matching
+          the users dropdown), and a button here would pick up the app-wide
+          control sizing and inflate the row. */}
+      <span
         style={{
-          all: 'unset',
           fontFamily: 'var(--lg-font-mono)', fontSize: 11, color: '#c8cdd8',
           flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          cursor: 'pointer',
         }}
         title={branch.name}
-      >{branch.displayName || branch.name}</button>
+      >{branch.displayName || branch.name}</span>
       <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
         {isDefault && (
           <span style={{
@@ -1114,61 +1320,28 @@ function LeftCommitRow({ node, selected, repoPath, remoteUrl, onRefresh, onClick
             hoveredBranchKey={hoveredBranchKey}
             branchHoverLabels={branchHoverLabels}
             onHoverBranch={onHoverBranch}
+            isTip={tipBranches.length > 0}
           />
         </div>
         <div style={{ flex: 1, minWidth: 0, paddingLeft: 5, paddingRight: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2, overflow: 'hidden' }}>
             {/* Branch tip pills */}
-            {tipBranches.map(b => {
-              const bCol = branchColors.get(b.name) ?? '#4d9dff'
-              const isDefaultTip = b.name === defaultBranch
-              const icon = b.name === defaultBranch ? '★' : b.current ? '◉' : '•'
-              return (
-                <span key={b.name} style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0,
-                  background: isDefaultTip ? `${MAIN_BRANCH_COLOR}22` : `${bCol}16`,
-                  color: isDefaultTip ? MAIN_BRANCH_COLOR : bCol,
-                  border: `1px solid ${isDefaultTip ? MAIN_BRANCH_COLOR : bCol}${isDefaultTip ? '80' : '40'}`,
-                  borderRadius: 3, padding: '0 5px',
-                  fontFamily: 'var(--lg-font-mono)', fontSize: 9, fontWeight: isDefaultTip ? 800 : 500,
-                  boxShadow: isDefaultTip ? '0 0 8px rgba(125,211,252,0.2)' : 'none',
-                }}>
-                  <span style={{ fontSize: 8 }}>{icon}</span>
-                  {tlBranchShortName(b.name)}
-                </span>
-              )
-            })}
+            {tipBranches.map(b => (
+              <BranchPill
+                key={b.name}
+                label={tlBranchShortName(b.name)}
+                color={branchColors.get(b.name) ?? '#4d9dff'}
+                icon={branchPillIcon(b, defaultBranch)}
+                isDefault={b.name === defaultBranch}
+              />
+            ))}
             <span style={{
               fontFamily: 'var(--lg-font-ui)', fontSize: 12,
               fontWeight: selected ? 600 : 400, color: '#c8cdd8',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
             }}>{commit.message}</span>
-            {needsPush && (
-              <span
-                title="Needs push"
-                style={{
-                  width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'rgba(125, 211, 252, 0.14)',
-                  border: '1px solid rgba(125, 211, 252, 0.5)',
-                  color: '#c4eeff', fontSize: 11, fontWeight: 700, lineHeight: 1,
-                  boxShadow: '0 0 0 1px rgba(9, 12, 19, 0.35) inset',
-                }}
-              >↑</span>
-            )}
-            {needsPull && (
-              <span
-                title="Needs pull"
-                style={{
-                  width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'rgba(252, 165, 165, 0.14)',
-                  border: '1px solid rgba(252, 165, 165, 0.5)',
-                  color: '#ffd1d1', fontSize: 11, fontWeight: 700, lineHeight: 1,
-                  boxShadow: '0 0 0 1px rgba(9, 12, 19, 0.35) inset',
-                }}
-              >↓</span>
-            )}
+            {needsPush && <SyncBadge dir="up" title="Needs push" />}
+            {needsPull && <SyncBadge dir="down" title="Needs pull" />}
             {isMerge && (
               <span style={{
                 background: 'rgba(162,126,240,0.12)', color: '#a27ef0',
@@ -1900,14 +2073,17 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     })
   }, [branches, defaultBranch])
 
+  // Tip pills and the filter dropdown read from the same branchColor() lookup
+  // the graph lanes use, so a branch is one colour everywhere. Previously this
+  // was assigned by list position, which reshuffled whenever a branch appeared
+  // or disappeared and never matched the lane it labelled.
   const branchColors = React.useMemo(() => {
     const colorBranches = mergeBranchLists(filterBranches, branches.filter(b => !b.isRemote))
-    const sorted = [
-      ...colorBranches.filter(b => b.displayName === defaultBranch || b.name === defaultBranch),
-      ...colorBranches.filter(b => b.displayName !== defaultBranch && b.name !== defaultBranch),
-    ]
     const map = new Map<string, string>()
-    sorted.forEach((b, i) => map.set(b.name, TL_BRANCH_COLORS[i % TL_BRANCH_COLORS.length]))
+    for (const b of colorBranches) {
+      const isDefault = b.displayName === defaultBranch || b.name === defaultBranch
+      map.set(b.name, isDefault ? MAIN_BRANCH_COLOR : branchColor(b.name))
+    }
     return map
   }, [filterBranches, branches, defaultBranch])
   const allAuthors = React.useMemo(() => {
@@ -1940,7 +2116,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     for (const node of displayedNodes) {
       const tips = branchTips.get(node.commit.hash) ?? []
       for (const branch of tips) {
-        const key = branch.displayName === defaultBranch || branch.name === defaultBranch ? 'main' : node.color
+        const key = branch.displayName === defaultBranch || branch.name === defaultBranch ? 'main' : node.branchKey
         const existing = labels.get(key)
         if (existing && !existing.split(' / ').includes(branch.name)) {
           labels.set(key, `${existing} / ${branch.name}`)
@@ -2082,7 +2258,6 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
         ? await ipc.log(repoPath, { limit, all: false, refs: [defaultRef] }).catch(() => [])
         : []
       const defaultHashes = firstParentHashes(commits, defaultCommits[0]?.hash)
-      const graph = remapGraphWithMainLeft(computeGraph(commits), defaultHashes)
       const tipCommits = await Promise.all(refs.map(async ref => {
         try {
           const [tip] = await ipc.log(repoPath, { limit: 1, all: false, refs: [ref] })
@@ -2092,13 +2267,19 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
         }
       }))
       const selectedTipRefs = new Map(tipCommits.filter(tip => !!tip).map(tip => [tip!.hash, tip!.ref]))
+      // Key each lane by the branch name where we know one, so a branch keeps
+      // its identity — and therefore its colour — as new commits move its tip.
+      const graph = remapGraphWithMainLeft(
+        computeGraph(commits, { branchNameByHash: selectedTipRefs }),
+        defaultHashes,
+      )
       const allowedKeys = new Set<string>()
       for (const node of graph) {
         const ref = selectedTipRefs.get(node.commit.hash)
         if (!ref) continue
         const branch = branchPool.find(b => b.name === ref)
         if (branch && (branch.displayName === mainBranch || branch.name === mainBranch)) allowedKeys.add('main')
-        else allowedKeys.add(node.color)
+        else allowedKeys.add(node.branchKey)
       }
       const pruned = pruneGraphToBranchKeys(graph, allowedKeys)
       setNodes(pruned)
@@ -2308,7 +2489,13 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   const legendHasBranchTip = displayedNodes.some(node => (branchTips.get(node.commit.hash) ?? []).some(branch => branch.displayName !== defaultBranch && branch.name !== defaultBranch))
   const legendHasPush = displayedNodes.some(node => needsPushHashes.has(node.commit.hash))
   const legendHasPull = displayedNodes.some(node => needsPullHashes.has(node.commit.hash))
-  const legendHasWorkingTree = leftSel.kind === 'working-tree'
+  // A "checked out" pill only shows when the current branch's tip is on screen
+  // and it isn't the default — the default already has its own ★ entry.
+  const legendHasCurrentBranch = displayedNodes.some(node =>
+    (branchTips.get(node.commit.hash) ?? []).some(branch =>
+      branch.current && branch.name !== defaultBranch && branch.displayName !== defaultBranch))
+  // The working-tree row is always pinned above the list, so its glyph is always
+  // on screen — unlike the entries above, which track what the graph shows.
   const currentHeadLane = React.useMemo(() => {
     const currentBranch = branches.find(b => b.current)?.name
     if (!currentBranch) return 0
@@ -2485,13 +2672,33 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
           flexWrap: 'wrap', lineHeight: 1.3,
         }}>
           <span>Legend:</span>
-          {legendHasMain && <span style={{ color: MAIN_BRANCH_COLOR }}>━ main path</span>}
-          {legendHasMain && <span style={{ color: '#4d9dff' }}>★ default</span>}
-          {legendHasBranchTip && <span style={{ color: '#2ec573' }}>• branch</span>}
-          {legendHasMerge && <span style={{ color: '#a27ef0' }}>◇ merge</span>}
-          {legendHasPush && <span style={{ color: '#7dd3fc' }}>↑ push</span>}
-          {legendHasPull && <span style={{ color: '#fca5a5' }}>↓ pull</span>}
-          {legendHasWorkingTree && <span style={{ color: '#f5a832' }}>⌂ working tree</span>}
+          {legendHasMain && (
+            <LegendItem label="main path">
+              <line x1={1} y1={8} x2={15} y2={8}
+                stroke={MAIN_BRANCH_COLOR} strokeWidth={2.7} strokeOpacity={0.86} strokeLinecap="round" />
+            </LegendItem>
+          )}
+          <LegendItem label="commit">
+            <CommitGlyph kind="commit" color={LEGEND_NEUTRAL} cx={8} cy={8} />
+          </LegendItem>
+          {legendHasBranchTip && (
+            <LegendItem label="branch tip">
+              <CommitGlyph kind="tip" color={LEGEND_NEUTRAL} cx={8} cy={8} />
+            </LegendItem>
+          )}
+          {legendHasMerge && (
+            <LegendItem label="merge">
+              <CommitGlyph kind="merge" color={LEGEND_NEUTRAL} cx={8} cy={8} />
+            </LegendItem>
+          )}
+          <LegendItem label="working tree">
+            <CommitGlyph kind="working" color={workingTreeAccent(fileStatus.length)} cx={8} cy={8} r={5} />
+          </LegendItem>
+          {legendHasPush && <LegendBadge dir="up" label="to push" />}
+          {legendHasPull && <LegendBadge dir="down" label="to pull" />}
+          {legendHasMain && <BranchPill label="default" color={MAIN_BRANCH_COLOR} icon="★" isDefault />}
+          {legendHasCurrentBranch && <BranchPill label="checked out" color={LEGEND_NEUTRAL} icon="◉" />}
+          <span style={{ opacity: 0.75 }}>colour = branch</span>
         </div>
         <div
           onMouseDown={makeDragStart('graph', effectiveGraphWidth)}

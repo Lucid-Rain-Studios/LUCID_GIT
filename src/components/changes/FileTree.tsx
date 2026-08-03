@@ -177,8 +177,9 @@ export function FileTree({
   const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login ?? null
   const canSelectAllDeferredStagePaths = isDeferredStaging
     && files.some(file => !deferredStagePaths?.has(file.path))
-  const discardCandidates = isDeferredStaging ? files : unstaged
-  const hasTrackedWorkingChanges = files.some(file => file.workingStatus !== '?')
+  // "Discard All" resets the index too, so staged rows count as candidates.
+  // Only files that are purely untracked (never staged) are left alone.
+  const discardCandidates = files.filter(file => file.indexStatus !== '?')
 
   // ── Multi-select state ─────────────────────────────────────────────────────
   const [multiPaths, setMultiPaths]         = useState<Set<string>>(new Set())
@@ -362,9 +363,17 @@ export function FileTree({
         <ActionBtn
           label="Discard All"
           danger
-          disabled={busy || (isDeferredStaging ? !hasTrackedWorkingChanges : unstaged.filter(f => f.workingStatus !== '?').length === 0)}
+          disabled={busy || discardCandidates.length === 0}
           onClick={async () => {
-            const ok = await dialog.confirm({ title: 'Discard all changes', message: 'This will discard all working-tree changes. This cannot be undone.', confirmLabel: 'Discard All', danger: true })
+            const newFileCount = discardCandidates.filter(f => f.indexStatus === 'A' || f.indexStatus === 'R').length
+            const ok = await dialog.confirm({
+              title: 'Discard all changes',
+              message: 'This will discard all staged and working-tree changes. This cannot be undone.',
+              detail: newFileCount > 0
+                ? `${newFileCount} staged new file${newFileCount === 1 ? '' : 's'} will be deleted from disk. Untracked files are kept.`
+                : 'Untracked files are kept.',
+              confirmLabel: 'Discard All', danger: true,
+            })
             if (!ok) return
             // Capture files locked by me before discarding so they can be unlocked after reset.
             const myLockedFiles = currentLogin
@@ -374,9 +383,14 @@ export function FileTree({
                 })
               : []
             run('Discarding changes…', async () => {
-              await ipc.discardAll(repoPath)
-              for (const file of myLockedFiles) {
-                await unlockFile(repoPath, file.path).catch(() => {})
+              // Release locks even on a partial failure — whatever did get
+              // reset should not stay locked behind the error.
+              try {
+                await ipc.discardAll(repoPath)
+              } finally {
+                for (const file of myLockedFiles) {
+                  await unlockFile(repoPath, file.path).catch(() => {})
+                }
               }
             })
           }}

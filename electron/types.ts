@@ -288,6 +288,15 @@ export interface FeatureVisibilitySettings {
   lfs:    FeatureVisibility
 }
 
+/** A terminal emulator Lucid Git can launch, and whether it's installed. */
+export interface TerminalProfile {
+  id: string
+  label: string
+  available: boolean
+  /** Resolved executable / .app bundle, when detected. */
+  path?: string
+}
+
 export interface AppSettings {
   autoFetchIntervalMinutes: number
   updateCheckIntervalMinutes: number
@@ -311,6 +320,8 @@ export interface AppSettings {
   defaultBranchName?: string
   desktopNotificationEvents?: DesktopNotificationEvents
   featureVisibility?: FeatureVisibilitySettings
+  /** Terminal id from TerminalService, or 'auto' to use the first installed one. */
+  preferredTerminal?: string
 }
 
 export interface TeamConfig {

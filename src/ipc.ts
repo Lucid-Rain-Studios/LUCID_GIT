@@ -439,6 +439,16 @@ export interface AppSettings {
   defaultBranchName?: string
   desktopNotificationEvents?: DesktopNotificationEvents
   featureVisibility?: FeatureVisibilitySettings
+  /** Terminal id from listTerminals(), or 'auto' to use the first installed one. */
+  preferredTerminal?: string
+}
+
+/** A terminal emulator Lucid Git can launch, and whether it's installed. */
+export interface TerminalProfile {
+  id: string
+  label: string
+  available: boolean
+  path?: string
 }
 
 export interface TeamConfig {
@@ -618,7 +628,8 @@ export interface LucidGitAPI {
   openExternal:   (url: string) => Promise<void>
   showInFolder:   (fullPath: string) => Promise<void>
   openPath:       (fullPath: string) => Promise<void>
-  openTerminal:   (cwd?: string) => Promise<void>
+  openTerminal:   (cwd?: string, terminalId?: string) => Promise<void>
+  listTerminals:  () => Promise<TerminalProfile[]>
 
   // Auth
   startDeviceFlow: () => Promise<DeviceFlowStart>

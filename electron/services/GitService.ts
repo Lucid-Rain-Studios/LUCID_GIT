@@ -8,6 +8,10 @@ import { logService } from './LogService'
 import { parseGitLog, GIT_LOG_FORMAT } from '../util/git-log-parse'
 import { FileStatus, BranchInfo, CommitEntry, ChangelogEntry, ChangelogQuery, DiffContent, StashEntry, ContributorInfo, ConflictPreviewFile, SyncStatus, LFSStatus, LfsLockCacheFile, LfsLocksMaintenanceResult, SizeBreakdown, CleanupResult, BranchActivity, BranchDiffSummary, BranchDiffFile, PotentialMergeConflictReport, RepoSearchResult } from '../types'
 
+// Long enough for a background `gc --auto` to finish committing its new pack
+// set, short enough that the user reads it as one slow operation, not a hang.
+const STALE_PACK_RETRY_DELAY_MS = 2000
+
 // ── Diff helpers ──────────────────────────────────────────────────────────────
 
 const BINARY_EXTS = new Set([
@@ -360,14 +364,55 @@ class GitService {
       }
     }
 
-    if (upstreamRes.exitCode !== 0) {
-      onProgress?.({ id: 'push-connect', label: 'Connecting to remote', status: 'running', progress: 12 })
-      await execWithProgress([...gitAuthArgs(token, remoteUrl), 'push', '--progress', '--set-upstream', 'origin', branch], repoPath, onProgress)
-      return { branch, filesAhead }
-    }
+    const pushArgs = upstreamRes.exitCode !== 0
+      ? [...gitAuthArgs(token, remoteUrl), 'push', '--progress', '--set-upstream', 'origin', branch]
+      : [...gitAuthArgs(token, remoteUrl), 'push', '--progress']
+
     onProgress?.({ id: 'push-connect', label: 'Connecting to remote', status: 'running', progress: 12 })
-    await execWithProgress([...gitAuthArgs(token, remoteUrl), 'push', '--progress'], repoPath, onProgress)
+    // Push is idempotent, so replaying a partially-completed push is safe.
+    await this.withStalePackRetry(() => execWithProgress(pushArgs, repoPath, onProgress), onProgress)
     return { branch, filesAhead }
+  }
+
+  /**
+   * Run a git operation, retrying once if a background repack pulled a pack
+   * file out from under it. The operation itself was never wrong — it just ran
+   * against a pack list that stopped being true mid-flight — so a plain re-run
+   * against the settled object store succeeds.
+   *
+   * Only wrap operations that are safe to repeat: a failed attempt must not
+   * leave state behind that a second attempt would trip over. `clone`, `gc` and
+   * `lfs migrate` are deliberately excluded — see the call sites.
+   */
+  private async withStalePackRetry<T>(fn: () => Promise<T>, onProgress?: ProgressCallback): Promise<T> {
+    try {
+      return await fn()
+    } catch (error) {
+      if (!this.isStalePackError(error)) throw error
+      logService.warn('git.repack-race', `Retrying after background repack invalidated a pack file:\n${error instanceof Error ? error.message : String(error)}`)
+      onProgress?.({ id: 'repack-retry', label: 'Repository was repacked — retrying', status: 'running' })
+      await new Promise(resolve => setTimeout(resolve, STALE_PACK_RETRY_DELAY_MS))
+      return await fn()
+    }
+  }
+
+  /**
+   * True for the transient "pack file disappeared mid-read" failure.
+   *
+   * Git starts `gc --auto` in the background after a pull/merge brings in
+   * enough loose objects. When it repacks, the superseded pack/idx files are
+   * unlinked. Any operation that walks the object store in that window fails —
+   * git-lfs's pre-push scan is the one that surfaces it most often. The object
+   * store is intact; only the caller's view of it is stale.
+   */
+  private isStalePackError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error)
+    if (!/objects[\\/]+pack[\\/]+pack-[0-9a-f]+\.(idx|pack)/i.test(message)) return false
+    return (
+      /cannot find the file/i.test(message) ||
+      /no such file or directory/i.test(message) ||
+      /does not exist/i.test(message)
+    )
   }
 
   /** Files changed in commits that are ahead of upstream (what push would publish). */
@@ -391,7 +436,10 @@ class GitService {
     try {
       const remoteUrl = await this.getRemoteUrl(repoPath)
       onProgress?.({ id: 'pull-connect', label: 'Connecting to remote', status: 'running', progress: 12 })
-      await execWithProgress([...gitAuthArgs(token, remoteUrl), 'pull', '--progress'], repoPath, onProgress)
+      await this.withStalePackRetry(
+        () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'pull', '--progress'], repoPath, onProgress),
+        onProgress,
+      )
     } catch (error) {
       if (!this.shouldRunLfsRecovery(error)) throw error
       await this.recoverLfsAndMergeState(repoPath)
@@ -445,7 +493,13 @@ class GitService {
   async fetch(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
     const token = await authService.getCurrentToken()
     const remoteUrl = await this.getRemoteUrl(repoPath)
-    await execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', '--all', '--progress'], repoPath, onProgress)
+    // --prune matters as much as the fetch itself: without it, remote-tracking
+    // refs for branches someone else deleted linger indefinitely, so the branch
+    // list keeps offering branches that no longer exist on the remote.
+    await this.withStalePackRetry(
+      () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', '--all', '--prune', '--progress'], repoPath, onProgress),
+      onProgress,
+    )
   }
 
   /** List local AND remote-tracking branches with upstream tracking info. */
@@ -471,8 +525,11 @@ class GitService {
     for (const line of refRes.stdout.trim().split('\n').filter(Boolean)) {
       const [refname, shortName, upstream, track] = line.split('\t')
 
-      // Skip the symbolic remote HEAD pointer (origin/HEAD)
-      if (shortName === 'origin/HEAD' || shortName.endsWith('/HEAD')) continue
+      // Skip the symbolic remote HEAD pointer. Match on the full refname:
+      // git abbreviates refs/remotes/origin/HEAD to plain "origin", so a
+      // short-name check misses it and admits a branch with an empty
+      // displayName into the list.
+      if (refname.endsWith('/HEAD')) continue
 
       const isRemote = refname.startsWith('refs/remotes/')
       const remoteName = isRemote ? shortName.split('/')[0] : undefined
@@ -489,7 +546,7 @@ class GitService {
       results.push({
         name:        shortName,
         displayName,
-        current:     !isRemote && shortName === current,
+        current:     false,   // resolved below against HEAD
         upstream:    upstream || undefined,
         ahead,
         behind,
@@ -499,8 +556,17 @@ class GitService {
       })
     }
 
+    // HEAD can carry a casing the ref store does not hold — a repo left in
+    // that state by an earlier case-collided checkout would otherwise show no
+    // current branch at all. Prefer the exact match, fall back to case.
+    const localsOnly = results.filter(b => !b.isRemote)
+    const head =
+      localsOnly.find(b => b.name === current) ??
+      localsOnly.find(b => b.name.toLowerCase() === current.toLowerCase())
+    if (head) head.current = true
+
     // Mark remote branches that have a corresponding local branch
-    const localNames = new Set(results.filter(b => !b.isRemote).map(b => b.name))
+    const localNames = new Set(localsOnly.map(b => b.name))
     for (const b of results) {
       if (b.isRemote) b.hasLocal = localNames.has(b.displayName)
     }
@@ -626,8 +692,44 @@ class GitService {
     await execSafe([...gitAuthArgs(token, remoteUrl), 'fetch', remoteName, '--prune'], repoPath)
   }
 
+  /**
+   * Ref short-names exactly as the ref store holds them.
+   *
+   * This is the only case-exact existence check available on Windows and
+   * macOS. `rev-parse --verify` and `show-ref --verify` resolve loose refs
+   * through the filesystem, so both report `refs/heads/dev_Ben2` as existing
+   * when only `dev_ben2` is on disk.
+   */
+  private async refNames(repoPath: string, ...namespaces: string[]): Promise<string[]> {
+    const res = await execSafe(
+      ['for-each-ref', '--format=%(refname:short)', ...namespaces],
+      repoPath
+    )
+    if (res.exitCode !== 0) return []
+    return res.stdout.split('\n').map(l => l.trim()).filter(Boolean)
+  }
+
+  /** An existing name that differs from `name` only by letter case, if any. */
+  private caseVariantOf(name: string, existing: string[]): string | undefined {
+    const lower = name.toLowerCase()
+    return existing.find(e => e !== name && e.toLowerCase() === lower)
+  }
+
   /** Create a new branch (and optionally check it out). */
   async createBranch(repoPath: string, name: string, from?: string): Promise<void> {
+    // On a case-insensitive filesystem two branches differing only by case
+    // are one loose ref file, so git rejects this with a message naming the
+    // branch the user just typed ("a branch named 'dev_Ben2' already
+    // exists"). Fail first, naming the branch that actually collides.
+    const clash = this.caseVariantOf(name, await this.refNames(repoPath, 'refs/heads/'))
+    if (clash) {
+      throw new Error(
+        `Branch "${clash}" already exists and differs from "${name}" only by letter case. ` +
+        `Git stores both as the same ref on Windows and macOS, so they cannot coexist. ` +
+        `Choose a different name, or rename "${clash}" first.`
+      )
+    }
+
     const args = from
       ? ['checkout', '-b', name, from]
       : ['checkout', '-b', name]
@@ -636,6 +738,32 @@ class GitService {
 
   /** Rename a branch. Renames the current branch when oldName === HEAD. */
   async renameBranch(repoPath: string, oldName: string, newName: string): Promise<void> {
+    // Case-only rename (dev_ben2 → dev_Ben2). `git branch -m` sees the
+    // destination ref as already present and refuses; `-M` reports success
+    // but leaves the old casing in place. Routing through a temporary name
+    // makes the rename actually land.
+    if (oldName !== newName && oldName.toLowerCase() === newName.toLowerCase()) {
+      const tmp = `${newName}.lucid-case-rename-${Date.now()}`
+      await exec(['branch', '-m', oldName, tmp], repoPath)
+      try {
+        await exec(['branch', '-m', tmp, newName], repoPath)
+      } catch (err) {
+        // Never leave the branch parked on the scratch name.
+        await execSafe(['branch', '-m', tmp, oldName], repoPath)
+        throw err
+      }
+      return
+    }
+
+    const clash = this.caseVariantOf(newName, await this.refNames(repoPath, 'refs/heads/'))
+    if (clash && clash !== oldName) {
+      throw new Error(
+        `Branch "${clash}" already exists and differs from "${newName}" only by letter case. ` +
+        `Git stores both as the same ref on Windows and macOS, so they cannot coexist. ` +
+        `Choose a different name, or rename "${clash}" first.`
+      )
+    }
+
     await exec(['branch', '-m', oldName, newName], repoPath)
   }
 
@@ -684,7 +812,10 @@ class GitService {
     // Synthetic stage events — guarantee the bar shows progression even when
     // git itself goes silent (already up-to-date fetch, pure ref-bump merge).
     onProgress?.({ id: 'stage', label: 'Fetching origin', status: 'running' })
-    await execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', 'origin', '--prune', '--progress'], repoPath, onProgress)
+    await this.withStalePackRetry(
+      () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', 'origin', '--prune', '--progress'], repoPath, onProgress),
+      onProgress,
+    )
 
     const defaultBranch = await this.remoteDefaultBranch(repoPath)
     const check = await execSafe(['rev-parse', '--verify', defaultBranch.ref], repoPath)
@@ -720,7 +851,7 @@ class GitService {
     // checkout phase — the main thing the user wants to watch on a big update.
     const mergeArgs = [...gitAuthArgs(token, remoteUrl), 'merge', '--no-edit', '--progress', defaultBranch.ref]
     try {
-      await execWithProgress(mergeArgs, repoPath, onProgress)
+      await this.withStalePackRetry(() => execWithProgress(mergeArgs, repoPath, onProgress), onProgress)
     } catch (error) {
       if (!this.shouldRunLfsRecovery(error)) throw error
       await this.recoverLfsAndMergeState(repoPath)
@@ -730,7 +861,9 @@ class GitService {
 
   private async runWithLfsRecovery(repoPath: string, args: string[]): Promise<void> {
     try {
-      await exec(args, repoPath)
+      // Wrapped here rather than at the call sites (checkout / merge / conflict
+      // resolution) so they all get the retry without nesting two of them.
+      await this.withStalePackRetry(() => exec(args, repoPath))
     } catch (error) {
       if (!this.shouldRunLfsRecovery(error)) throw error
       await this.recoverLfsAndMergeState(repoPath)
@@ -1025,10 +1158,107 @@ class GitService {
     report(total, 'done')
   }
 
-  /** Discard all working-tree modifications (does not delete untracked files). */
-  async discardAll(repoPath: string): Promise<void> {
-    await execSafe(['restore', '--staged', '.'], repoPath)
-    await execSafe(['restore', '.'], repoPath)
+  /**
+   * Discard every staged and working-tree change (does not delete untracked
+   * files that were never staged).
+   *
+   * `restore --staged .` + `restore .` was not enough on its own: unstaging a
+   * staged addition — or the new half of a staged rename — leaves an untracked
+   * file behind, and `restore` will not remove it, so those rows survived
+   * "Discard All" and had to be cleared one by one from the context menu.
+   * `reset --hard` covers them. The verify/retry loop then mops up anything
+   * git could not touch on the first pass, typically an asset the game editor
+   * still holds an exclusive handle on, and the operation reports a real error
+   * instead of silently leaving changes on disk.
+   */
+  async discardAll(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
+    const report = (status: 'running' | 'done' = 'running', detail?: string) =>
+      onProgress?.({ id: 'discard-all', label: 'Discarding changes', status, detail })
+
+    report('running', 'Reading status…')
+    const before = await this.status(repoPath)
+    // Files that are untracked *and* were never staged stay put — the button
+    // is offered on that basis, and deleting them would be a surprise.
+    const keep = new Set(before.filter(f => f.indexStatus === '?').map(f => f.path))
+    const isLeftover = (f: FileStatus) => !keep.has(f.path)
+
+    const headExists = (await execSafe(['rev-parse', '--verify', 'HEAD'], repoPath)).exitCode === 0
+
+    let lastError = ''
+    const noteFailure = (res: { stdout: string; stderr: string; exitCode: number }) => {
+      if (res.exitCode !== 0) lastError = (res.stderr || res.stdout).trim()
+    }
+
+    report('running', 'Resetting working tree…')
+    if (headExists) {
+      // Clears the index, restores tracked files, deletes index-only files, and
+      // drops any half-finished merge state — all in one index rewrite.
+      noteFailure(await execSafe(['reset', '--hard', 'HEAD'], repoPath))
+    } else {
+      // No commits yet, so nothing to restore to and `reset --hard` cannot run.
+      // Emptying the index turns every staged file into an untracked one, which
+      // the loop below then deletes — the same net effect `reset --hard` has on
+      // a staged addition.
+      noteFailure(await execSafe(['rm', '-r', '-f', '--cached', '--ignore-unmatch', '--', '.'], repoPath))
+    }
+
+    let leftover: FileStatus[] = []
+    for (let attempt = 0; attempt < 3; attempt++) {
+      leftover = (await this.status(repoPath)).filter(isLeftover)
+      if (leftover.length === 0) {
+        report('done')
+        return
+      }
+
+      report('running', `Clearing ${leftover.length} remaining file${leftover.length === 1 ? '' : 's'}…`)
+
+      // Unstage first so the working-tree state below is the real one.
+      // `restore --staged` needs a HEAD to restore the index from; without one
+      // the only way back is to drop the entry outright.
+      const stagedPaths = leftover.filter(f => f.staged).map(f => f.path)
+      if (stagedPaths.length > 0) {
+        const unstageArgs = headExists
+          ? ['restore', '--staged', '--']
+          : ['rm', '-r', '-f', '--cached', '--ignore-unmatch', '--']
+        await runInPathChunks(stagedPaths, c => execSafe([...unstageArgs, ...c], repoPath).then(noteFailure))
+      }
+
+      const stillDirty = (await this.status(repoPath)).filter(isLeftover)
+      // Untracked at this point means the file only ever existed in the index
+      // (staged add, or a rename target) — nothing to restore it from.
+      const orphans = stillDirty.filter(f => f.workingStatus === '?').map(f => f.path)
+      const tracked = stillDirty.filter(f => f.workingStatus !== '?').map(f => f.path)
+
+      for (const p of orphans) {
+        try {
+          fs.rmSync(path.join(repoPath, p), { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+        } catch (e) {
+          lastError = e instanceof Error ? e.message : String(e)
+        }
+      }
+      if (tracked.length > 0 && headExists) {
+        await runInPathChunks(tracked, c => execSafe(['restore', '--', ...c], repoPath).then(noteFailure))
+      }
+
+      // A file an external tool has open fails now and succeeds a moment later.
+      await new Promise(r => setTimeout(r, 200))
+    }
+
+    leftover = (await this.status(repoPath)).filter(isLeftover)
+    if (leftover.length === 0) {
+      report('done')
+      return
+    }
+
+    report('done')
+    const names = leftover.slice(0, 10).map(f => f.path)
+    const more  = leftover.length > names.length ? `\n…and ${leftover.length - names.length} more` : ''
+    throw new Error(
+      `Could not discard ${leftover.length} file${leftover.length === 1 ? '' : 's'}:\n${names.join('\n')}${more}\n\n` +
+      `They are usually held open by another program (the Unreal editor, an IDE, or an antivirus scan). ` +
+      `Close it and discard again.` +
+      (lastError ? `\n\nGit reported:\n${lastError}` : '')
+    )
   }
 
   /** Append a pattern to .gitignore, creating the file if needed. */
@@ -1128,15 +1358,32 @@ class GitService {
   /** Switch to an existing branch. */
   async checkout(repoPath: string, branch: string): Promise<void> {
     const checkout = async (args: string[]) => this.runWithLfsRecovery(repoPath, await this.authenticatedArgs(repoPath, args))
-    const localExists = (await execSafe(['rev-parse', '--verify', `refs/heads/${branch}`], repoPath)).exitCode === 0
-    if (localExists) {
+
+    // Match against the ref store rather than `rev-parse --verify`, which
+    // resolves through the filesystem and so confirms any casing of a name
+    // that exists on disk.
+    const locals = await this.refNames(repoPath, 'refs/heads/')
+    if (locals.includes(branch)) {
       await checkout(['checkout', branch])
       return
     }
 
+    // A local branch differing only by case is the same ref file. Git would
+    // "succeed" here and point HEAD at a name the ref store does not hold:
+    // the branch list loses its current marker, upstream tracking drops, and
+    // commits meant for one branch land on the other.
+    const localClash = this.caseVariantOf(branch, locals)
+    if (localClash) {
+      throw new Error(
+        `Cannot switch to "${branch}": local branch "${localClash}" differs only by letter case. ` +
+        `Git stores both as the same ref on Windows and macOS, so switching would move commits ` +
+        `onto the wrong branch. Rename "${localClash}" first, or delete it and check this one out fresh.`
+      )
+    }
+
     const remoteRef = `origin/${branch}`
-    const remoteExists = (await execSafe(['rev-parse', '--verify', `refs/remotes/${remoteRef}`], repoPath)).exitCode === 0
-    if (remoteExists) {
+    const remotes = await this.refNames(repoPath, 'refs/remotes/origin/')
+    if (remotes.includes(remoteRef)) {
       await checkout(['checkout', '--track', '-b', branch, remoteRef])
       return
     }
@@ -1684,13 +1931,19 @@ class GitService {
   async cleanupShallow(repoPath: string, depth: number, onProgress?: ProgressCallback): Promise<void> {
     const token = await authService.getCurrentToken()
     const remoteUrl = await this.getRemoteUrl(repoPath)
-    await execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', '--depth', String(depth), '--progress'], repoPath, onProgress)
+    await this.withStalePackRetry(
+      () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', '--depth', String(depth), '--progress'], repoPath, onProgress),
+      onProgress,
+    )
   }
 
   async cleanupUnshallow(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
     const token = await authService.getCurrentToken()
     const remoteUrl = await this.getRemoteUrl(repoPath)
-    await execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', '--unshallow', '--progress'], repoPath, onProgress)
+    await this.withStalePackRetry(
+      () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', '--unshallow', '--progress'], repoPath, onProgress),
+      onProgress,
+    )
   }
 
   // ── LFS ───────────────────────────────────────────────────────────────────
@@ -2055,7 +2308,9 @@ class GitService {
   async setUpstream(repoPath: string, branch: string): Promise<void> {
     const token = await authService.getCurrentToken()
     const remoteUrl = await this.getRemoteUrl(repoPath)
-    await execWithProgress([...gitAuthArgs(token, remoteUrl), 'push', '--set-upstream', 'origin', branch], repoPath)
+    await this.withStalePackRetry(
+      () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'push', '--set-upstream', 'origin', branch], repoPath),
+    )
   }
 
   async setGitConfig(repoPath: string, key: string, value: string): Promise<void> {

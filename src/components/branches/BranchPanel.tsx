@@ -77,6 +77,8 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
   const dialog = useDialogStore()
 
   const [newName, setNewName]               = useState('')
+  /** Start point for the new branch. '' means "current branch (HEAD)". */
+  const [createFrom, setCreateFrom]         = useState('')
   const [creating, setCreating]             = useState(false)
   const [renamingBranch, setRenamingBranch] = useState<string | null>(null)
   const [renameValue, setRenameValue]       = useState('')
@@ -105,6 +107,14 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
     if (renamingBranch) renameInputRef.current?.select()
   }, [renamingBranch])
 
+  // A chosen start point can disappear (branch deleted, remote pruned) or become
+  // the branch we just checked out — fall back to HEAD rather than passing git a
+  // ref that no longer resolves.
+  useEffect(() => {
+    if (!createFrom) return
+    if (createFrom === currentBranch || !branches.some(b => b.name === createFrom)) setCreateFrom('')
+  }, [branches, currentBranch, createFrom])
+
   const withBusy = async (key: string, fn: () => Promise<void>) => {
     setBusy(key)
     setError(null)
@@ -122,11 +132,16 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
   const doCreate = async () => {
     const name = newName.trim()
     if (!name || !repoPath) return
+    const from = createFrom.trim()
     setCreating(true)
     setError(null)
     try {
-      await opRun(`Creating branch ${name}…`, () => ipc.createBranch(repoPath, name))
+      await opRun(
+        from ? `Creating branch ${name} from ${from}…` : `Creating branch ${name}…`,
+        () => ipc.createBranch(repoPath, name, from || undefined),
+      )
       setNewName('')
+      setCreateFrom('')
       await loadBranches()
       onRefresh()
     } catch (e) {
@@ -325,6 +340,13 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
     .sort((a, b) => (a.current ? -1 : b.current ? 1 : a.name.localeCompare(b.name)))
   const remoteBranches = branches.filter(b => b.isRemote)
     .sort((a, b) => a.displayName.localeCompare(b.displayName))
+  // Start points offered for a new branch. The current branch is the default
+  // option rendered separately, so it is excluded from the "Local" group.
+  const startPointGroups = [
+    { label: 'Local',  names: localBranches.filter(b => !b.current).map(b => b.name) },
+    { label: 'Remote', names: remoteBranches.map(b => b.name) },
+  ].filter(g => g.names.length > 0)
+
   const selectedBranch = selectedBranchName
     ? (localBranches.find(b => b.name === selectedBranchName)
       ?? remoteBranches.find(b => b.displayName === selectedBranchName || b.name === selectedBranchName)
@@ -386,23 +408,44 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
       )}
 
       {/* ── Create branch ──────────────────────────────────────────────── */}
-      <div className="px-3 py-2 border-b border-lg-border shrink-0 space-y-1.5">
-        <span className="text-[10px] font-mono uppercase tracking-widest text-lg-text-secondary">
-          New branch
-        </span>
-        <div className="flex gap-1">
+      <div className="px-3 py-2 border-b border-lg-border shrink-0">
+        <div className="flex items-center gap-2">
+          <span className="shrink-0 text-[10px] font-mono uppercase tracking-widest text-lg-text-secondary">
+            New branch
+          </span>
+
           <input
             value={newName}
             onChange={e => setNewName(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && doCreate()}
             placeholder="branch-name"
-            className="flex-1 min-w-0 bg-lg-bg-primary border border-lg-border rounded px-2 py-1 text-[11px] font-mono text-lg-text-primary placeholder:text-lg-text-secondary focus:outline-none focus:border-lg-accent transition-colors"
+            style={{ width: 220 }}
+            className="shrink-0 h-7 bg-lg-bg-primary border border-lg-border rounded px-2 text-[11px] font-mono text-lg-text-primary placeholder:text-lg-text-secondary focus:outline-none focus:border-lg-accent transition-colors"
           />
+
+          <span className="shrink-0 text-[10px] font-mono text-lg-text-secondary">from</span>
+
+          <select
+            value={createFrom}
+            onChange={e => setCreateFrom(e.target.value)}
+            title="Branch (or remote branch) the new branch starts from"
+            style={{ maxWidth: 200 }}
+            className="shrink-0 h-7 bg-lg-bg-primary border border-lg-border rounded pl-2 pr-1 text-[11px] font-mono text-lg-text-primary focus:outline-none focus:border-lg-accent transition-colors cursor-pointer"
+          >
+            <option value="">{currentBranch ? `${currentBranch} (current)` : 'HEAD (current)'}</option>
+            {startPointGroups.map(group => (
+              <optgroup key={group.label} label={group.label}>
+                {group.names.map(name => <option key={name} value={name}>{name}</option>)}
+              </optgroup>
+            ))}
+          </select>
+
           <ActionBtn
             onClick={doCreate}
             disabled={!newName.trim() || creating}
+            disabledReason={!newName.trim() ? 'Enter a branch name first' : null}
             size="sm"
-            style={{ height: 28, paddingLeft: 8, paddingRight: 8, fontSize: 10, fontFamily: 'var(--lg-font-mono)', flexShrink: 0 }}
+            style={{ height: 28, flexShrink: 0, fontFamily: 'var(--lg-font-mono)', fontSize: 10.5 }}
           >
             {creating ? '…' : '+ Create'}
           </ActionBtn>

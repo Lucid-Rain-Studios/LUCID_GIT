@@ -275,8 +275,10 @@ const api = {
     ipcRenderer.invoke(CHANNELS.TEAM_CONFIG_SAVE, repoPath, config),
 
   // ── Shell ─────────────────────────────────────────────────────────────────
-  openTerminal: (cwd?: string) =>
-    ipcRenderer.invoke(CHANNELS.SHELL_OPEN_TERMINAL, cwd),
+  openTerminal: (cwd?: string, terminalId?: string) =>
+    ipcRenderer.invoke(CHANNELS.SHELL_OPEN_TERMINAL, cwd, terminalId),
+  listTerminals: () =>
+    ipcRenderer.invoke(CHANNELS.SHELL_LIST_TERMINALS),
   openFile: (defaultPath?: string) =>
     ipcRenderer.invoke(CHANNELS.DIALOG_OPEN_FILE, defaultPath),
 

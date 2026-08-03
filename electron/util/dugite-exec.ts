@@ -139,7 +139,7 @@ export async function execWithProgress(
         const errText = (stderr || stdout).slice(0, 1000)
         const subCmd  = detectGitSubcommand(args)
         logService.error(`git.${subCmd}`, `git ${subCmd} failed (exit ${code}):\n${errText}`)
-        reject(new Error(`git ${args[0]} failed (exit ${code}):\n${stderr || stdout}`))
+        reject(new Error(`git ${subCmd} failed (exit ${code}):\n${stderr || stdout}`))
       }
     })
   })
@@ -164,7 +164,7 @@ export async function exec(
     const errText  = combined.slice(0, 1000)
     const subCmd   = detectGitSubcommand(args)
     logService.error(`git.${subCmd}`, `git ${subCmd} failed (exit ${result.exitCode}):\n${errText}`)
-    throw new Error(`git ${args[0]} failed (exit ${result.exitCode}):\n${combined}`)
+    throw new Error(`git ${subCmd} failed (exit ${result.exitCode}):\n${combined}`)
   }
 
   return { stdout: result.stdout, stderr: result.stderr }
@@ -190,7 +190,7 @@ export async function execWithStdin(
   })
   if (result.exitCode !== 0) {
     const combined = [result.stderr, result.stdout].filter(Boolean).join('\n')
-    throw new Error(`git ${args[0]} failed (exit ${result.exitCode}):\n${combined}`)
+    throw new Error(`git ${detectGitSubcommand(args)} failed (exit ${result.exitCode}):\n${combined}`)
   }
   return { stdout: result.stdout, stderr: result.stderr }
 }

@@ -43,6 +43,7 @@ const DEFAULTS: AppSettings = {
   defaultBranchName: 'main',
   desktopNotificationEvents: { ...DESKTOP_NOTIFICATION_DEFAULTS },
   featureVisibility: { ...FEATURE_VISIBILITY_DEFAULTS },
+  preferredTerminal: 'auto',
 }
 
 type SettingsListener = (settings: AppSettings) => void
@@ -86,6 +87,7 @@ class SettingsService {
       ...DEFAULTS,
       ...settings,
       defaultBranchName: (settings.defaultBranchName ?? 'main').trim() || 'main',
+      preferredTerminal: settings.preferredTerminal ?? 'auto',
       desktopNotificationEvents: {
         ...DESKTOP_NOTIFICATION_DEFAULTS,
         ...(settings.desktopNotificationEvents ?? {}),

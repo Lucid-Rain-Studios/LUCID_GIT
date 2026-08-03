@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { ipc, AppSettings, UpdateInfo } from '@/ipc'
+import { ipc, AppSettings, UpdateInfo, TerminalProfile } from '@/ipc'
 import { cn } from '@/lib/utils'
 import { ActionBtn } from '@/components/ui/ActionBtn'
 
@@ -28,6 +28,7 @@ const DEFAULTS: AppSettings = {
     unreal: 'auto',
     lfs:    'auto',
   },
+  preferredTerminal: 'auto',
 }
 
 /** Broadcast so live UI (e.g. the sidebar) can react without a full reload. */
@@ -71,8 +72,11 @@ export function GeneralSettings() {
   const [updateReady, setUpdateReady] = useState(false)
   const [updateStatus, setUpdateStatus] = useState<string>('')
 
+  const [terminals, setTerminals] = useState<TerminalProfile[]>([])
+
   useEffect(() => {
     ipc.settingsGet().then(setSettings).catch(() => {})
+    ipc.listTerminals().then(setTerminals).catch(() => setTerminals([]))
   }, [])
 
   useEffect(() => {
@@ -202,6 +206,26 @@ export function GeneralSettings() {
               <option value="auto">Auto (detect)</option>
               <option value="show">Always show</option>
               <option value="hide">Always hide</option>
+            </select>
+          </Row>
+        </Section>
+
+        <Section title="Terminal">
+          <Row
+            label="Open Terminal uses"
+            hint="Which terminal the sidebar's Open Terminal button launches. Auto picks the first one installed."
+          >
+            <select
+              value={settings.preferredTerminal ?? 'auto'}
+              onChange={e => update({ preferredTerminal: e.target.value })}
+              className="bg-lg-bg-primary border border-lg-border rounded px-2 py-1 text-[11px] font-mono text-lg-text-primary focus:outline-none focus:border-lg-accent"
+            >
+              <option value="auto">Auto (first installed)</option>
+              {terminals.map(term => (
+                <option key={term.id} value={term.id} disabled={!term.available}>
+                  {term.available ? term.label : `${term.label} (not found)`}
+                </option>
+              ))}
             </select>
           </Row>
         </Section>

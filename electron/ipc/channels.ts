@@ -215,6 +215,7 @@ export const CHANNELS = {
   SHELL_SHOW_IN_FOLDER:  'shell:show-in-folder',
   SHELL_OPEN_PATH:       'shell:open-path',
   SHELL_OPEN_TERMINAL:   'shell:open-terminal',
+  SHELL_LIST_TERMINALS:  'shell:list-terminals',
 
   // File-system watcher
   GIT_WATCH_STATUS:   'git:watch-status',
