@@ -1,12 +1,12 @@
 @echo off
 setlocal EnableDelayedExpansion
-title Lucid Git - One-Click Patch Release
+title Lucid Git - Version Release
 
 cd /d "%~dp0"
 
 echo.
 echo ============================================
-echo  Lucid Git - Patch Release (GitHub Actions)
+echo  Lucid Git - Version Release (GitHub Actions)
 echo ============================================
 echo.
 
@@ -89,8 +89,34 @@ if not exist "node_modules\typescript\bin\tsc" (
 )
 echo.
 
-echo [3/7] Bumping patch version...
-call npm version patch
+echo [3/7] Setting new version...
+for /f "tokens=*" %%v in ('node -e "process.stdout.write(require('./package.json').version)"') do set CURRENT_VERSION=%%v
+echo Current version: !CURRENT_VERSION!
+echo Enter the new version as X.Y.Z (for example 1.0.12). A leading "v" is stripped.
+set "NEW_VERSION="
+set /p "NEW_VERSION=New version: "
+if not defined NEW_VERSION (
+  echo ERROR: No version entered.
+  goto :fail
+)
+if /i "!NEW_VERSION:~0,1!"=="v" set "NEW_VERSION=!NEW_VERSION:~1!"
+echo !NEW_VERSION!|findstr /r /c:"^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$" >nul
+if errorlevel 1 (
+  echo ERROR: "!NEW_VERSION!" is not a valid X.Y.Z version number.
+  goto :fail
+)
+if "!NEW_VERSION!"=="!CURRENT_VERSION!" (
+  echo ERROR: !NEW_VERSION! is already the current version.
+  goto :fail
+)
+echo This will commit !NEW_VERSION!, tag v!NEW_VERSION!, and push to origin/main.
+set "CONFIRM="
+set /p "CONFIRM=Continue? (Y/N): "
+if /i not "!CONFIRM!"=="Y" (
+  echo Cancelled. No changes made.
+  goto :fail
+)
+call npm version !NEW_VERSION!
 if errorlevel 1 (
   echo ERROR: Version bump failed.
   goto :fail
@@ -121,7 +147,7 @@ if errorlevel 1 (
 )
 echo.
 
-echo [7/7] Patch release triggered.
+echo [7/7] Release triggered.
 for /f "tokens=*" %%v in ('node -e "process.stdout.write(require('./package.json').version)"') do set VERSION=%%v
 echo Version tagged: v!VERSION!
 echo.
@@ -139,7 +165,7 @@ exit /b 0
 
 :fail
 echo.
-echo Patch release stopped. Press any key to close this window...
+echo Release stopped. Press any key to close this window...
 pause >nul
 exit /b 1
 
