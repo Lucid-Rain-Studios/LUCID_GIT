@@ -211,13 +211,28 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): 
 // ── gitAuthArgs — injects token via git http extraheader (avoids credential manager) ──
 
 export function gitAuthArgs(token: string | null, remoteUrl?: string | null): string[] {
+  // Commands such as fetch and pull may start automatic repository
+  // maintenance after writing objects. Git normally detaches that work, which
+  // lets the command return while a repack is still replacing pack indexes.
+  // A push started immediately afterwards (especially its Git LFS pre-push
+  // scan) can then try to open an index that disappeared mid-scan. Keep
+  // maintenance started by Lucid Git in the foreground so the operation does
+  // not report completion until the object store is stable.
+  //
+  // `gc.autoDetach` is retained as the fallback used by older Git versions;
+  // newer versions prefer `maintenance.autoDetach`.
+  const foregroundMaintenance = [
+    '-c', 'maintenance.autoDetach=false',
+    '-c', 'gc.autoDetach=false',
+  ]
+
   // Always reset git's cumulative credential-helper list (an empty value
   // clears it). Without this, a missing/expired token falls through to the
   // system credential manager (GCM), which pops a GUI login dialog that
   // GIT_TERMINAL_PROMPT/GIT_ASKPASS cannot suppress — and password auth is
   // dead on GitHub anyway, so that dialog can never succeed. This -c setting
   // also reaches `git lfs` subprocesses via GIT_CONFIG_PARAMETERS.
-  const noCredentialHelper = ['-c', 'credential.helper=']
+  const noCredentialHelper = [...foregroundMaintenance, '-c', 'credential.helper=']
   if (!token) return noCredentialHelper
   const b64 = Buffer.from(`x-access-token:${token}`).toString('base64')
 

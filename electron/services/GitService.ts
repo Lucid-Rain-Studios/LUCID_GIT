@@ -1,4 +1,3 @@
-import { GitProcess } from 'dugite'
 import Database from 'better-sqlite3'
 import fs from 'fs'
 import path from 'path'
@@ -8,8 +7,8 @@ import { logService } from './LogService'
 import { parseGitLog, GIT_LOG_FORMAT } from '../util/git-log-parse'
 import { FileStatus, BranchInfo, CommitEntry, ChangelogEntry, ChangelogQuery, DiffContent, StashEntry, ContributorInfo, ConflictPreviewFile, SyncStatus, LFSStatus, LfsLockCacheFile, LfsLocksMaintenanceResult, SizeBreakdown, CleanupResult, BranchActivity, BranchDiffSummary, BranchDiffFile, PotentialMergeConflictReport, RepoSearchResult } from '../types'
 
-// Long enough for a background `gc --auto` to finish committing its new pack
-// set, short enough that the user reads it as one slow operation, not a hang.
+// Brief fallback delay for a genuinely concurrent repack. Persistent missing
+// indexes are repaired directly before this delay is considered.
 const STALE_PACK_RETRY_DELAY_MS = 2000
 
 // ── Diff helpers ──────────────────────────────────────────────────────────────
@@ -370,7 +369,7 @@ class GitService {
 
     onProgress?.({ id: 'push-connect', label: 'Connecting to remote', status: 'running', progress: 12 })
     // Push is idempotent, so replaying a partially-completed push is safe.
-    await this.withStalePackRetry(() => execWithProgress(pushArgs, repoPath, onProgress), onProgress)
+    await this.withStalePackRetry(repoPath, () => execWithProgress(pushArgs, repoPath, onProgress), onProgress)
     return { branch, filesAhead }
   }
 
@@ -384,26 +383,123 @@ class GitService {
    * leave state behind that a second attempt would trip over. `clone`, `gc` and
    * `lfs migrate` are deliberately excluded — see the call sites.
    */
-  private async withStalePackRetry<T>(fn: () => Promise<T>, onProgress?: ProgressCallback): Promise<T> {
+  private async withStalePackRetry<T>(repoPath: string, fn: () => Promise<T>, onProgress?: ProgressCallback): Promise<T> {
     try {
       return await fn()
     } catch (error) {
       if (!this.isStalePackError(error)) throw error
-      logService.warn('git.repack-race', `Retrying after background repack invalidated a pack file:\n${error instanceof Error ? error.message : String(error)}`)
-      onProgress?.({ id: 'repack-retry', label: 'Repository was repacked — retrying', status: 'running' })
-      await new Promise(resolve => setTimeout(resolve, STALE_PACK_RETRY_DELAY_MS))
+      const repaired = await this.repairPackIndexesFromError(repoPath, error, onProgress)
+      logService.warn(
+        'git.pack-index-recovery',
+        `${repaired ? 'Rebuilt a missing pack index' : 'Waiting for a possible background repack'} before retrying:\n${error instanceof Error ? error.message : String(error)}`,
+      )
+      if (!repaired) {
+        onProgress?.({ id: 'repack-retry', label: 'Repository maintenance is still running — retrying', status: 'running' })
+        await new Promise(resolve => setTimeout(resolve, STALE_PACK_RETRY_DELAY_MS))
+      }
       return await fn()
     }
   }
 
+  /** Absolute missing pack-index paths reported by Git/Git LFS. */
+  private missingPackIndexPaths(error: unknown): string[] {
+    const message = error instanceof Error ? error.message : String(error)
+    const matches = message.match(/(?:[a-z]:[\\/]|\/)[^\r\n]*?objects[\\/]+pack[\\/]+pack-[0-9a-f]+\.idx/gi) ?? []
+    return [...new Set(matches.map(candidate => path.resolve(candidate)))]
+      .filter(candidate => (
+        path.basename(path.dirname(candidate)).toLowerCase() === 'pack' &&
+        path.basename(path.dirname(path.dirname(candidate))).toLowerCase() === 'objects' &&
+        /^pack-[0-9a-f]+\.idx$/i.test(path.basename(candidate))
+      ))
+  }
+
   /**
-   * True for the transient "pack file disappeared mid-read" failure.
+   * Rebuild index files for otherwise intact pack files.
    *
-   * Git starts `gc --auto` in the background after a pull/merge brings in
-   * enough loose objects. When it repacks, the superseded pack/idx files are
-   * unlinked. Any operation that walks the object store in that window fails —
-   * git-lfs's pre-push scan is the one that surfaces it most often. The object
-   * store is intact; only the caller's view of it is stale.
+   * `git gc` alone cannot reliably repair this state: an indexless pack is not
+   * readable as part of the object database, so GC may leave it as garbage.
+   * `git index-pack` verifies the pack contents and recreates the exact `.idx`
+   * file that Git LFS needs for its pre-push object scan.
+   */
+  private async repairPackIndexes(
+    repoPath: string,
+    indexPaths: string[],
+    onProgress?: ProgressCallback,
+  ): Promise<boolean> {
+    let repaired = false
+    for (const indexPath of indexPaths) {
+      if (fs.existsSync(indexPath)) {
+        repaired = true
+        continue
+      }
+
+      const packPath = indexPath.replace(/\.idx$/i, '.pack')
+      if (!fs.existsSync(packPath)) continue
+
+      onProgress?.({
+        id: 'pack-index-repair',
+        label: 'Rebuilding missing pack index',
+        status: 'running',
+        detail: path.basename(indexPath),
+      })
+      try {
+        await exec(['index-pack', '--index-version=2', '-o', indexPath, packPath], repoPath)
+        repaired = true
+      } catch (repairError) {
+        // Another process may have completed the same repair while index-pack
+        // was starting. Treat the now-present index as success.
+        if (fs.existsSync(indexPath)) {
+          repaired = true
+        } else {
+          logService.warn(
+            'git.pack-index-recovery',
+            `Could not rebuild ${indexPath}:\n${repairError instanceof Error ? repairError.message : String(repairError)}`,
+          )
+        }
+      }
+    }
+    return repaired
+  }
+
+  private async repairPackIndexesFromError(
+    repoPath: string,
+    error: unknown,
+    onProgress?: ProgressCallback,
+  ): Promise<boolean> {
+    return this.repairPackIndexes(repoPath, this.missingPackIndexPaths(error), onProgress)
+  }
+
+  /** Find `.pack` files in the primary object store whose `.idx` is missing. */
+  private async orphanedPackIndexPaths(repoPath: string): Promise<string[]> {
+    let objectsDir = ''
+    const absolute = await execSafe(['rev-parse', '--path-format=absolute', '--git-path', 'objects'], repoPath)
+    if (absolute.exitCode === 0) objectsDir = absolute.stdout.trim()
+    if (!objectsDir) {
+      const fallback = await execSafe(['rev-parse', '--git-path', 'objects'], repoPath)
+      if (fallback.exitCode === 0 && fallback.stdout.trim()) {
+        objectsDir = path.resolve(repoPath, fallback.stdout.trim())
+      }
+    }
+    if (!objectsDir) return []
+
+    const packDir = path.join(objectsDir, 'pack')
+    let entries: fs.Dirent[]
+    try {
+      entries = await fs.promises.readdir(packDir, { withFileTypes: true })
+    } catch {
+      return []
+    }
+
+    return entries
+      .filter(entry => entry.isFile() && /^pack-[0-9a-f]+\.pack$/i.test(entry.name))
+      .map(entry => path.join(packDir, entry.name.replace(/\.pack$/i, '.idx')))
+      .filter(indexPath => !fs.existsSync(indexPath))
+  }
+
+  /**
+   * True when Git/Git LFS could not open a pack or its index. This may be a
+   * transient repack race, or a persistent indexless pack left by interrupted
+   * maintenance. The retry path distinguishes them by checking the pack pair.
    */
   private isStalePackError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error)
@@ -436,7 +532,7 @@ class GitService {
     try {
       const remoteUrl = await this.getRemoteUrl(repoPath)
       onProgress?.({ id: 'pull-connect', label: 'Connecting to remote', status: 'running', progress: 12 })
-      await this.withStalePackRetry(
+      await this.withStalePackRetry(repoPath,
         () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'pull', '--progress'], repoPath, onProgress),
         onProgress,
       )
@@ -496,7 +592,7 @@ class GitService {
     // --prune matters as much as the fetch itself: without it, remote-tracking
     // refs for branches someone else deleted linger indefinitely, so the branch
     // list keeps offering branches that no longer exist on the remote.
-    await this.withStalePackRetry(
+    await this.withStalePackRetry(repoPath,
       () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', '--all', '--prune', '--progress'], repoPath, onProgress),
       onProgress,
     )
@@ -812,7 +908,7 @@ class GitService {
     // Synthetic stage events — guarantee the bar shows progression even when
     // git itself goes silent (already up-to-date fetch, pure ref-bump merge).
     onProgress?.({ id: 'stage', label: 'Fetching origin', status: 'running' })
-    await this.withStalePackRetry(
+    await this.withStalePackRetry(repoPath,
       () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', 'origin', '--prune', '--progress'], repoPath, onProgress),
       onProgress,
     )
@@ -851,7 +947,7 @@ class GitService {
     // checkout phase — the main thing the user wants to watch on a big update.
     const mergeArgs = [...gitAuthArgs(token, remoteUrl), 'merge', '--no-edit', '--progress', defaultBranch.ref]
     try {
-      await this.withStalePackRetry(() => execWithProgress(mergeArgs, repoPath, onProgress), onProgress)
+      await this.withStalePackRetry(repoPath, () => execWithProgress(mergeArgs, repoPath, onProgress), onProgress)
     } catch (error) {
       if (!this.shouldRunLfsRecovery(error)) throw error
       await this.recoverLfsAndMergeState(repoPath)
@@ -863,7 +959,7 @@ class GitService {
     try {
       // Wrapped here rather than at the call sites (checkout / merge / conflict
       // resolution) so they all get the retry without nesting two of them.
-      await this.withStalePackRetry(() => exec(args, repoPath))
+      await this.withStalePackRetry(repoPath, () => exec(args, repoPath))
     } catch (error) {
       if (!this.shouldRunLfsRecovery(error)) throw error
       await this.recoverLfsAndMergeState(repoPath)
@@ -1910,6 +2006,17 @@ class GitService {
   async cleanupGc(repoPath: string, aggressive = false, onProgress?: ProgressCallback): Promise<CleanupResult> {
     onProgress?.({ id: 'gc', label: 'Git GC', status: 'running', detail: 'Measuring current size…' })
     this._sizeCache.delete(repoPath)
+    const orphanedIndexes = await this.orphanedPackIndexPaths(repoPath)
+    if (orphanedIndexes.length > 0) {
+      await this.repairPackIndexes(repoPath, orphanedIndexes, onProgress)
+      const stillMissing = orphanedIndexes.filter(indexPath => !fs.existsSync(indexPath))
+      if (stillMissing.length > 0) {
+        throw new Error(
+          `Could not rebuild ${stillMissing.length} missing Git pack index${stillMissing.length === 1 ? '' : 'es'}:\n` +
+          stillMissing.join('\n'),
+        )
+      }
+    }
     const before = await this.cleanupSize(repoPath)
     const args = ['gc']
     if (aggressive) args.push('--aggressive')
@@ -1931,7 +2038,7 @@ class GitService {
   async cleanupShallow(repoPath: string, depth: number, onProgress?: ProgressCallback): Promise<void> {
     const token = await authService.getCurrentToken()
     const remoteUrl = await this.getRemoteUrl(repoPath)
-    await this.withStalePackRetry(
+    await this.withStalePackRetry(repoPath,
       () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', '--depth', String(depth), '--progress'], repoPath, onProgress),
       onProgress,
     )
@@ -1940,7 +2047,7 @@ class GitService {
   async cleanupUnshallow(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
     const token = await authService.getCurrentToken()
     const remoteUrl = await this.getRemoteUrl(repoPath)
-    await this.withStalePackRetry(
+    await this.withStalePackRetry(repoPath,
       () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', '--unshallow', '--progress'], repoPath, onProgress),
       onProgress,
     )
@@ -2308,7 +2415,7 @@ class GitService {
   async setUpstream(repoPath: string, branch: string): Promise<void> {
     const token = await authService.getCurrentToken()
     const remoteUrl = await this.getRemoteUrl(repoPath)
-    await this.withStalePackRetry(
+    await this.withStalePackRetry(repoPath,
       () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'push', '--set-upstream', 'origin', branch], repoPath),
     )
   }

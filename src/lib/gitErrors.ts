@@ -254,18 +254,18 @@ const DEFS: ErrorDef[] = [
   {
     code: 'STALE_PACK_INDEX',
     test: /objects[\\/]+pack[\\/]+pack-[0-9a-f]+\.(idx|pack).*(cannot find the file|no such file|does not exist)/i,
-    title: 'Repository was repacked mid-operation',
+    title: 'Git pack index is missing',
     description:
-      "Git's background housekeeping repacked the object store while this operation was scanning it, so a pack file it had already listed no longer exists. Nothing is corrupted — the operation just needs to run against the new pack set.",
+      'Git LFS tried to scan a packed object, but its index file was missing. This can be a brief repack race, or a pack left without its matching index after interrupted maintenance.',
     causes: [
       'Git ran `gc --auto` in the background after your last pull or update from main',
-      'The push started while that repack was still in progress',
-      'Another Git client (GitHub Desktop, a terminal, an IDE) repacked the repo at the same time',
+      'A previous GC or repack was interrupted after writing the pack but before preserving its index',
+      'Antivirus, sync software, or another Git client removed or locked the index file',
     ],
     severity: 'error',
     canAutoFix: true,
     fixes: [
-      { label: 'Finish housekeeping now, then push again', action: { type: 'clean-pack-files' } },
+      { label: 'Rebuild missing pack indexes, then run GC', action: { type: 'clean-pack-files' } },
       { label: 'Verify the object store is intact', command: 'git fsck --connectivity-only' },
     ],
   },

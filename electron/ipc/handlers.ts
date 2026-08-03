@@ -595,7 +595,10 @@ export function registerHandlers(): void {
   })
 
   handle(CHANNELS.CLEANUP_GC, async (event, repoPath: string, aggressive?: boolean) => {
-    await requireAdmin(repoPath)
+    // GC only repairs/optimizes this local clone's object database. It does
+    // not modify the remote repository, so GitHub admin permission is neither
+    // required nor relevant. This also allows collaborators to use the stale
+    // pack recovery action offered after a failed push.
     return gitService.cleanupGc(repoPath, aggressive, (step) => {
       if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
     })
