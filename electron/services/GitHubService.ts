@@ -46,6 +46,16 @@ export interface PRListArgs {
   repo: string
 }
 
+export interface GitHubRepo {
+  fullName: string
+  name: string
+  owner: string
+  private: boolean
+  cloneUrl: string
+  description: string | null
+  updatedAt: string
+}
+
 // Error carrying the HTTP status so callers can tell transient failures
 // (5xx outage, 429 rate limit, network unreachable → status undefined)
 // apart from real ones (401/403/404/422).
@@ -124,6 +134,10 @@ async function ghFetch(token: string, path: string, method = 'GET', body?: objec
 // (sidebar, overview, dashboard, PR monitor, lock overlay) poll the same
 // endpoint independently; this collapses them into ~2 requests/minute.
 const PR_LIST_TTL_MS = 20 * 1000
+// Repos change far less often than PRs; a longer TTL keeps re-opening the
+// clone dialog's repo picker instant without hammering the API.
+const REPO_LIST_TTL_MS = 5 * 60 * 1000
+const REPO_LIST_MAX_PAGES = 5   // up to 500 repos
 
 class GitHubService {
   // `${owner}/${repo}` → last successfully fetched open-PR list. Serves two
@@ -202,6 +216,49 @@ class GitHubService {
     }))
     this.lastGoodPRs.set(cacheKey, { prs, fetchedAt: Date.now() })
     return prs
+  }
+
+  // token → last successfully fetched repo list, reused briefly since the
+  // clone dialog's repo picker may be closed and reopened within a session.
+  private lastGoodRepos = new Map<string, { repos: GitHubRepo[]; fetchedAt: number }>()
+  private repoListInFlight = new Map<string, Promise<GitHubRepo[]>>()
+
+  async listRepos(token: string): Promise<GitHubRepo[]> {
+    const cached = this.lastGoodRepos.get(token)
+    if (cached && Date.now() - cached.fetchedAt < REPO_LIST_TTL_MS) return cached.repos
+
+    let inFlight = this.repoListInFlight.get(token)
+    if (!inFlight) {
+      inFlight = this.fetchRepos(token).finally(() => this.repoListInFlight.delete(token))
+      this.repoListInFlight.set(token, inFlight)
+    }
+    return inFlight
+  }
+
+  private async fetchRepos(token: string): Promise<GitHubRepo[]> {
+    type RawRepo = {
+      full_name: string; name: string; private: boolean; clone_url: string
+      description: string | null; updated_at: string; owner: { login: string }
+    }
+    const repos: GitHubRepo[] = []
+    for (let page = 1; page <= REPO_LIST_MAX_PAGES; page++) {
+      const data = await ghFetch(
+        token,
+        `/user/repos?per_page=100&page=${page}&sort=updated&direction=desc&affiliation=owner,collaborator,organization_member`,
+      ) as RawRepo[]
+      repos.push(...data.map(r => ({
+        fullName:    r.full_name,
+        name:        r.name,
+        owner:       r.owner.login,
+        private:     r.private,
+        cloneUrl:    r.clone_url,
+        description: r.description,
+        updatedAt:   r.updated_at,
+      })))
+      if (data.length < 100) break
+    }
+    this.lastGoodRepos.set(token, { repos, fetchedAt: Date.now() })
+    return repos
   }
 
   async mergePR(token: string, args: PRActionArgs): Promise<void> {

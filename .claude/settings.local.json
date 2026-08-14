@@ -57,7 +57,8 @@
       "Bash(echo \"exit=$?\")",
       "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./package.json'\\).scripts, null, 2\\)\\)\")",
       "Bash(node -p \"require\\('H:/LUCID_GIT/package.json'\\).version\")",
-      "Bash(git --no-pager diff --stat HEAD)"
+      "Bash(git --no-pager diff --stat HEAD)",
+      "Bash(node /private/tmp/claude-501/-Users-ricardo-Gamedev-LUCID-GIT/bb0eade3-f9b3-4b58-8b85-cd270e89d86f/scratchpad/drive.mjs)"
     ]
   }
 }
