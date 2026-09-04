@@ -1,9 +1,106 @@
 import { GitProcess } from 'dugite'
 import path from 'path'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { execFile, type ChildProcess } from 'node:child_process'
 import { OperationStep } from '../types'
 import { logService } from '../services/LogService'
 
 export type ProgressCallback = (step: OperationStep) => void
+
+// ── Live git subprocess registry ─────────────────────────────────────────────
+//
+// A git process Lucid Git starts outlives us: on Windows a child is not in the
+// parent's job object, so closing the app — or abandoning a read whose promise
+// timed out — leaves `git.exe` running, and with it the `git-lfs.exe
+// filter-process` git spawned to smudge content. Both then sit at 0% CPU
+// forever waiting on a parent that is never coming back, which is how a
+// session ends up with a dozen idle Git/Git LFS entries in Task Manager.
+//
+// Nothing in dugite exposes the child for `GitProcess.exec`, but its
+// `processCallback` option hands it over, so every process we start is
+// registered here and can be killed deliberately.
+
+interface LiveGitProcess {
+  child: ChildProcess
+  args: string[]
+  startedAt: number
+}
+
+const liveGitProcesses = new Map<number, LiveGitProcess>()
+
+/**
+ * PIDs started inside the current `withGitTimeout` scope. AsyncLocalStorage
+ * carries this across every `await` in the handler, so a timeout can kill the
+ * processes that handler started without touching anyone else's.
+ */
+const gitProcessScope = new AsyncLocalStorage<Set<number>>()
+
+/** Record a freshly spawned git process, and forget it once it exits. */
+function registerGitProcess(child: ChildProcess, args: string[]): void {
+  const pid = child.pid
+  if (pid === undefined) return
+
+  liveGitProcesses.set(pid, { child, args, startedAt: Date.now() })
+  gitProcessScope.getStore()?.add(pid)
+
+  const forget = () => { liveGitProcesses.delete(pid) }
+  child.once('close', forget)
+  child.once('exit', forget)
+  child.once('error', forget)
+}
+
+/**
+ * Kill a git process *and everything it spawned*. The child that actually
+ * matters is `git-lfs filter-process`: killing only `git.exe` reparents it and
+ * leaves it running, so the leak we are fixing would half-survive. Windows has
+ * no process groups to signal, hence taskkill's /T.
+ */
+function killProcessTree(pid: number, child: ChildProcess): void {
+  if (process.platform === 'win32') {
+    // Detached and fully ignored — we never wait on the result, and a failure
+    // here (process already gone, access denied) is not worth surfacing.
+    execFile('taskkill', ['/pid', String(pid), '/T', '/F'], () => { /* best effort */ })
+    return
+  }
+  try { child.kill('SIGKILL') } catch { /* already gone */ }
+}
+
+/** Kill the given git processes. Returns how many were still alive. */
+export function killGitProcesses(pids: Iterable<number>): number {
+  let killed = 0
+  for (const pid of pids) {
+    const entry = liveGitProcesses.get(pid)
+    if (!entry) continue
+    liveGitProcesses.delete(pid)
+    killProcessTree(pid, entry.child)
+    killed++
+  }
+  return killed
+}
+
+/**
+ * Kill every git process Lucid Git currently has running. Called on quit: an
+ * abandoned `git`/`git-lfs` pair has no one left to read its output, and
+ * leaving it behind is what accumulates across app restarts. An index write
+ * interrupted this way leaves `.git/index.lock`, which the stale-lock recovery
+ * already clears on the next run.
+ */
+export function killAllGitProcesses(): number {
+  const pids = [...liveGitProcesses.keys()]
+  if (pids.length === 0) return 0
+  const detail = [...liveGitProcesses.values()]
+    .map(p => `  git ${detectGitSubcommand(p.args)} (${Math.round((Date.now() - p.startedAt) / 1000)}s)`)
+    .join('\n')
+  const killed = killGitProcesses(pids)
+  logService.warn('git.shutdown', `Terminated ${killed} git process(es) still running at shutdown:\n${detail}`)
+  return killed
+}
+
+/** Env every git process we start shares. */
+const GIT_BASE_ENV = {
+  GIT_TERMINAL_PROMPT: '0',
+  GIT_ASKPASS: 'echo',
+} as const
 
 // ── Git process bookkeeping ──────────────────────────────────────────────────
 //
@@ -197,8 +294,7 @@ async function execWithProgressInner(
     const proc = GitProcess.spawn(args, repoPath, {
       env: {
         ...process.env,
-        GIT_TERMINAL_PROMPT: '0',
-        GIT_ASKPASS: 'echo',
+        ...GIT_BASE_ENV,
         // git-lfs checks isatty and silently drops its whole progress meter
         // (both the checkout-time "Filtering content" smudge line and
         // "Downloading LFS objects" from a plain `lfs pull`) when stdio isn't
@@ -208,6 +304,7 @@ async function execWithProgressInner(
         GIT_LFS_FORCE_PROGRESS: '1',
       },
     })
+    registerGitProcess(proc, args)
 
     let stdout = ''
     let stderr = ''
@@ -276,11 +373,8 @@ export async function exec(
   repoPath: string
 ): Promise<{ stdout: string; stderr: string }> {
   const result = await trackGitOp(repoPath, () => GitProcess.exec(args, repoPath, {
-    env: {
-      ...process.env,
-      GIT_TERMINAL_PROMPT: '0',
-      GIT_ASKPASS: 'echo',
-    },
+    env: { ...process.env, ...GIT_BASE_ENV },
+    processCallback: child => registerGitProcess(child, args),
   }))
 
   if (result.exitCode !== 0) {
@@ -304,11 +398,8 @@ export async function execWithStdin(
   stdin: string,
 ): Promise<{ stdout: string; stderr: string }> {
   const result = await trackGitOp(repoPath, () => GitProcess.exec(args, repoPath, {
-    env: {
-      ...process.env,
-      GIT_TERMINAL_PROMPT: '0',
-      GIT_ASKPASS: 'echo',
-    },
+    env: { ...process.env, ...GIT_BASE_ENV },
+    processCallback: child => registerGitProcess(child, args),
     stdin,
     stdinEncoding: 'utf8',
   }))
@@ -330,6 +421,36 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): 
     promise.finally(() => clearTimeout(timer)),
     deadline,
   ])
+}
+
+/**
+ * `withTimeout`, but the git processes the work started are killed when the
+ * deadline passes instead of being abandoned.
+ *
+ * Racing a promise only frees the *caller* — the git process it is waiting on
+ * keeps running, and a wedged one (stalled LFS transfer, disconnected share)
+ * never exits, so every timed-out read used to leak a `git.exe` plus its
+ * `git-lfs.exe` filter for the rest of the session. The scope is carried by
+ * AsyncLocalStorage, so only processes this call started are killed; anything
+ * another operation is legitimately running is left alone.
+ */
+export async function withGitTimeout<T>(fn: () => Promise<T>, ms: number, label: string): Promise<T> {
+  const scope = new Set<number>()
+  return gitProcessScope.run(scope, async () => {
+    try {
+      return await withTimeout(Promise.resolve(fn()), ms, label)
+    } catch (error) {
+      // Only a timeout leaves processes behind with nobody to collect them; a
+      // command that failed on its own has already exited.
+      if (error instanceof Error && error.message.includes('timed out after')) {
+        const killed = killGitProcesses(scope)
+        if (killed > 0) {
+          logService.warn('git.timeout', `${label} timed out after ${ms / 1000}s; killed ${killed} orphaned git process(es)`)
+        }
+      }
+      throw error
+    }
+  })
 }
 
 // ── gitAuthArgs — injects token via git http extraheader (avoids credential manager) ──
@@ -382,11 +503,8 @@ export async function execSafe(
   repoPath: string
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const result = await trackGitOp(repoPath, () => GitProcess.exec(args, repoPath, {
-    env: {
-      ...process.env,
-      GIT_TERMINAL_PROMPT: '0',
-      GIT_ASKPASS: 'echo',
-    },
+    env: { ...process.env, ...GIT_BASE_ENV },
+    processCallback: child => registerGitProcess(child, args),
   }))
   return {
     stdout: result.stdout,

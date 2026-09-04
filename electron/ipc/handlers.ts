@@ -8,7 +8,7 @@ import { assetDiffService } from '../services/AssetDiffService'
 import { presenceService } from '../services/PresenceService'
 import type { PresenceEntry } from '../types'
 import { CHANNELS } from './channels'
-import { withTimeout } from '../util/dugite-exec'
+import { withGitTimeout } from '../util/dugite-exec'
 import { gitService } from '../services/GitService'
 import { authService } from '../services/AuthService'
 import { logService } from '../services/LogService'
@@ -129,12 +129,14 @@ export function registerHandlers(): void {
    * objects, a fetch, or an `lfs migrate` legitimately runs for many minutes,
    * and those already stream progress so the user can see they are alive.
    *
-   * dugite gives no handle to kill the underlying process, so this frees the
-   * UI rather than the subprocess — the orphan finishes on its own.
+   * The timeout kills the git processes this handler started rather than
+   * abandoning them: a wedged `git.exe` never exits on its own, and it holds a
+   * `git-lfs.exe` filter process open with it, so abandoned reads used to
+   * accumulate idle Git/Git LFS processes for the life of the session.
    */
   const handleRead = <TArgs extends unknown[]>(channel: string, fn: IpcHandler<TArgs>): void => {
     handle(channel, async (event, ...args) =>
-      withTimeout(Promise.resolve(fn(event, ...(args as TArgs))), READ_TIMEOUT_MS, channel))
+      withGitTimeout(() => Promise.resolve(fn(event, ...(args as TArgs))), READ_TIMEOUT_MS, channel))
   }
 
   const runGitOp = async <T>(op: string, fn: () => Promise<T>): Promise<T> => {
@@ -612,8 +614,8 @@ export function registerHandlers(): void {
   })
 
   handle(CHANNELS.CLEANUP_SIZE, async (event, repoPath: string) => {
-    return withTimeout(
-      gitService.cleanupSize(repoPath, (step) => {
+    return withGitTimeout(
+      () => gitService.cleanupSize(repoPath, (step) => {
         if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
       }),
       30_000,

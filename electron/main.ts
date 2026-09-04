@@ -7,6 +7,7 @@ import { watcherService } from './services/WatcherService'
 import { logService } from './services/LogService'
 import { desktopNotificationService } from './services/DesktopNotificationService'
 import { settingsService } from './services/SettingsService'
+import { killAllGitProcesses } from './util/dugite-exec'
 
 const isDev = !app.isPackaged
 const openDevToolsOnStart = process.env.LUCID_OPEN_DEVTOOLS === '1'
@@ -298,6 +299,13 @@ app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
+  // Git children are not in our job object on Windows, so anything still
+  // running outlives the app — and a `git.exe` waiting on a stalled transfer
+  // keeps its `git-lfs.exe` filter process alive with it. Nothing is left to
+  // read their output once we go, so end them here rather than letting them
+  // accumulate across restarts. An index write cut short this way leaves
+  // `.git/index.lock`, which the stale-lock recovery clears on next launch.
+  killAllGitProcesses()
   logService.endSession()
 })
 
