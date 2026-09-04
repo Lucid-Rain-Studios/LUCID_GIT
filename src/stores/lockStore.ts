@@ -72,7 +72,7 @@ export const useLockStore = create<LockState>((set, get) => ({
         ...ghostLocks,
       ]
       set({ locks: mergedLocks, isLoading: false })
-    } catch (e) {
+    } catch {
       // LFS may not be initialised — treat as empty, don't surface error
       set({ locks: [], isLoading: false })
     }

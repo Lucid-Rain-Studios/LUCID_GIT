@@ -2,6 +2,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import * as crypto from 'crypto'
+import { execSync } from 'child_process'
 import { execSafe } from '../util/dugite-exec'
 import { ueHeadlessService } from './UEHeadlessService'
 
@@ -62,6 +63,7 @@ const CACHE_MAX_BYTES = 5 * 1024 * 1024 * 1024 // 5 GB
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let sharpLib: any = null
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- optional native dep, must stay lazy
 try { sharpLib = require('sharp') } catch { /* not installed */ }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -137,18 +139,12 @@ class AssetDiffService {
 
     // LFS pointer? Attempt smudge.
     if (stdout.startsWith(LFS_POINTER)) {
-      const smudge = await execSafe(
-        ['lfs', 'smudge', '--', filePath],
-        repoPath,
-        // pass pointer on stdin — not supported by execSafe, use pointer file instead
-      )
       // Write pointer to a temp file, smudge it
       const ptrFile = path.join(destDir, `${side}.lfsptr`)
       try {
         await fs.promises.writeFile(ptrFile, stdout, 'utf8')
         // git lfs smudge reads from stdin; use execSafe to pipe
-        const { execSync } = require('child_process')
-        const binary = execSync(
+          const binary = execSync(
           `git lfs smudge -- "${filePath}"`,
           { cwd: repoPath, input: stdout, maxBuffer: 256 * 1024 * 1024 }
         ) as Buffer
@@ -165,7 +161,6 @@ class AssetDiffService {
 
     // Plain binary blob
     try {
-      const { execSync } = require('child_process')
       const binary = execSync(
         `git cat-file -p ${gitRef}`,
         { cwd: repoPath, maxBuffer: 256 * 1024 * 1024 }

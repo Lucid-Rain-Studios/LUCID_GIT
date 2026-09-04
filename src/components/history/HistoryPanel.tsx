@@ -572,12 +572,6 @@ export function CommitDetail({ commit, files, filesLoading, repoPath, remoteUrl 
 
 // ── Stash panel ───────────────────────────────────────────────────────────────
 
-const stashBtnStyle: React.CSSProperties = {
-  fontFamily: 'var(--lg-font-ui)', fontSize: 11, fontWeight: 500,
-  height: 24, paddingLeft: 8, paddingRight: 8, borderRadius: 4,
-  border: '1px solid', cursor: 'pointer', transition: 'background 0.12s',
-}
-
 function StashPanel({ repoPath }: { repoPath: string }) {
   const [stashes, setStashes] = useState<StashEntry[]>([])
   const [loading, setLoading] = useState(false)
@@ -1106,7 +1100,8 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
   const toggleBranch = (name: string) => {
     if (name === defaultBranch) return
     const next = new Set(selectedBranches)
-    next.has(name) ? next.delete(name) : next.add(name)
+    if (next.has(name)) next.delete(name)
+    else next.add(name)
     setSelectedBranches(next)
     limitRef.current = INITIAL_LIMIT
     loadHistory(INITIAL_LIMIT, next)

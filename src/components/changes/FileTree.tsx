@@ -214,7 +214,8 @@ export function FileTree({
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault()
       const next = new Set(multiPaths)
-      next.has(key) ? next.delete(key) : next.add(key)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       setMultiPaths(next)
       setLastClickedKey(key)
     } else if (e.shiftKey && lastClickedKey) {

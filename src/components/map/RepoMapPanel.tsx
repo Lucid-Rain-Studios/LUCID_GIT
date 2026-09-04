@@ -456,7 +456,7 @@ function Breadcrumb({
 // ── Side panel ────────────────────────────────────────────────────────────────
 
 function SidePanel({
-  freqMap, locks, presence, presNames,
+  freqMap, locks, presence,
 }: {
   freqMap:   Map<string, number>
   locks:     Lock[]

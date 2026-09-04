@@ -96,7 +96,6 @@ function loadVisibility(): Record<string, string[]> {
         result[key] = [...VISIBILITY_DEFAULTS[key]]
       } else {
         // Merge: keep user preferences but add any new defaults that aren't stored yet
-        const userSet = new Set(stored[key])
         const newDefaults = VISIBILITY_DEFAULTS[key].filter(id => {
           // Find IDs that are in defaults but were never seen in any stored section
           const allStored = Object.values(stored).flat()

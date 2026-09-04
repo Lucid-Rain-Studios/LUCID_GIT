@@ -124,26 +124,6 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   )
 }
 
-function TextInput({ value, onChange, placeholder, mono }: { value: string; onChange: (v: string) => void; placeholder?: string; mono?: boolean }) {
-  return (
-    <input
-      type="text"
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      placeholder={placeholder}
-      style={{
-        width: '100%', boxSizing: 'border-box',
-        background: '#10131c', border: '1px solid #252d42',
-        borderRadius: 5, padding: '7px 10px',
-        fontFamily: mono ? 'var(--lg-font-mono)' : 'var(--lg-font-ui)',
-        fontSize: 12, color: '#dde1f0', outline: 'none',
-      }}
-      onFocus={e => (e.target.style.borderColor = '#e8622f')}
-      onBlur={e => (e.target.style.borderColor = '#252d42')}
-    />
-  )
-}
-
 function ActionButton({ label, onClick, disabled, danger }: { label: string; onClick: () => void; disabled?: boolean; danger?: boolean }) {
   const [hover, setHover] = useState(false)
   return (
@@ -660,7 +640,6 @@ function ResetTool({ repoPath, run }: { repoPath: string; run: (label: string, f
 
   const doReset = () => {
     if (!hash.trim()) return
-    const m = RESET_MODES.find(r => r.mode === mode)!
     const warn = mode === 'hard' ? '\n\n⚠️  HARD reset will discard ALL uncommitted changes. This cannot be easily undone.' : ''
     if (!confirm(`Reset HEAD to ${hash.slice(0, 8)} (--${mode})?${warn}`)) return
     run(`Resetting (--${mode})…`, () => ipc.gitResetTo(repoPath, hash, mode))

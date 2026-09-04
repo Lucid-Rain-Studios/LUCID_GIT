@@ -3044,7 +3044,7 @@ class GitService {
   }
 
   async getGlobalGitIdentity(): Promise<{ name: string; email: string }> {
-    const home = require('os').homedir()
+    const home = os.homedir()
     const [nameRes, emailRes] = await Promise.all([
       execSafe(['config', '--global', 'user.name'],  home),
       execSafe(['config', '--global', 'user.email'], home),
@@ -3053,7 +3053,7 @@ class GitService {
   }
 
   async setGlobalGitIdentity(name: string, email: string): Promise<void> {
-    const home = require('os').homedir()
+    const home = os.homedir()
     await Promise.all([
       exec(['config', '--global', 'user.name', name],  home),
       exec(['config', '--global', 'user.email', email], home),
@@ -3061,7 +3061,7 @@ class GitService {
   }
 
   async setGlobalDefaultBranch(defaultBranchName: string): Promise<void> {
-    const home = require('os').homedir()
+    const home = os.homedir()
     await exec(['config', '--global', 'init.defaultBranch', defaultBranchName], home)
   }
 
@@ -3070,7 +3070,7 @@ class GitService {
    * Creates an empty file if it does not yet exist so the OS can open it.
    */
   getGlobalGitConfigPath(): string {
-    const home = require('os').homedir()
+    const home = os.homedir()
     const configPath = path.join(home, '.gitconfig')
     if (!fs.existsSync(configPath)) {
       fs.writeFileSync(configPath, '', 'utf8')

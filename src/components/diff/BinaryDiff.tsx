@@ -266,7 +266,7 @@ function WidgetIcon() {
   )
 }
 
-function MaterialIcon({ color }: { color: string }) {
+function MaterialIcon(_: { color: string }) {
   return (
     <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
       <circle cx="14" cy="14" r="9" stroke="currentColor" strokeWidth="1.4" />

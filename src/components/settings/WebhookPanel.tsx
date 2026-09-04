@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react'
 import { ipc, WebhookConfig } from '@/ipc'
-import { cn } from '@/lib/utils'
 import { ActionBtn } from '@/components/ui/ActionBtn'
 
 interface WebhookPanelProps {

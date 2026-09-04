@@ -234,7 +234,6 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
 
   const TWO_DAYS  = 2 * 24 * 60 * 60 * 1000
   const behind    = effectiveSync?.behind ?? 0
-  const ahead     = effectiveSync?.ahead ?? 0
   const busyState = effectiveBusy
   const canCreatePRNow = canCreatePR(!!ghSlug, currentBranch, busyState)
   const stalePull = behind > 0 && (lastPull === null || Date.now() - lastPull > TWO_DAYS)

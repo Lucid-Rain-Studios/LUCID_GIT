@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import lucidGitIcon from '@/lib/icons/lucid_git.svg'
-import { ipc, SyncStatus, UpdateInfo, PresenceEntry, GitIdentity } from '@/ipc'
+import { ipc, SyncStatus, UpdateInfo, PresenceEntry } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useOperationStore } from '@/stores/operationStore'
@@ -11,7 +11,6 @@ import { ClearLockCacheButton } from '@/components/locks/ClearLockCacheButton'
 import { getLastFetch, markFetchPerformed, onFetchPerformed } from '@/lib/fetchState'
 import {
   canCreatePR,
-  canPull,
   canPush,
   createPRDisabledReason,
   fetchButtonLabel,
@@ -1189,7 +1188,7 @@ function RepoMenuItem({
 }
 
 function RepoMenuItemWithRemove({
-  name, path, onClick, onRemove,
+  name, onClick, onRemove,
 }: {
   name: string; path: string; onClick: () => void; onRemove: () => void
 }) {
@@ -1564,16 +1563,6 @@ function FetchIcon() {
   )
 }
 
-function FetchPullIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
-      <path d="M7 1v8M4.5 6.5L7 9l2.5-2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M2 11.5h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      <path d="M11 4.5c0-2.2-1.8-4-4-4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeDasharray="1.5 1.5" />
-    </svg>
-  )
-}
-
 function ArrowUp() {
   return (
     <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
@@ -1619,16 +1608,6 @@ function FlowArrow() {
         <path d="M3.5 2.5L8 6L3.5 9.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     </span>
-  )
-}
-
-function WarnIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 13 13" fill="none">
-      <path d="M6.5 2L12 11H1L6.5 2Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-      <path d="M6.5 6v2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      <circle cx="6.5" cy="9.5" r="0.6" fill="currentColor" />
-    </svg>
   )
 }
 

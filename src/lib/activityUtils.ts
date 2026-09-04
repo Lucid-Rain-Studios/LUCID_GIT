@@ -244,7 +244,6 @@ export function calculateStats(activity: Map<string, DayActivity>): {
   // Calculate streaks
   const today = toDateKey(Date.now())
   let checkingStreak = true
-  let streakBroken = false
 
   for (let i = 0; i < sortedDays.length; i++) {
     const day = sortedDays[i]
@@ -257,7 +256,6 @@ export function calculateStats(activity: Map<string, DayActivity>): {
         continue
       } else {
         checkingStreak = false
-        streakBroken = true
       }
     }
 

@@ -155,7 +155,7 @@ function setIniKeys(content: string, section: string, keys: Record<string, strin
   const lines = content.split('\n')
   const header = `[${section}]`
 
-  let secIdx = lines.findIndex(l => l.trimEnd() === header)
+  const secIdx = lines.findIndex(l => l.trimEnd() === header)
 
   if (secIdx === -1) {
     const appended = ['', header, ...Object.entries(keys).map(([k, v]) => `${k}=${v}`)]

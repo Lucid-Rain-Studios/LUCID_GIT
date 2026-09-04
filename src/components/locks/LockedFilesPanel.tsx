@@ -123,7 +123,10 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
     const ids = locksInGroup.filter(lock => selectableLockIds.has(lock.id)).map(lock => lock.id)
     setSelectedLockIds(prev => {
       const next = new Set(prev)
-      for (const id of ids) checked ? next.add(id) : next.delete(id)
+      for (const id of ids) {
+        if (checked) next.add(id)
+        else next.delete(id)
+      }
       return next
     })
   }
@@ -138,7 +141,8 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
   const toggleOwner = (login: string) => {
     setExpandedOwners(prev => {
       const next = new Set(prev)
-      next.has(login) ? next.delete(login) : next.add(login)
+      if (next.has(login)) next.delete(login)
+      else next.add(login)
       return next
     })
   }
@@ -162,7 +166,8 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
         const inRange = selectableLocks.slice(start, end + 1)
         for (const item of inRange) next.add(item.id)
       } else if (isToggle) {
-        next.has(lock.id) ? next.delete(lock.id) : next.add(lock.id)
+        if (next.has(lock.id)) next.delete(lock.id)
+        else next.add(lock.id)
       } else {
         next.clear()
         next.add(lock.id)
@@ -572,7 +577,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
 // ── Lock Row ──────────────────────────────────────────────────────────────────
 
 function LockRow({
-  lock, repoPath, currentLogin, isAdmin, unlocking,
+  lock, currentLogin, isAdmin, unlocking,
   selected, disableActions, onUnlock, onSelect, onCopyPath, onShowInExplorer,
 }: {
   lock: Lock

@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react'
 import { ipc, AppSettings, UpdateInfo, TerminalProfile } from '@/ipc'
-import { cn } from '@/lib/utils'
 import { ActionBtn } from '@/components/ui/ActionBtn'
 
 const CONFIRM_BRANCH_KEY = 'lucid-git:confirm-branch-switch'

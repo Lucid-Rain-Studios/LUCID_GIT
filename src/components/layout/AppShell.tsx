@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import lucidGitIcon from '@/lib/icons/lucid_git.svg'
-import { ipc, OperationStep, FileStatus, DiffContent, Lock, AppNotification } from '@/ipc'
+import { ipc, OperationStep, Lock, AppNotification } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useOperationStore } from '@/stores/operationStore'
 import { useAuthStore } from '@/stores/authStore'
@@ -10,15 +10,11 @@ import { usePRUnlockStore } from '@/stores/prUnlockStore'
 import { getTopBarSyncHandlers, getTopBarSyncSnapshot } from '@/lib/topBarSyncBridge'
 import { useStatusToastStore } from '@/stores/statusToastStore'
 import { StatusToastStack } from '@/components/notifications/StatusToastStack'
-import { useErrorStore } from '@/stores/errorStore'
 import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
 import { StatusBar } from './StatusBar'
 import { CloneDialog } from '@/components/repo/CloneDialog'
 import { DeviceFlowLogin } from '@/components/auth/DeviceFlowLogin'
-import { FileTree } from '@/components/changes/FileTree'
-import { CommitBox } from '@/components/changes/CommitBox'
-import { StashPanel } from '@/components/changes/StashPanel'
 import { BranchPanel } from '@/components/branches/BranchPanel'
 import { MergePreviewDialog } from '@/components/merge/MergeDialog'
 import { CherryPickConflictDialog } from '@/components/merge/CherryPickConflictDialog'
@@ -26,7 +22,6 @@ import { PushBlockedByLocksDialog } from '@/components/locks/PushBlockedByLocksD
 import { LfsPanel } from '@/components/lfs/LfsPanel'
 import { CleanupPanel } from '@/components/cleanup/CleanupPanel'
 import { SettingsPage } from '@/components/settings/SettingsPage'
-import { HistoryPanel } from '@/components/history/HistoryPanel'
 import { TimelinePanel } from '@/components/timeline/TimelinePanel'
 import { UnrealPanel } from '@/components/unreal/UnrealPanel'
 import { HooksManager } from '@/components/hooks/HooksManager'
@@ -43,10 +38,6 @@ import { ContentBrowserPanel } from '@/components/map/ContentBrowserPanel'
 import { ErrorPanel } from '@/components/errors/ErrorPanel'
 import { CommandPalette } from '@/components/command-palette/CommandPalette'
 import { GlobalDialogs } from '@/components/ui/GlobalDialogs'
-import { TextDiff } from '@/components/diff/TextDiff'
-import { BinaryDiff } from '@/components/diff/BinaryDiff'
-import { AssetDiffViewer } from '@/components/diff/AssetDiffViewer'
-import { DependencyBlamePanel } from '@/components/blame/DependencyBlamePanel'
 import { LockHeatmap } from '@/components/heatmap/LockHeatmap'
 import { ForecastPanel } from '@/components/heatmap/ForecastPanel'
 import { LockedFilesPanel } from '@/components/locks/LockedFilesPanel'
@@ -57,18 +48,6 @@ import { BugLogsPanel } from '@/components/logs/BugLogsPanel'
 import { GlobalLoadingCursor } from '@/components/ui/GlobalLoadingCursor'
 
 type TabId = 'timeline' | 'branches' | 'lfs' | 'cleanup' | 'unreal' | 'hooks' | 'settings' | 'tools' | 'presence' | 'overview' | 'changelog' | 'map' | 'content' | 'heatmap' | 'forecast' | 'dashboard' | 'locks' | 'logs' | 'activity'
-
-const ASSET_EXTS = new Set([
-  'uasset', 'umap', 'upk', 'udk',
-  'png', 'jpg', 'jpeg', 'tga', 'bmp', 'tiff', 'tif', 'dds', 'exr', 'hdr',
-  'wav', 'mp3', 'ogg', 'flac', 'aif', 'aiff',
-  'mp4', 'mov', 'avi', 'mkv',
-])
-
-function isRecognizedAsset(filePath: string): boolean {
-  const ext = filePath.split('.').pop()?.toLowerCase() ?? ''
-  return ASSET_EXTS.has(ext)
-}
 
 function RecentRepoRow({ name, path, divider, onOpen, onRemove }: {
   name: string; path: string; divider: boolean
@@ -177,12 +156,7 @@ export function AppShell() {
   const [cmdOpen, setCmdOpen] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
 
-  const [selectedFile, setSelectedFile] = useState<FileStatus | null>(null)
-  const [diffContent,  setDiffContent]  = useState<DiffContent | null>(null)
-  const [diffLoading,  setDiffLoading]  = useState(false)
-  const [blameTarget,  setBlameTarget]  = useState<{ filePath: string; repoPath: string } | null>(null)
-
-  const { repoPath, fileStatus, isLoading, error, openRepo, refreshStatus, silentRefresh, recentRepos, removeRecentRepo, clearRepo } = useRepoStore()
+  const { repoPath, error, openRepo, refreshStatus, silentRefresh, recentRepos, removeRecentRepo, clearRepo } = useRepoStore()
   const { updateStep } = useOperationStore()
 
   // Auto-open the cherry-pick conflict dialog if a previous session left
@@ -196,12 +170,11 @@ export function AppShell() {
     return () => { cancelled = true }
   }, [repoPath])
   const { loadAccounts, accounts, currentAccountId } = useAuthStore()
-  const { locks, loadLocks, setLocks } = useLockStore()
+  const { loadLocks, setLocks } = useLockStore()
 
   const { notifications, push: pushNotification, resolveRequest, clearResolveRequest } = useNotificationStore()
   const showStatusToast = useStatusToastStore(s => s.show)
 
-  const pushError = useErrorStore(s => s.pushRaw)
   const { conflicts: forecastConflicts, enabled: forecastEnabled, lastPolledAt, setConflicts: setForecastConflicts, setEnabled: setForecastEnabled, setLastPolledAt } = useForecastStore()
 
   const currentUserName = accounts.find(a => a.userId === currentAccountId)?.login ?? null
@@ -407,7 +380,6 @@ export function AppShell() {
   }, [authChecked, isSignedIn, clearRepo])
 
   useEffect(() => {
-    setSelectedFile(null); setDiffContent(null)
     if (repoPath) {
       loadLocks(repoPath)
       ipc.startLockPolling(repoPath)
@@ -485,18 +457,8 @@ export function AppShell() {
   }
 
   const handleRefresh = () => {
-    setSelectedFile(null); setDiffContent(null)
     refreshStatus()
     if (repoPath) loadLocks(repoPath)
-  }
-
-  const handleSelectFile = async (file: FileStatus) => {
-    setSelectedFile(file); setDiffLoading(true); setDiffContent(null)
-    try {
-      const diff = await ipc.diff(repoPath!, file.path, file.staged)
-      setDiffContent(diff)
-    } catch { /* ignore */ }
-    finally { setDiffLoading(false) }
   }
 
   // ── Drag handle component ─────────────────────────────────────────────────

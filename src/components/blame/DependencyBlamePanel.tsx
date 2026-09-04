@@ -301,7 +301,7 @@ export function DependencyBlamePanel({ repoPath, filePath, onClose }: Props) {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function BlameSection({ entry, label, isTarget, onViewRefs, indent }: {
+function BlameSection({ entry, isTarget, onViewRefs, indent }: {
   entry: DepBlameEntry
   label: string
   isTarget: boolean
