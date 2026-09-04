@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import fs from 'fs'
 import path from 'path'
-import { exec, execSafe, execWithProgress, execWithStdin, gitAuthArgs, gitOpActivity, ProgressCallback } from '../util/dugite-exec'
+import { exec, execSafe, execWithProgress, execWithStdin, gitAuthArgs, gitOpActivity, waitForGitOpsToDrain, ProgressCallback } from '../util/dugite-exec'
 import { authService } from './AuthService'
 import { logService } from './LogService'
 import { parseGitLog, GIT_LOG_FORMAT } from '../util/git-log-parse'
@@ -15,6 +15,12 @@ const STALE_PACK_RETRY_DELAY_MS = 2000
 // writing — git removes its own lock within milliseconds of finishing. Matches
 // the threshold the cherry-pick conflict dialog uses for its manual prompt.
 const STALE_INDEX_LOCK_S = 5
+
+// How long to let our own in-flight git processes finish before judging who
+// owns an index.lock. Long enough to cover a status refresh crawling under an
+// antivirus scan, short enough that a genuinely foreign lock still reports
+// quickly.
+const OUR_GIT_OPS_DRAIN_MS = 5000
 
 // ── Diff helpers ──────────────────────────────────────────────────────────────
 
@@ -114,6 +120,40 @@ async function runInPathChunks(
     onChunkDone?.(processed, paths.length)
   }
 }
+
+/**
+ * Sum the `size` field of every Git LFS pointer in `raw`, which may be a
+ * single pointer or a run of `git cat-file --batch` records.
+ *
+ * A pointer's keys are written in alphabetical order after the version line,
+ * so `size` always follows `oid`. Anchoring on that pairing means a stray
+ * "size N" line inside a blob that is not a pointer cannot inflate the total.
+ */
+function sumPointerSizes(raw: string): number {
+  let total = 0
+  let afterOid = false
+  for (const line of raw.split('\n')) {
+    if (line.startsWith('oid sha256:')) { afterOid = true; continue }
+    if (!afterOid) continue
+    const m = /^size (\d+)\r?$/.exec(line)
+    if (m) { total += Number(m[1]); afterOid = false }
+  }
+  return total
+}
+
+// `git status` refreshes the on-disk index as a side effect, and that
+// writeback takes `.git/index.lock` — briefly, but long enough to collide with
+// a real write when the filesystem is slow (an antivirus scan over a UE
+// project will do it). The watcher fires a status refresh on every working-tree
+// change, so during a checkout or a conflict resolution that background poll
+// is exactly what steals the lock from the write the user asked for. This read
+// never needs the refreshed index written back.
+//
+// Only `status` honours the flag: `git diff` writes its refreshed index
+// regardless (verified against the bundled Git 2.26), so adding it there would
+// buy nothing. Mandatory locks — add, commit, checkout — are not optional
+// locks and are unaffected either way.
+const NO_OPTIONAL_LOCKS = '--no-optional-locks'
 
 // ── GitService ────────────────────────────────────────────────────────────────
 
@@ -222,7 +262,7 @@ class GitService {
     // `git update-index`, which takes literal file paths and cannot expand
     // directories, so file granularity here is load-bearing.
     const { exitCode, stdout, stderr } = await execSafe(
-      ['status', '--porcelain=v1', '-z', '--untracked-files=all'],
+      [NO_OPTIONAL_LOCKS, 'status', '--porcelain=v1', '-z', '--untracked-files=all'],
       repoPath
     )
     if (exitCode !== 0) throw new Error(stderr || `git status failed (exit ${exitCode})`)
@@ -1099,7 +1139,17 @@ class GitService {
     // Snapshot before any further git command — `getIndexLockInfo` runs
     // rev-parse, which would otherwise show up as one of our in-flight
     // processes and as a run window of its own.
-    const ops = gitOpActivity(repoPath)
+    let ops = gitOpActivity(repoPath)
+
+    // Something of ours is still running, so the lock may be legitimately
+    // held by it. Give that work a moment to finish and look again: reporting
+    // an external writer while one of our own commands is mid-write is the
+    // wrong diagnosis, and the wait is bounded so a genuinely foreign lock
+    // still surfaces promptly.
+    if (ops.inFlight > 0) {
+      await waitForGitOpsToDrain(repoPath, OUR_GIT_OPS_DRAIN_MS)
+      ops = gitOpActivity(repoPath)
+    }
 
     const info = await this.getIndexLockInfo(repoPath)
     if (!info) return true            // nothing to clear; retry is unblocked
@@ -2442,6 +2492,74 @@ class GitService {
     }
   }
 
+  /**
+   * Count LFS-tracked files and sum their real sizes.
+   *
+   * `git lfs ls-files -s` is the obvious tool and the wrong one at UE scale:
+   * it opens every object to report a size, which on a 40k-asset project runs
+   * for over two minutes. Git answers both questions on its own in about a
+   * second — `:(attr:filter=lfs)` selects exactly the files the LFS filter
+   * applies to (honouring nested .gitattributes, which parsing the top-level
+   * file alone does not), and the `size` line inside each pointer blob is the
+   * true byte count. That size is also exact, where `-s` reports a value
+   * git-lfs has already rounded to two decimal places.
+   *
+   * Falls back to `git lfs ls-files -s` if the attribute pathspec is
+   * unavailable (Git older than 2.18).
+   */
+  private async lfsObjectTotals(repoPath: string): Promise<{ objects: number; totalBytes: number }> {
+    const listed = await execSafe(['ls-files', '-z', ':(attr:filter=lfs)'], repoPath)
+    if (listed.exitCode !== 0) return this.lfsObjectTotalsSlow(repoPath)
+
+    const paths = listed.stdout.split('\0').filter(Boolean)
+    if (paths.length === 0) return { objects: 0, totalBytes: 0 }
+
+    // `cat-file --batch` reads one revision per line, and the bundled Git
+    // (2.26) predates the `-z` switch that would take NUL separators instead.
+    // A path containing a newline would therefore split into two bogus
+    // revisions, so those go through one at a time.
+    const batchable = paths.filter(p => !p.includes('\n'))
+    const awkward   = paths.filter(p =>  p.includes('\n'))
+
+    // Pointer blobs are ~130 bytes plus a ~50-byte cat-file header, so this
+    // keeps each batch's stdout near 2 MB — well inside dugite's 10 MB buffer.
+    const BATCH = 10_000
+    let totalBytes = 0
+    for (let i = 0; i < batchable.length; i += BATCH) {
+      const stdin = batchable.slice(i, i + BATCH).map(p => `:${p}`).join('\n') + '\n'
+      const batchRes = await execWithStdin(['cat-file', '--batch', '--buffer'], repoPath, stdin)
+      totalBytes += sumPointerSizes(batchRes.stdout)
+    }
+    for (const p of awkward) {
+      const one = await execSafe(['cat-file', 'blob', `:${p}`], repoPath)
+      if (one.exitCode === 0) totalBytes += sumPointerSizes(one.stdout)
+    }
+
+    return { objects: paths.length, totalBytes }
+  }
+
+  /** Pre-2.18 fallback: ask git-lfs directly, at the cost of a full object scan. */
+  private async lfsObjectTotalsSlow(repoPath: string): Promise<{ objects: number; totalBytes: number }> {
+    let objects = 0, totalBytes = 0
+    const lsRes = await execSafe(['lfs', 'ls-files', '-s'], repoPath)
+    if (lsRes.exitCode === 0 && lsRes.stdout.trim()) {
+      for (const line of lsRes.stdout.trim().split('\n').filter(Boolean)) {
+        objects++
+        // Format: "oid * path (1.23 MB)"
+        const m = line.match(/\(([\d.]+)\s*(B|KB|MB|GB|TB)\)$/)
+        if (m) {
+          const n = parseFloat(m[1])
+          const u = m[2]
+          totalBytes += u === 'TB' ? n * 1e12
+            : u === 'GB' ? n * 1e9
+            : u === 'MB' ? n * 1e6
+            : u === 'KB' ? n * 1e3 : n
+        }
+      }
+    }
+    return { objects, totalBytes }
+  }
+
   /** Parse .gitattributes + count LFS objects + suggest untracked binary exts. Cached 5 min. */
   async lfsStatus(repoPath: string): Promise<LFSStatus> {
     const cached = this._lfsCache.get(repoPath)
@@ -2460,24 +2578,8 @@ class GitService {
       }
     } catch { /* no .gitattributes */ }
 
-    // Count LFS objects and estimate total bytes
-    let objects = 0, totalBytes = 0
-    const lsRes = await execSafe(['lfs', 'ls-files', '-s'], repoPath)
-    if (lsRes.exitCode === 0 && lsRes.stdout.trim()) {
-      for (const line of lsRes.stdout.trim().split('\n').filter(Boolean)) {
-        objects++
-        // Format: "oid * path (1.23 MB)"
-        const m = line.match(/\(([\d.]+)\s*(B|KB|MB|GB|TB)\)$/)
-        if (m) {
-          const n = parseFloat(m[1])
-          const u = m[2]
-          totalBytes += u === 'TB' ? n * 1e12
-            : u === 'GB' ? n * 1e9
-            : u === 'MB' ? n * 1e6
-            : u === 'KB' ? n * 1e3 : n
-        }
-      }
-    }
+    // Count LFS objects and total bytes
+    const { objects, totalBytes } = await this.lfsObjectTotals(repoPath)
 
     // Suggest binary extensions in the repo not yet covered by a tracked pattern
     const trackedExts = new Set(

@@ -58,6 +58,25 @@ export function gitOpActivity(repoPath: string): GitOpActivity {
   }
 }
 
+/**
+ * Wait until this repo has no git process of ours running, or `timeoutMs`
+ * passes. Resolves true if the repo went quiet.
+ *
+ * A `.git/index.lock` held by one of our own in-flight processes is in use,
+ * not stale — and under heavy filesystem load (an antivirus scan over a UE
+ * project) a background refresh can hold it for seconds. Waiting for our own
+ * work to finish tells the two cases apart, where sampling `inFlight` once
+ * reports a live lock of ours as an external writer's.
+ */
+export async function waitForGitOpsToDrain(repoPath: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while ((repoGitOps.get(opsKey(repoPath))?.inFlight ?? 0) > 0) {
+    if (Date.now() >= deadline) return false
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  return true
+}
+
 function entryFor(repoPath: string): RepoGitOps {
   const key = opsKey(repoPath)
   let entry = repoGitOps.get(key)

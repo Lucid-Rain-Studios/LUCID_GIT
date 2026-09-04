@@ -1032,59 +1032,74 @@ export function OverviewPanel({ repoPath, onNavigate, onRefresh }: OverviewPanel
     return () => { mounted.current = false }
   }, [])
 
+  // Pull requests load on their own chain. They share nothing with the local
+  // repository probes but the repo path, and a single slow probe (`git lfs
+  // ls-files` takes minutes on a large Unreal repo) must never hold the PR
+  // card in its spinner. `finally` clears the spinner on every exit path,
+  // including an unmount partway through.
+  const loadPRs = useCallback(async () => {
+    setPrsLoading(true)
+    try {
+      const remoteUrl = await ipc.getRemoteUrl(repoPath)
+      const slug = remoteUrl ? parseGitHubSlug(remoteUrl) : null
+      if (!mounted.current) return
+      setGhSlug(slug)
+      if (!slug) {
+        setPrs([])
+        setPrsError(null)
+        return
+      }
+      const [owner, repo] = slug.split('/')
+      try {
+        const prList = await ipc.githubListPRs({ owner, repo })
+        if (mounted.current) { setPrs(prList); setPrsError(null) }
+      } catch (err: unknown) {
+        if (mounted.current) setPrsError(classifyPRLoadError(err))
+      }
+    } catch {
+      // No readable remote — treat the repo as having no GitHub PRs.
+      if (mounted.current) {
+        setGhSlug(null)
+        setPrs([])
+        setPrsError(null)
+      }
+    } finally {
+      if (mounted.current) setPrsLoading(false)
+    }
+  }, [repoPath])
+
   const loadAll = useCallback(async () => {
     setRefreshing(true)
-    setPrsLoading(true)
-    const [branchR, syncR, lfsR, locksR, activityR, commitsR, remoteUrlR] = await Promise.allSettled([
+    const prsDone = loadPRs()
+    const [branchR, syncR, lfsR, locksR, activityR, commitsR] = await Promise.allSettled([
       ipc.currentBranch(repoPath),
       ipc.getSyncStatus(repoPath),
       ipc.lfsStatus(repoPath),
       ipc.listLocks(repoPath),
       ipc.gitBranchActivity(repoPath),
       ipc.log(repoPath, { limit: 20 }),
-      ipc.getRemoteUrl(repoPath),
     ])
-    if (!mounted.current) return
-    if (branchR.status   === 'fulfilled') setBranch(branchR.value)
-    if (syncR.status     === 'fulfilled') setSync(syncR.value)
-    if (lfsR.status      === 'fulfilled') setLfs(lfsR.value)
-    if (locksR.status    === 'fulfilled') setLocks(locksR.value.length)
-    if (activityR.status === 'fulfilled') setActivity(activityR.value)
-    if (commitsR.status  === 'fulfilled') setCommits(commitsR.value)
+    if (mounted.current) {
+      if (branchR.status   === 'fulfilled') setBranch(branchR.value)
+      if (syncR.status     === 'fulfilled') setSync(syncR.value)
+      if (lfsR.status      === 'fulfilled') setLfs(lfsR.value)
+      if (locksR.status    === 'fulfilled') setLocks(locksR.value.length)
+      if (activityR.status === 'fulfilled') setActivity(activityR.value)
+      if (commitsR.status  === 'fulfilled') setCommits(commitsR.value)
 
-    setLastUpdate(Date.now())
-    setRefreshing(false)
-
-    if (remoteUrlR.status === 'fulfilled' && remoteUrlR.value) {
-      const slug = parseGitHubSlug(remoteUrlR.value)
-      setGhSlug(slug)
-      if (slug) {
-        const [owner, repo] = slug.split('/')
-        try {
-          const prList = await ipc.githubListPRs({ owner, repo })
-          if (mounted.current) { setPrs(prList); setPrsError(null) }
-        } catch (err: unknown) {
-          if (mounted.current) setPrsError(classifyPRLoadError(err))
-        }
-      } else if (mounted.current) {
-        setPrs([])
-        setPrsError(null)
-      }
-    } else if (mounted.current) {
-      setGhSlug(null)
-      setPrs([])
-      setPrsError(null)
+      setLastUpdate(Date.now())
+      setRefreshing(false)
     }
-    if (mounted.current) setPrsLoading(false)
-  }, [repoPath])
+    await prsDone
+  }, [repoPath, loadPRs])
 
   // Transient GitHub failures recover without requiring users to repeatedly
   // press Refresh. Auth/configuration errors wait for explicit user action.
   useEffect(() => {
     if (prsError?.kind !== 'unavailable' && prsError?.kind !== 'rate-limited') return
-    const retry = window.setTimeout(() => loadAll(), 30_000)
+    const retry = window.setTimeout(() => loadPRs(), 30_000)
     return () => window.clearTimeout(retry)
-  }, [prsError, loadAll])
+  }, [prsError, loadPRs])
 
   // Refresh when history or PR state changes (fetch, pull, push, PR merge/close, branch switch)
   const historyTick    = useRepoStore(s => s.historyTick)
@@ -1251,7 +1266,7 @@ export function OverviewPanel({ repoPath, onNavigate, onRefresh }: OverviewPanel
           repoPath={repoPath}
           loading={prsLoading}
           error={prsError}
-          onRefresh={loadAll}
+          onRefresh={loadPRs}
         />
 
         {/* ── Row 1: Repository Size ───────────────────────────────────────── */}

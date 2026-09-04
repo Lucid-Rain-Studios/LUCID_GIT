@@ -541,7 +541,10 @@ export function registerHandlers(): void {
   })
 
   handle(CHANNELS.LFS_STATUS, async (_event, repoPath: string) => {
-    return gitService.lfsStatus(repoPath)
+    // `git lfs ls-files -s` stats every LFS object, which on a large Unreal
+    // repo runs for minutes. Bound it so callers that batch this alongside
+    // other probes (the Overview refresh) report "LFS —" instead of stalling.
+    return withTimeout(gitService.lfsStatus(repoPath), 30_000, 'lfsStatus')
   })
 
   handle(CHANNELS.LFS_TRACK, async (_event, repoPath: string, patterns: string[]) => {
