@@ -377,13 +377,27 @@ export function AppShell() {
   }, [loadAccounts])
 
   // ── Restore previous session — auto-open last repo on launch ──────────────
+  //
+  // The one-shot guard marks that a restore was *attempted*, so it is set only
+  // where one actually happens. Setting it as soon as auth resolved meant an
+  // empty `recentRepos` at that instant — the list is read from localStorage,
+  // which can come back empty or throw — permanently disabled restore for the
+  // rest of the launch, leaving the user on "No repository open" with their
+  // last project one click away and no indication why.
   useEffect(() => {
     if (didAttemptSessionRestore.current) return
     if (!authChecked || !isSignedIn) return
+
+    // Already have a repository — nothing to restore, and no later change
+    // should trigger one.
+    if (repoPath) { didAttemptSessionRestore.current = true; return }
+
+    // Nothing to restore yet. Stay armed: if the list arrives on a later
+    // render, this effect runs again and picks it up.
+    if (recentRepos.length === 0) return
+
     didAttemptSessionRestore.current = true
-    if (!repoPath && recentRepos.length > 0) {
-      openRepo(recentRepos[0]).catch(() => {})
-    }
+    openRepo(recentRepos[0]).catch(() => {})
   }, [authChecked, isSignedIn, repoPath, recentRepos, openRepo])
 
   useEffect(() => {
