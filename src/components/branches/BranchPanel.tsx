@@ -7,6 +7,7 @@ import { usePRStore } from '@/stores/prStore'
 import { cn } from '@/lib/utils'
 import { FilePathText } from '@/components/ui/FilePathText'
 import { ActionBtn } from '@/components/ui/ActionBtn'
+import { BranchHealthCard } from './BranchHealthCard'
 
 
 
@@ -457,6 +458,11 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
         <div className="px-3 py-1.5 text-[10px] font-mono text-lg-error bg-lg-error/10 border-b border-lg-border shrink-0 whitespace-pre-wrap">
           {error}
         </div>
+      )}
+
+      {/* ── Branch health ──────────────────────────────────────────────── */}
+      {repoPath && (
+        <BranchHealthCard repoPath={repoPath} onPreview={onMergePreview} />
       )}
 
       {/* ── Scrollable branch lists ─────────────────────────────────────── */}

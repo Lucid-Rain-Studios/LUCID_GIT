@@ -6,7 +6,7 @@ import { exec, execSafe, execWithProgress, execWithStdin, gitAuthArgs, gitOpActi
 import { authService } from './AuthService'
 import { logService } from './LogService'
 import { parseGitLog, GIT_LOG_FORMAT } from '../util/git-log-parse'
-import { FileStatus, BranchInfo, CommitEntry, ChangelogEntry, ChangelogQuery, DiffContent, StashEntry, ContributorInfo, ConflictPreviewFile, SyncStatus, LFSStatus, LfsLockCacheFile, LfsLocksMaintenanceResult, SizeBreakdown, CleanupResult, BranchActivity, BranchDiffSummary, BranchDiffFile, PotentialMergeConflictReport, RepoSearchResult } from '../types'
+import { FileStatus, BranchInfo, CommitEntry, ChangelogEntry, ChangelogQuery, DiffContent, StashEntry, ContributorInfo, ConflictPreviewFile, SyncStatus, LFSStatus, LfsLockCacheFile, LfsLocksMaintenanceResult, SizeBreakdown, CleanupResult, BranchActivity, BranchDiffSummary, BranchDiffFile, PotentialMergeConflictReport, RepoSearchResult, BranchHealth, BranchHealthReport } from '../types'
 
 // Brief fallback delay for a genuinely concurrent repack. Persistent missing
 // indexes are repaired directly before this delay is considered.
@@ -155,6 +155,28 @@ function sumPointerSizes(raw: string): number {
 // buy nothing. Mandatory locks — add, commit, checkout — are not optional
 // locks and are unaffected either way.
 const NO_OPTIONAL_LOCKS = '--no-optional-locks'
+
+/**
+ * Pull the conflicted paths out of `git merge-tree --write-tree -z --name-only`.
+ *
+ * The output is NUL-separated sections: the merged tree's OID, then the
+ * conflicted paths, then an empty field, then human-readable messages. Returns
+ * null when the first field is not an object id — git exits 1 both for "this
+ * merge conflicts" and for "that ref does not exist", and only the presence of
+ * a tree tells the two apart.
+ */
+function parseMergeTreeConflicts(stdout: string): string[] | null {
+  const fields = stdout.split('\0')
+  if (!/^[0-9a-f]{40,64}$/.test(fields[0]?.trim() ?? '')) return null
+
+  const conflicts: string[] = []
+  for (let i = 1; i < fields.length; i++) {
+    const field = fields[i]
+    if (field === '') break          // separator: messages follow, not paths
+    conflicts.push(field)
+  }
+  return conflicts
+}
 
 interface LfsTotals {
   objects: number
@@ -1290,6 +1312,116 @@ class GitService {
         }
       })
       .filter(e => e.hash.length > 0)
+  }
+
+  /**
+   * Measure every branch against the integration branch: how far it has
+   * drifted, and whether merging it would actually conflict.
+   *
+   * Both halves need a Git newer than the one Lucid Git used to ship.
+   * `%(ahead-behind:<base>)` (2.41) answers the drift question for every ref
+   * in a single process — `%(upstream:track)`, which `branchList` uses, only
+   * compares a branch to its own upstream and so can never say how far
+   * `origin/dev_Ben` has fallen behind `main`. `merge-tree --write-tree`
+   * (2.38) performs the merge entirely in memory: no checkout, no index, no
+   * `index.lock`, nothing to clean up if it conflicts. Before it, answering
+   * "would this merge cleanly?" meant actually merging and rolling back.
+   *
+   * A branch with nothing ahead of the base is already contained in it, so
+   * merging is a no-op and the merge test is skipped — that prunes most refs
+   * on a busy repo. The rest are capped by `maxChecks` so a repo with hundreds
+   * of branches cannot run past the IPC deadline; whatever is left is reported
+   * as skipped rather than silently dropped.
+   */
+  async branchHealth(
+    repoPath: string,
+    options: { base?: string; maxChecks?: number } = {},
+  ): Promise<BranchHealthReport> {
+    const base = options.base ?? (await this.remoteDefaultBranch(repoPath)).ref
+    const maxChecks = options.maxChecks ?? 40
+    const SEP = '\x1f'
+
+    const refRes = await execSafe(
+      [
+        'for-each-ref',
+        `--format=%(refname:short)${SEP}%(objectname)${SEP}%(ahead-behind:${base})${SEP}%(authordate:iso-strict)${SEP}%(authorname)`,
+        '--sort=-authordate',
+        'refs/heads/', 'refs/remotes/origin/',
+      ],
+      repoPath,
+    )
+    if (refRes.exitCode !== 0) return { base, branches: [], checked: 0, skipped: 0 }
+
+    interface Candidate extends BranchHealth { oid: string }
+    const candidates: Candidate[] = []
+
+    for (const line of refRes.stdout.split('\n')) {
+      if (!line.trim()) continue
+      const [name, oid, aheadBehind, date, author] = line.split(SEP)
+      // `origin` is refs/remotes/origin/HEAD, a pointer at the default branch
+      // rather than a branch of its own, and the base is not news to anyone.
+      if (!name || name === base || name === 'origin' || name.endsWith('/HEAD')) continue
+
+      // "<ahead> <behind>", or empty when the ref has no path to the base.
+      const [aheadRaw, behindRaw] = (aheadBehind ?? '').trim().split(/\s+/)
+      const ahead = Number.parseInt(aheadRaw, 10)
+      const behind = Number.parseInt(behindRaw, 10)
+      const comparable = Number.isFinite(ahead) && Number.isFinite(behind)
+
+      candidates.push({
+        name,
+        displayName: name.replace(/^origin\//, ''),
+        isRemote: name.startsWith('origin/'),
+        ahead: comparable ? ahead : 0,
+        behind: comparable ? behind : 0,
+        conflicts: [],
+        status: !comparable ? 'error' : ahead === 0 ? 'merged' : 'skipped',
+        lastCommitAt: date || undefined,
+        lastAuthor: author || undefined,
+        oid: oid ?? '',
+      })
+    }
+
+    // A local branch and its remote copy at the same commit are one branch as
+    // far as this view is concerned. Once they diverge they are genuinely two
+    // different merges and both are worth showing.
+    const byCommit = new Map<string, Candidate>()
+    const deduped: Candidate[] = []
+    for (const c of candidates) {
+      const key = `${c.displayName}@${c.oid}`
+      const seen = byCommit.get(key)
+      if (seen) {
+        // Prefer the local ref: it is the one the user can act on directly.
+        if (seen.isRemote && !c.isRemote) Object.assign(seen, c)
+        continue
+      }
+      byCommit.set(key, c)
+      deduped.push(c)
+    }
+
+    let checked = 0
+    let skipped = 0
+    for (const branch of deduped) {
+      if (branch.status !== 'skipped') continue      // merged or uncomparable
+      if (checked >= maxChecks) { skipped++; continue }
+      checked++
+      const merge = await execSafe(
+        ['merge-tree', '--write-tree', '-z', '--name-only', base, branch.name],
+        repoPath,
+      )
+      const parsed = parseMergeTreeConflicts(merge.stdout)
+      if (!parsed) {
+        // A missing ref exits 1 exactly like a conflict does, so the tree OID
+        // on stdout — not the exit code — is what says the merge really ran.
+        branch.status = 'error'
+        continue
+      }
+      branch.conflicts = parsed
+      branch.status = parsed.length > 0 ? 'conflicted' : 'clean'
+    }
+
+    const branches: BranchHealth[] = deduped.map(({ oid: _oid, ...rest }) => rest)
+    return { base, branches, checked, skipped }
   }
 
   /** Returns the preferred branch label for update UX. */

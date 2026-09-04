@@ -708,6 +708,12 @@ export function registerHandlers(): void {
     gitService.trustRepoDirectory(repoPath)
   )
 
+  // Read-only, but one merge per unmerged branch, so it is the slowest thing
+  // behind the deadline. `maxChecks` in the service keeps it inside that.
+  handleRead(CHANNELS.GIT_BRANCH_HEALTH, (_event, repoPath: string, options?: { base?: string; maxChecks?: number }) =>
+    gitService.branchHealth(repoPath, options ?? {})
+  )
+
   handle(CHANNELS.GIT_GET_GLOBAL_IDENTITY, () =>
     gitService.getGlobalGitIdentity()
   )

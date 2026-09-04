@@ -466,6 +466,28 @@ export interface BranchActivity {
   message: string
 }
 
+/** One branch measured against the integration branch it will merge into. */
+export interface BranchHealth {
+  name: string
+  displayName: string
+  isRemote: boolean
+  /** Commits this branch has that the base does not. 0 means already merged. */
+  ahead: number
+  /** Commits on the base this branch has not picked up — how stale it is. */
+  behind: number
+  conflicts: string[]
+  status: 'clean' | 'conflicted' | 'merged' | 'skipped' | 'error'
+  lastCommitAt?: string
+  lastAuthor?: string
+}
+
+export interface BranchHealthReport {
+  base: string
+  branches: BranchHealth[]
+  checked: number
+  skipped: number
+}
+
 export interface PresenceEntry {
   login: string
   name: string
@@ -813,6 +835,8 @@ export interface LucidGitAPI {
   gitLsFiles: (repoPath: string) => Promise<string[]>
   gitFileLog: (repoPath: string, filePath: string, limit?: number) => Promise<CommitEntry[]>
   gitBranchActivity: (repoPath: string) => Promise<BranchActivity[]>
+  /** Drift + real merge outcome for every branch, measured against the default branch. */
+  branchHealth: (repoPath: string, options?: { base?: string; maxChecks?: number }) => Promise<BranchHealthReport>
   gitDefaultBranch: (repoPath: string) => Promise<string>
   gitBlame: (repoPath: string, filePath: string, rev: string) => Promise<BlameEntry[]>
   gitCommitFileDiff: (repoPath: string, filePath: string, hash: string) => Promise<DiffContent>

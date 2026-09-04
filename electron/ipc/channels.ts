@@ -105,6 +105,7 @@ export const CHANNELS = {
   GIT_SET_CONFIG:    'git:set-config',
   GIT_GET_CONFIG:    'git:get-config',
   GIT_TRUST_DIR:     'git:trust-directory',
+  GIT_BRANCH_HEALTH: 'git:branch-health',
 
   // Hooks
   HOOK_LIST:            'hook:list',

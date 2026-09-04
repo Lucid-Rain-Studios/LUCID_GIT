@@ -40,6 +40,37 @@ export interface BranchInfo {
   hasLocal?: boolean    // remote branches: whether a local tracking branch exists
 }
 
+/** One branch measured against the integration branch it will eventually merge into. */
+export interface BranchHealth {
+  name: string           // "dev_Dylan" or "origin/dev_Dylan"
+  displayName: string    // without the remote prefix
+  isRemote: boolean
+  /** Commits on this branch that the base does not have. 0 means already merged. */
+  ahead: number
+  /** Commits on the base this branch has not picked up — how stale it is. */
+  behind: number
+  /** Paths that conflict when this branch is merged into the base. */
+  conflicts: string[]
+  /**
+   * Why `conflicts` is empty. 'clean' merges without conflict; 'merged' is
+   * fully contained in the base so there is nothing to merge; 'skipped' hit
+   * the check budget; 'error' means git could not compute the merge.
+   */
+  status: 'clean' | 'conflicted' | 'merged' | 'skipped' | 'error'
+  lastCommitAt?: string
+  lastAuthor?: string
+}
+
+export interface BranchHealthReport {
+  /** Ref everything was compared against, e.g. "origin/main". */
+  base: string
+  branches: BranchHealth[]
+  /** Branches a real merge was computed for. */
+  checked: number
+  /** Branches left unchecked because the budget ran out. */
+  skipped: number
+}
+
 export interface CommitEntry {
   hash: string
   parentHashes: string[]

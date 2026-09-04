@@ -213,6 +213,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GIT_SET_UPSTREAM, repoPath, branch),
   setGitConfig: (repoPath: string, key: string, value: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_SET_CONFIG, repoPath, key, value),
+  branchHealth: (repoPath: string, options?: { base?: string; maxChecks?: number }) =>
+    ipcRenderer.invoke(CHANNELS.GIT_BRANCH_HEALTH, repoPath, options),
   trustRepoDirectory: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_TRUST_DIR, repoPath),
   getGitConfig: (repoPath: string, key: string) =>
