@@ -1663,10 +1663,16 @@ class GitService {
         if (processed === total || processed % 25 === 0) report(processed)
       }
     } else {
+      // Restoring a tracked file runs it back through the Git LFS smudge
+      // filter, which downloads any object missing from the local LFS cache —
+      // a network operation that needs our token. Without it git-lfs falls
+      // through to the system credential manager and the batch API answers
+      // "Bad credentials", so the file stays dirty. Same auth as checkout/merge.
+      const auth = await this.authenticatedArgs(repoPath, [])
       // Unstage first (no-op if not staged), then restore working tree.
       // Two passes — each pass covers `total` files, so the bar fills in halves.
-      await runInPathChunks(paths, c => execSafe(['restore', '--staged', '--', ...c], repoPath), (p) => report(Math.floor(p / 2)))
-      await runInPathChunks(paths, c => execSafe(['restore', '--', ...c], repoPath), (p) => report(Math.floor(total / 2) + Math.floor(p / 2)))
+      await runInPathChunks(paths, c => execSafe([...auth, 'restore', '--staged', '--', ...c], repoPath), (p) => report(Math.floor(p / 2)))
+      await runInPathChunks(paths, c => execSafe([...auth, 'restore', '--', ...c], repoPath), (p) => report(Math.floor(total / 2) + Math.floor(p / 2)))
     }
     report(total, 'done')
   }
@@ -1697,6 +1703,14 @@ class GitService {
 
     const headExists = (await execSafe(['rev-parse', '--verify', 'HEAD'], repoPath)).exitCode === 0
 
+    // `reset --hard` and `restore` rewrite tracked files through the Git LFS
+    // smudge filter, which fetches any object that is not in the local LFS
+    // cache. That fetch needs our token — unauthenticated it falls through to
+    // the system credential manager, whose stale entry the LFS batch API
+    // rejects with "Bad credentials", and every affected file survives the
+    // discard.
+    const auth = await this.authenticatedArgs(repoPath, [])
+
     let lastError = ''
     const noteFailure = (res: { stdout: string; stderr: string; exitCode: number }) => {
       if (res.exitCode !== 0) lastError = (res.stderr || res.stdout).trim()
@@ -1706,7 +1720,7 @@ class GitService {
     if (headExists) {
       // Clears the index, restores tracked files, deletes index-only files, and
       // drops any half-finished merge state — all in one index rewrite.
-      noteFailure(await execSafe(['reset', '--hard', 'HEAD'], repoPath))
+      noteFailure(await execSafe([...auth, 'reset', '--hard', 'HEAD'], repoPath))
     } else {
       // No commits yet, so nothing to restore to and `reset --hard` cannot run.
       // Emptying the index turns every staged file into an untracked one, which
@@ -1731,8 +1745,8 @@ class GitService {
       const stagedPaths = leftover.filter(f => f.staged).map(f => f.path)
       if (stagedPaths.length > 0) {
         const unstageArgs = headExists
-          ? ['restore', '--staged', '--']
-          : ['rm', '-r', '-f', '--cached', '--ignore-unmatch', '--']
+          ? [...auth, 'restore', '--staged', '--']
+          : [...auth, 'rm', '-r', '-f', '--cached', '--ignore-unmatch', '--']
         await runInPathChunks(stagedPaths, c => execSafe([...unstageArgs, ...c], repoPath).then(noteFailure))
       }
 
@@ -1750,8 +1764,15 @@ class GitService {
         }
       }
       if (tracked.length > 0 && headExists) {
-        await runInPathChunks(tracked, c => execSafe(['restore', '--', ...c], repoPath).then(noteFailure))
+        await runInPathChunks(tracked, c => execSafe([...auth, 'restore', '--', ...c], repoPath).then(noteFailure))
       }
+
+      // A git or git-lfs subprocess that died mid-write leaves .git/index.lock
+      // behind, and every index write after that fails with the same error no
+      // matter how many passes we make. Repair what is repairable — the
+      // orphaned lock, an unreadable LFS lock cache, a broken LFS filter
+      // install — so the next attempt is not a replay of the last one.
+      if (lastError) await this.recoverForRetry(repoPath, new Error(lastError)).catch(() => false)
 
       // A file an external tool has open fails now and succeeds a moment later.
       await new Promise(r => setTimeout(r, 200))
@@ -1768,10 +1789,45 @@ class GitService {
     const more  = leftover.length > names.length ? `\n…and ${leftover.length - names.length} more` : ''
     throw new Error(
       `Could not discard ${leftover.length} file${leftover.length === 1 ? '' : 's'}:\n${names.join('\n')}${more}\n\n` +
-      `They are usually held open by another program (the Unreal editor, an IDE, or an antivirus scan). ` +
-      `Close it and discard again.` +
+      this.discardFailureHint(lastError) +
       (lastError ? `\n\nGit reported:\n${lastError}` : '')
     )
+  }
+
+  /**
+   * Explain why a discard left files behind, based on what git actually said.
+   *
+   * "Held open by another program" used to be the only explanation offered,
+   * and it is the wrong one for the most common failure on an LFS repo:
+   * restoring a tracked file runs the smudge filter, which downloads any
+   * object missing from the local cache, and a rejected token stops every
+   * file dead. Blaming Unreal there sends the user hunting for a lock that
+   * does not exist while the real fix is to sign in again.
+   */
+  private discardFailureHint(lastError: string): string {
+    const message = lastError.toLowerCase()
+
+    if (
+      message.includes('batch response: bad credentials') ||
+      message.includes('batch response: unauthorized') ||
+      message.includes('authentication required')
+    ) {
+      return `Git LFS could not download the original file contents — the remote rejected the credentials. ` +
+             `Sign in to GitHub again from the top bar, then discard again.`
+    }
+
+    if (message.includes('smudge filter lfs failed') || message.includes('git-lfs filter-process')) {
+      return `Git LFS could not restore the original file contents. ` +
+             `Check that you are online and that Git LFS is installed, then discard again.`
+    }
+
+    if (this.isStaleIndexLockError(lastError)) {
+      return `Another program is holding .git/index.lock — usually a second Git client or a git command still running. ` +
+             `Wait for it to finish, then discard again.`
+    }
+
+    return `They are usually held open by another program (the Unreal editor, an IDE, or an antivirus scan). ` +
+           `Close it and discard again.`
   }
 
   /** Append a pattern to .gitignore, creating the file if needed. */
