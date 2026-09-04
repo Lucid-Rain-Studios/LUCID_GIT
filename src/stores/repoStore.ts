@@ -92,12 +92,20 @@ export const useRepoStore = create<RepoState>((set, get) => ({
     const op = useOperationStore.getState()
     try {
       await op.run('Refreshing…', async () => {
-        const [status, branch, branches] = await Promise.all([
+        // Settled, not all: these three are independent, and a slow branch
+        // list must not throw away a file status that arrived fine. Batching
+        // them with Promise.all meant one failure showed the user a stale
+        // changes list with nothing to explain it. Each IPC rejection is
+        // already logged by the ipc proxy, so a partial refresh is
+        // diagnosable in Bug Logs.
+        const [statusR, branchR, branchesR] = await Promise.allSettled([
           window.lucidGit.status(repoPath),
           window.lucidGit.currentBranch(repoPath),
           window.lucidGit.branchList(repoPath),
         ])
-        set({ fileStatus: status ?? [], currentBranch: branch ?? '', branches: branches ?? [] })
+        if (statusR.status   === 'fulfilled') set({ fileStatus: statusR.value ?? [] })
+        if (branchR.status   === 'fulfilled') set({ currentBranch: branchR.value ?? '' })
+        if (branchesR.status === 'fulfilled') set({ branches: branchesR.value ?? [] })
       })
     } catch {
       // silent
@@ -112,13 +120,14 @@ export const useRepoStore = create<RepoState>((set, get) => ({
     if (!repoPath || isLoading || isSilentRefreshing) return
     set({ isSilentRefreshing: true })
     try {
-      const [status, branch] = await Promise.all([
+      const [statusR, branchR] = await Promise.allSettled([
         window.lucidGit.status(repoPath),
         window.lucidGit.currentBranch(repoPath),
       ])
       // Only write if no explicit refresh started while we were waiting
       if (!get().isLoading) {
-        set({ fileStatus: status ?? [], currentBranch: branch ?? '' })
+        if (statusR.status === 'fulfilled') set({ fileStatus: statusR.value ?? [] })
+        if (branchR.status === 'fulfilled') set({ currentBranch: branchR.value ?? '' })
       }
     } catch { /* ignore */ }
     finally { set({ isSilentRefreshing: false }) }
@@ -137,15 +146,18 @@ export const useRepoStore = create<RepoState>((set, get) => ({
     const op = useOperationStore.getState()
     await op.run(`Switching to ${branch}…`, async () => {
       await window.lucidGit.checkout(repoPath, branch)
-      const [status, currentBranch, branches] = await Promise.all([
+      // The checkout already succeeded. Refreshing what it changed is
+      // follow-up work, so a failure here must not surface as "Switching to X
+      // failed" for a branch the user is now standing on.
+      const [statusR, currentBranchR, branchesR] = await Promise.allSettled([
         window.lucidGit.status(repoPath),
         window.lucidGit.currentBranch(repoPath),
         window.lucidGit.branchList(repoPath),
       ])
       set(s => ({
-        currentBranch,
-        fileStatus: status ?? [],
-        branches: branches ?? s.branches,
+        currentBranch: currentBranchR.status === 'fulfilled' ? currentBranchR.value : branch,
+        fileStatus:    statusR.status        === 'fulfilled' ? (statusR.value ?? []) : s.fileStatus,
+        branches:      branchesR.status      === 'fulfilled' ? (branchesR.value ?? s.branches) : s.branches,
         historyTick: s.historyTick + 1,
       }))
     })

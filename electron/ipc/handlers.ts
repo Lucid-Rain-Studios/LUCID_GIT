@@ -29,6 +29,11 @@ import type { WebhookConfig, AppSettings, TeamConfig } from '../types'
 
 type IpcHandler<TArgs extends unknown[]> = (event: IpcMainInvokeEvent, ...args: TArgs) => unknown
 
+// Ceiling for a read the UI waits on. Generous enough that a large repo on a
+// slow disk still answers, short enough that a wedged process surfaces as an
+// error instead of an endless spinner.
+const READ_TIMEOUT_MS = 30_000
+
 function sanitizeForLog(value: unknown, depth = 0): unknown {
   if (depth > 4) return '[MaxDepth]'
   if (value instanceof Error) {
@@ -110,6 +115,28 @@ export function registerHandlers(): void {
     })
   }
 
+  /**
+   * Register a read-only handler the UI blocks on, bounded by a deadline.
+   *
+   * These are all sub-second in a healthy repo, so a hang is always
+   * pathological — a stalled credential prompt, a disconnected network share,
+   * a git process wedged behind an antivirus scan. Unbounded, the renderer's
+   * promise simply never settles and the panel spins forever with no error to
+   * act on; that is the failure mode that hid a slow `git lfs ls-files` behind
+   * an empty Overview.
+   *
+   * Deliberately NOT applied to writes: a checkout that smudges 40k LFS
+   * objects, a fetch, or an `lfs migrate` legitimately runs for many minutes,
+   * and those already stream progress so the user can see they are alive.
+   *
+   * dugite gives no handle to kill the underlying process, so this frees the
+   * UI rather than the subprocess — the orphan finishes on its own.
+   */
+  const handleRead = <TArgs extends unknown[]>(channel: string, fn: IpcHandler<TArgs>): void => {
+    handle(channel, async (event, ...args) =>
+      withTimeout(Promise.resolve(fn(event, ...(args as TArgs))), READ_TIMEOUT_MS, channel))
+  }
+
   const runGitOp = async <T>(op: string, fn: () => Promise<T>): Promise<T> => {
     try {
       return await fn()
@@ -177,15 +204,15 @@ export function registerHandlers(): void {
   })
 
   // ── Git — Phase 2 ──────────────────────────────────────────────────────────
-  handle(CHANNELS.GIT_IS_REPO, async (_event, repoPath: string) => {
+  handleRead(CHANNELS.GIT_IS_REPO, async (_event, repoPath: string) => {
     return gitService.isRepo(repoPath)
   })
 
-  handle(CHANNELS.GIT_STATUS, async (_event, repoPath: string) => {
+  handleRead(CHANNELS.GIT_STATUS, async (_event, repoPath: string) => {
     return gitService.status(repoPath)
   })
 
-  handle(CHANNELS.GIT_CURRENT_BRANCH, async (_event, repoPath: string) => {
+  handleRead(CHANNELS.GIT_CURRENT_BRANCH, async (_event, repoPath: string) => {
     return gitService.currentBranch(repoPath)
   })
 
@@ -267,16 +294,16 @@ export function registerHandlers(): void {
     return result
   })
 
-  handle(CHANNELS.GIT_LOG, async (_event, repoPath: string, args?: { limit?: number; all?: boolean; filePath?: string; refs?: string[] }) => {
+  handleRead(CHANNELS.GIT_LOG, async (_event, repoPath: string, args?: { limit?: number; all?: boolean; filePath?: string; refs?: string[] }) => {
     return gitService.log(repoPath, args)
   })
 
-  handle(CHANNELS.GIT_CHANGELOG, async (_event, repoPath: string, query: { fromDate?: string; toDate?: string; fromCommit?: string; toCommit?: string; ref?: string }) => {
+  handleRead(CHANNELS.GIT_CHANGELOG, async (_event, repoPath: string, query: { fromDate?: string; toDate?: string; fromCommit?: string; toCommit?: string; ref?: string }) => {
     await requireAdmin(repoPath)
     return gitService.changelog(repoPath, query ?? {})
   })
 
-  handle(CHANNELS.GIT_BRANCH_LIST, async (_event, repoPath: string) => {
+  handleRead(CHANNELS.GIT_BRANCH_LIST, async (_event, repoPath: string) => {
     return gitService.branchList(repoPath)
   })
 
@@ -303,11 +330,11 @@ export function registerHandlers(): void {
     return gitService.deleteRemoteBranch(repoPath, remoteName, branch)
   })
 
-  handle(CHANNELS.GIT_REMOTE_URL, async (_event, repoPath: string) => {
+  handleRead(CHANNELS.GIT_REMOTE_URL, async (_event, repoPath: string) => {
     return gitService.getRemoteUrl(repoPath)
   })
 
-  handle(CHANNELS.GIT_SYNC_STATUS, async (_event, repoPath: string) => {
+  handleRead(CHANNELS.GIT_SYNC_STATUS, async (_event, repoPath: string) => {
     return gitService.getSyncStatus(repoPath)
   })
 
@@ -326,7 +353,7 @@ export function registerHandlers(): void {
     return gitService.updateFromMainConflicts(repoPath)
   })
 
-  handle(CHANNELS.GIT_DIFF, async (_event, repoPath: string, filePath: string, staged: boolean) => {
+  handleRead(CHANNELS.GIT_DIFF, async (_event, repoPath: string, filePath: string, staged: boolean) => {
     return gitService.diff(repoPath, filePath, staged)
   })
 
@@ -394,7 +421,7 @@ export function registerHandlers(): void {
     return gitService.isHeadPushed(repoPath)
   })
 
-  handle(CHANNELS.GIT_DIFF_RAW, async (_event, repoPath: string, filePath: string, staged: boolean) => {
+  handleRead(CHANNELS.GIT_DIFF_RAW, async (_event, repoPath: string, filePath: string, staged: boolean) => {
     return gitService.diffRaw(repoPath, filePath, staged)
   })
 
@@ -485,7 +512,7 @@ export function registerHandlers(): void {
   })
 
 // ── Locks — Phase 5 ───────────────────────────────────────────────────────
-  handle(CHANNELS.LOCK_LIST, async (_event, repoPath: string) => {
+  handleRead(CHANNELS.LOCK_LIST, async (_event, repoPath: string) => {
     return lockService.listLocks(repoPath)
   })
 
@@ -540,11 +567,8 @@ export function registerHandlers(): void {
     })
   })
 
-  handle(CHANNELS.LFS_STATUS, async (_event, repoPath: string) => {
-    // `git lfs ls-files -s` stats every LFS object, which on a large Unreal
-    // repo runs for minutes. Bound it so callers that batch this alongside
-    // other probes (the Overview refresh) report "LFS —" instead of stalling.
-    return withTimeout(gitService.lfsStatus(repoPath), 30_000, 'lfsStatus')
+  handleRead(CHANNELS.LFS_STATUS, async (_event, repoPath: string) => {
+    return gitService.lfsStatus(repoPath)
   })
 
   handle(CHANNELS.LFS_TRACK, async (_event, repoPath: string, patterns: string[]) => {
@@ -839,19 +863,19 @@ export function registerHandlers(): void {
     return withUndo(repoPath, 'reset', 'Reset', () => runGitOp('Reset', () => gitService.resetTo(repoPath, hash, mode)))
   })
 
-  handle(CHANNELS.GIT_FILE_LOG, (_event, repoPath: string, filePath: string, limit?: number) =>
+  handleRead(CHANNELS.GIT_FILE_LOG, (_event, repoPath: string, filePath: string, limit?: number) =>
     gitService.log(repoPath, { limit: limit ?? 100, filePath })
   )
 
-  handle(CHANNELS.GIT_BRANCH_ACTIVITY, (_event, repoPath: string) =>
+  handleRead(CHANNELS.GIT_BRANCH_ACTIVITY, (_event, repoPath: string) =>
     gitService.branchActivity(repoPath)
   )
 
-  handle(CHANNELS.GIT_BRANCH_DIFF, (_event, repoPath: string, base: string, compare: string) =>
+  handleRead(CHANNELS.GIT_BRANCH_DIFF, (_event, repoPath: string, base: string, compare: string) =>
     gitService.branchDiff(repoPath, base, compare)
   )
 
-  handle(CHANNELS.GIT_DEFAULT_BRANCH, (_event, repoPath: string) =>
+  handleRead(CHANNELS.GIT_DEFAULT_BRANCH, (_event, repoPath: string) =>
     gitService.defaultBranch(repoPath)
   )
 
@@ -859,7 +883,7 @@ export function registerHandlers(): void {
     gitService.blame(repoPath, filePath, rev)
   )
 
-  handle(CHANNELS.GIT_DIFF_COMMIT, (_event, repoPath: string, filePath: string, hash: string) =>
+  handleRead(CHANNELS.GIT_DIFF_COMMIT, (_event, repoPath: string, filePath: string, hash: string) =>
     gitService.diffCommit(repoPath, filePath, hash)
   )
 

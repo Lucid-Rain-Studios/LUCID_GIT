@@ -944,8 +944,31 @@ class GitService {
 
   /** Return the URL of the 'origin' remote, or null if not set. */
   async getRemoteUrl(repoPath: string): Promise<string | null> {
-    const res = await execSafe(['remote', 'get-url', 'origin'], repoPath)
-    return res.exitCode === 0 ? res.stdout.trim() : null
+    const key = path.resolve(repoPath).toLowerCase()
+    const cached = this._remoteUrlCache.get(key)
+    if (cached && Date.now() - cached.ts < GitService.REMOTE_URL_TTL) return cached.value
+
+    // The in-flight promise is cached, not just its result: a single Overview
+    // refresh asks ten different callers for this URL at once, and without
+    // sharing the promise each one spawns its own `git remote get-url`.
+    const pending = this._remoteUrlInFlight.get(key)
+    if (pending) return pending
+
+    const request = execSafe(['remote', 'get-url', 'origin'], repoPath)
+      .then(res => {
+        const value = res.exitCode === 0 ? res.stdout.trim() : null
+        this._remoteUrlCache.set(key, { ts: Date.now(), value })
+        return value
+      })
+      .finally(() => { this._remoteUrlInFlight.delete(key) })
+
+    this._remoteUrlInFlight.set(key, request)
+    return request
+  }
+
+  /** Drop the cached origin URL — call if the remote is reconfigured. */
+  invalidateRemoteUrl(repoPath: string): void {
+    this._remoteUrlCache.delete(path.resolve(repoPath).toLowerCase())
   }
 
   /** Return ahead/behind counts for HEAD vs its upstream. */
@@ -2148,6 +2171,14 @@ class GitService {
   // ── Cleanup ───────────────────────────────────────────────────────────────
 
   // TTL caches so repeated callers (OverviewPanel refresh, GC before/after) don't re-scan
+  // origin's URL is read on nearly every git operation (authenticatedArgs) and
+  // by ~10 renderer call sites per refresh, at ~50ms a spawn, for a value that
+  // nothing in the app ever changes. Short TTL so a remote reconfigured outside
+  // Lucid Git is still picked up promptly.
+  private _remoteUrlCache = new Map<string, { ts: number; value: string | null }>()
+  private _remoteUrlInFlight = new Map<string, Promise<string | null>>()
+  private static readonly REMOTE_URL_TTL = 5 * 60 * 1000 // 5 minutes
+
   private _sizeCache = new Map<string, { ts: number; result: SizeBreakdown }>()
   private _lfsCache  = new Map<string, { ts: number; result: LFSStatus }>()
   private static readonly SIZE_TTL = 2  * 60 * 1000 // 2 minutes
