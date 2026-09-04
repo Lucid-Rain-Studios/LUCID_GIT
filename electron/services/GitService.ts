@@ -156,26 +156,72 @@ function sumPointerSizes(raw: string): number {
 // locks and are unaffected either way.
 const NO_OPTIONAL_LOCKS = '--no-optional-locks'
 
+interface MergeTreeReport {
+  /** Paths git could not merge on its own. */
+  conflicts: string[]
+  /** Labels git attached to each path, e.g. "CONFLICT (binary)". */
+  kindsByPath: Map<string, string[]>
+}
+
 /**
- * Pull the conflicted paths out of `git merge-tree --write-tree -z --name-only`.
+ * Parse `git merge-tree --write-tree -z --name-only`.
  *
- * The output is NUL-separated sections: the merged tree's OID, then the
- * conflicted paths, then an empty field, then human-readable messages. Returns
- * null when the first field is not an object id — git exits 1 both for "this
- * merge conflicts" and for "that ref does not exist", and only the presence of
- * a tree tells the two apart.
+ * NUL-separated, in three parts: the merged tree's OID, the conflicted paths,
+ * an empty field, then one record per informational message shaped
+ * `<path-count> <path>… <label> <message>`. A path can appear in several
+ * records — a conflicted .umap collects "CONFLICT (binary)", "Auto-merging"
+ * and "CONFLICT (contents)" — so labels accumulate per path.
+ *
+ * Returns null when the first field is not an object id: git exits 1 both for
+ * "this merge conflicts" and for "that ref does not exist", and only the
+ * presence of a tree tells the two apart.
  */
-function parseMergeTreeConflicts(stdout: string): string[] | null {
+function parseMergeTree(stdout: string): MergeTreeReport | null {
   const fields = stdout.split('\0')
   if (!/^[0-9a-f]{40,64}$/.test(fields[0]?.trim() ?? '')) return null
 
   const conflicts: string[] = []
-  for (let i = 1; i < fields.length; i++) {
-    const field = fields[i]
-    if (field === '') break          // separator: messages follow, not paths
-    conflicts.push(field)
+  let i = 1
+  for (; i < fields.length; i++) {
+    if (fields[i] === '') { i++; break }   // separator: messages follow
+    conflicts.push(fields[i])
   }
-  return conflicts
+
+  const kindsByPath = new Map<string, string[]>()
+  while (i < fields.length) {
+    const count = Number.parseInt(fields[i], 10)
+    if (!Number.isFinite(count) || count < 0) break
+    i++
+    const paths = fields.slice(i, i + count)
+    i += count
+    const label = fields[i]; i++   // e.g. "CONFLICT (binary)", "Auto-merging"
+    i++                            // the human-readable message itself
+    if (!label) continue
+    for (const p of paths) {
+      const seen = kindsByPath.get(p)
+      if (seen) seen.push(label)
+      else kindsByPath.set(p, [label])
+    }
+  }
+
+  return { conflicts, kindsByPath }
+}
+
+/**
+ * Reduce git's conflict labels for one path to the three kinds the merge UI
+ * draws. A path often carries several; the most specific wins, since "this
+ * file was deleted on one side" is more useful to show than "contents differ".
+ */
+function conflictKindFrom(labels: string[] | undefined, filePath: string): ConflictPreviewFile['conflictType'] {
+  const all = (labels ?? []).join(' ').toLowerCase()
+  if (all.includes('delete')) return 'delete-modify'      // modify/delete, rename/delete
+
+  // Git reports "contents" for a binary file whenever .gitattributes has not
+  // told it the file is binary, and it will happily produce a text merge of a
+  // .uasset. The extension is the authority for how the user can resolve it:
+  // no one hand-edits conflict markers in a UE asset, whatever git attempted.
+  if (all.includes('binary')) return 'binary'
+  return BINARY_EXTS.has(path.extname(filePath).toLowerCase()) ? 'binary' : 'content'
 }
 
 interface LfsTotals {
@@ -1409,7 +1455,7 @@ class GitService {
         ['merge-tree', '--write-tree', '-z', '--name-only', base, branch.name],
         repoPath,
       )
-      const parsed = parseMergeTreeConflicts(merge.stdout)
+      const parsed = parseMergeTree(merge.stdout)?.conflicts
       if (!parsed) {
         // A missing ref exits 1 exactly like a conflict does, so the tree OID
         // on stdout — not the exit code — is what says the merge really ran.
@@ -1875,7 +1921,25 @@ class GitService {
     await checkout(['checkout', branch])
   }
 
-  /** Dry-run merge: returns files that would conflict. Does not modify the working tree. */
+  /**
+   * Dry-run merge: the files that would actually conflict. Nothing is checked
+   * out, no index is written, no lock is taken.
+   *
+   * This used to approximate the answer — any path changed on both sides since
+   * the merge base was reported as a conflict. On a project of binary assets
+   * that approximation is usually right, because two edits to one `.uasset`
+   * genuinely cannot merge. It is wrong in both directions elsewhere, and both
+   * are covered by tests: two people editing different lines of one text file
+   * merge cleanly yet were reported as conflicting, and a file both sides
+   * renamed to different names conflicts for real but shares no path between
+   * the two diffs, so it was reported as no conflict at all.
+   *
+   * `merge-tree --write-tree` (Git 2.38) runs the merge in memory instead, so
+   * this now reports git's own outcome — including the rename, directory/file
+   * and add/add cases the path intersection could never see — and labels each
+   * conflict the way git classified it rather than guessing from the file
+   * extension.
+   */
   async mergePreview(repoPath: string, targetBranch: string, baseBranch?: string): Promise<ConflictPreviewFile[]> {
     const targetRef = await this.resolveBranchRef(repoPath, targetBranch)
     // "Ours" side: an explicit base branch (e.g. a PR's base branch) when one
@@ -1884,58 +1948,44 @@ class GitService {
     // on an unrelated branch.
     const ourRef = baseBranch ? await this.resolveBranchRef(repoPath, baseBranch) : 'HEAD'
 
-    // 1. Find the common ancestor
+    // Checked first purely for the error message: merge-tree also fails on
+    // unrelated histories, but only says the merge could not be computed.
     const baseRes = await execSafe(['merge-base', ourRef, targetRef], repoPath)
     if (baseRes.exitCode !== 0) throw new Error(`Could not find merge base with "${targetBranch}"`)
-    const base = baseRes.stdout.trim()
 
-    // 2. Files changed on each side since the merge base
-    const [oursRes, theirsRes] = await Promise.all([
-      execSafe(['diff', '--name-status', base, ourRef], repoPath),
-      execSafe(['diff', '--name-status', base, targetRef], repoPath),
-    ])
-
-    const parseNameStatus = (out: string): Map<string, string> => {
-      const m = new Map<string, string>()
-      for (const line of out.trim().split('\n')) {
-        const parts = line.trim().split('\t')
-        if (parts.length >= 2) {
-          // Rename lines look like "R100\told\tnew" — use the new name
-          const filePath = parts[parts.length - 1]
-          const status   = parts[0][0]  // first char: M A D R C
-          if (filePath) m.set(filePath, status)
-        }
-      }
-      return m
+    const mergeRes = await execSafe(
+      ['merge-tree', '--write-tree', '-z', '--name-only', ourRef, targetRef],
+      repoPath,
+    )
+    const report = parseMergeTree(mergeRes.stdout)
+    if (!report) {
+      // Exit 1 means "conflicts" and "bad ref" alike, so the absence of a tree
+      // on stdout is what distinguishes a failure from a conflicted merge.
+      const detail = (mergeRes.stderr || mergeRes.stdout).trim().split('\n')[0] ?? ''
+      throw new Error(`Could not compute a merge with "${targetBranch}"${detail ? `: ${detail}` : ''}`)
     }
-
-    const oursMap   = parseNameStatus(oursRes.stdout)
-    const theirsMap = parseNameStatus(theirsRes.stdout)
 
     const UE_EXTS = new Set(['.uasset', '.umap', '.udk', '.ubulk', '.uexp', '.ucas'])
     const ourLabel = baseBranch ?? await this.currentBranch(repoPath)
 
     const conflicts: ConflictPreviewFile[] = []
-    for (const [filePath, oursStatus] of oursMap) {
-      if (!theirsMap.has(filePath)) continue   // only one side changed it — no conflict
-      const theirsStatus = theirsMap.get(filePath)!
-
-      const ext    = path.extname(filePath).toLowerCase()
-      const isBin  = BINARY_EXTS.has(ext)
+    for (const filePath of report.conflicts) {
+      const ext = path.extname(filePath).toLowerCase()
       const type: ConflictPreviewFile['type'] = UE_EXTS.has(ext) ? 'ue-asset'
-        : isBin ? 'binary' : 'text'
-
-      const conflictType: ConflictPreviewFile['conflictType'] =
-        (oursStatus === 'D' || theirsStatus === 'D') ? 'delete-modify'
-        : isBin ? 'binary'
-        : 'content'
+        : BINARY_EXTS.has(ext) ? 'binary' : 'text'
 
       const [oursInfo, theirsInfo] = await Promise.all([
         this._contributorInfo(repoPath, filePath, ourRef, ourLabel),
         this._contributorInfo(repoPath, filePath, targetRef, targetBranch),
       ])
 
-      conflicts.push({ path: filePath, type, conflictType, ours: oursInfo, theirs: theirsInfo })
+      conflicts.push({
+        path: filePath,
+        type,
+        conflictType: conflictKindFrom(report.kindsByPath.get(filePath), filePath),
+        ours: oursInfo,
+        theirs: theirsInfo,
+      })
     }
 
     return conflicts
