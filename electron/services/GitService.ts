@@ -192,7 +192,27 @@ class GitService {
     const cmdArgs = [...gitAuthArgs(token, args.url), 'clone', '--progress']
     if (args.depth) cmdArgs.push('--depth', String(args.depth))
     cmdArgs.push(args.url, args.dir)
-    await execWithProgress(cmdArgs, process.cwd(), onProgress)
+
+    try {
+      await execWithProgress(cmdArgs, process.cwd(), onProgress)
+    } catch (error) {
+      if (!this.isCloneHookProtectionError(error)) throw error
+      // Git refuses to run a hook that becomes active mid-clone (its
+      // CVE-2024-32002 hardening) — and git-lfs's own post-checkout hook
+      // self-installs via exactly that path the first time an LFS-tracked
+      // repo is cloned. The objects are already fetched at this point; only
+      // the checkout step failed. Re-installing the hook through a trusted
+      // command and replaying the checkout is git's own documented
+      // recovery (see the error text), and leaves the protection intact
+      // for anything that isn't git-lfs's known hook.
+      await execSafe(['lfs', 'install', '--local'], args.dir)
+      await execWithProgress(['restore', '--source=HEAD', ':/'], args.dir, onProgress)
+    }
+  }
+
+  private isCloneHookProtectionError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error)
+    return message.includes('active `post-checkout` hook found during `git clone`')
   }
 
   /** git status --porcelain=v1 */

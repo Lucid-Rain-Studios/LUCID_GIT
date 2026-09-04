@@ -192,6 +192,7 @@ export const CHANNELS = {
   GITHUB_PR_FILES:  'github:pr-files',
   GITHUB_MERGE_PR:  'github:merge-pr',
   GITHUB_CLOSE_PR:  'github:close-pr',
+  GITHUB_LIST_REPOS: 'github:list-repos',
 
   // PR Monitor — tracks open PRs and notifies on merge/close
   PR_MONITOR_START:  'pr-monitor:start',

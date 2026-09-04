@@ -382,6 +382,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GITHUB_MERGE_PR, args),
   githubClosePR: (args: { owner: string; repo: string; prNumber: number }) =>
     ipcRenderer.invoke(CHANNELS.GITHUB_CLOSE_PR, args),
+  githubListRepos: () =>
+    ipcRenderer.invoke(CHANNELS.GITHUB_LIST_REPOS),
 
   // ── PR Monitor ────────────────────────────────────────────────────────────
   prMonitorStart:  (repoPath: string) =>

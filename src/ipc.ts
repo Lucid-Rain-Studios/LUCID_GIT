@@ -615,6 +615,16 @@ export interface PullRequest {
   updatedAt: string
 }
 
+export interface GitHubRepo {
+  fullName: string
+  name: string
+  owner: string
+  private: boolean
+  cloneUrl: string
+  description: string | null
+  updatedAt: string
+}
+
 // ── Permissions (Phase 20) ────────────────────────────────────────────────────
 
 export type RepoPermission = 'admin' | 'write' | 'read'
@@ -842,6 +852,7 @@ export interface LucidGitAPI {
   githubPrFiles:  (args: { owner: string; repo: string; prNumber: number }) => Promise<string[]>
   githubMergePR:  (args: { owner: string; repo: string; prNumber: number; repoPath: string }) => Promise<void>
   githubClosePR:  (args: { owner: string; repo: string; prNumber: number }) => Promise<void>
+  githubListRepos: () => Promise<GitHubRepo[]>
 
   // PR Monitor
   prMonitorStart:  (repoPath: string) => Promise<void>

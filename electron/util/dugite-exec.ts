@@ -116,6 +116,7 @@ const PROGRESS_PATTERNS: ProgressPattern[] = [
   { regex: /remote:\s+Compressing objects:\s+(\d+)%/i,   id: 'remote-zip',   label: 'Remote: compressing' },
   { regex: /Uploading LFS objects:\s+(\d+)%/i,           id: 'lfs-up',       label: 'Uploading LFS objects' },
   { regex: /Downloading LFS objects:\s+(\d+)%/i,         id: 'lfs-down',     label: 'Downloading LFS objects' },
+  { regex: /Filtering content:\s+(\d+)%/i,               id: 'lfs-filter',   label: 'Downloading LFS content' },
   { regex: /Packing objects:\s+(\d+)%/i,                 id: 'pack',         label: 'Packing objects' },
   { regex: /Pruning loose objects:\s+(\d+)%/i,           id: 'prune-loose',  label: 'Pruning loose objects' },
   { regex: /Updating references:\s+(\d+)%/i,             id: 'update-refs',  label: 'Updating references' },
@@ -179,6 +180,13 @@ async function execWithProgressInner(
         ...process.env,
         GIT_TERMINAL_PROMPT: '0',
         GIT_ASKPASS: 'echo',
+        // git-lfs checks isatty and silently drops its whole progress meter
+        // (both the checkout-time "Filtering content" smudge line and
+        // "Downloading LFS objects" from a plain `lfs pull`) when stdio isn't
+        // a terminal — which a spawned child process never is. Without this,
+        // LFS-heavy clones/pulls (e.g. Unreal projects) go silent for
+        // minutes right after the last native git progress line.
+        GIT_LFS_FORCE_PROGRESS: '1',
       },
     })
 
@@ -202,21 +210,28 @@ async function execWithProgressInner(
       }
     }
 
+    const scanForProgress = (text: string) => {
+      if (!onProgress) return
+      // Git and git-lfs both write multiple progress lines per chunk,
+      // separated by \r or \n
+      for (const line of text.split(/[\r\n]+/)) {
+        const step = parseGitProgress(line)
+        if (step) emitProgress(step)
+      }
+    }
+
     proc.stdout?.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString()
+      const text = chunk.toString()
+      stdout += text
+      // git-lfs's forced progress meter (e.g. `lfs pull`) writes to stdout,
+      // unlike git's own `--progress` output which goes to stderr.
+      scanForProgress(text)
     })
 
     proc.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString()
       stderr += text
-
-      if (onProgress) {
-        // Git writes multiple progress lines per chunk, separated by \r or \n
-        for (const line of text.split(/[\r\n]+/)) {
-          const step = parseGitProgress(line)
-          if (step) emitProgress(step)
-        }
-      }
+      scanForProgress(text)
     })
 
     proc.on('error', reject)

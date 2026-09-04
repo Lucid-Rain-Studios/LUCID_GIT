@@ -27,6 +27,10 @@ asarUnpack:
 # Versioned filenames make GitHub Releases clean
 artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
 
+# Re-signs mac builds ad-hoc when no Developer ID identity is configured —
+# electron-builder otherwise leaves a stale signature that won't launch.
+afterSign: scripts/afterSign.js
+
 compression: maximum
 
 # ── Windows ──────────────────────────────────────────────────────────────────
@@ -59,11 +63,15 @@ mac:
     - target: dmg
       arch: [x64, arm64]          # Intel + Apple Silicon
   icon: assets/icon.icns
-  hardenedRuntime: true            # required for notarization
+  hardenedRuntime: true
   gatekeeperAssess: false
   category: public.app-category.developer-tools
-  # macOS notarization — configure secrets in GitHub when ready:
-  # afterSign: scripts/notarize.js
+  # Unsigned/un-notarized for now — no paid Apple Developer Program membership yet.
+  # Users will need to right-click → Open past the Gatekeeper warning on first launch.
+  # Once you have a Developer ID Application cert + notarization credentials, set
+  # notarize: true here and add the APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD /
+  # APPLE_TEAM_ID / CSC_LINK / CSC_KEY_PASSWORD secrets in GitHub (see release.yml).
+  notarize: false
   entitlementsInherit: assets/entitlements.mac.plist
 
 dmg:

@@ -1040,6 +1040,12 @@ export function registerHandlers(): void {
     return gitHubService.closePR(token, args)
   })
 
+  handle(CHANNELS.GITHUB_LIST_REPOS, async () => {
+    const token = await authService.getCurrentToken()
+    if (!token) throw new Error('Not authenticated with GitHub')
+    return gitHubService.listRepos(token)
+  })
+
   // ── PR Monitor ─────────────────────────────────────────────────────────────
   handle(CHANNELS.PR_MONITOR_START, async (_event, repoPath: string) => {
     return prMonitorService.start(repoPath)
