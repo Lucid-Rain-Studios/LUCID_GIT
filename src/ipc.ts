@@ -755,6 +755,8 @@ export interface LucidGitAPI {
   rebaseAbort: (repoPath: string) => Promise<void>
   setUpstream: (repoPath: string, branch: string) => Promise<void>
   setGitConfig: (repoPath: string, key: string, value: string) => Promise<void>
+  /** Add this repo to git's global safe.directory list; reports whether it now opens. */
+  trustRepoDirectory: (repoPath: string) => Promise<{ trusted: boolean; alreadyTrusted: boolean; value: string }>
   getGitConfig: (repoPath: string, key: string) => Promise<string | null>
 
   // Hooks

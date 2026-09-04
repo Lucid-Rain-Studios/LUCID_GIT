@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3'
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import { exec, execSafe, execWithProgress, execWithStdin, gitAuthArgs, gitOpActivity, waitForGitOpsToDrain, ProgressCallback } from '../util/dugite-exec'
 import { authService } from './AuthService'
@@ -150,10 +151,17 @@ function sumPointerSizes(raw: string): number {
 // never needs the refreshed index written back.
 //
 // Only `status` honours the flag: `git diff` writes its refreshed index
-// regardless (verified against the bundled Git 2.26), so adding it there would
+// regardless (re-verified against the bundled Git 2.43.4), so adding it there would
 // buy nothing. Mandatory locks — add, commit, checkout — are not optional
 // locks and are unaffected either way.
 const NO_OPTIONAL_LOCKS = '--no-optional-locks'
+
+interface LfsTotals {
+  objects: number
+  totalBytes: number
+  /** Exact set of LFS-tracked paths; null when only the slow scan was available. */
+  lfsPaths: Set<string> | null
+}
 
 // ── GitService ────────────────────────────────────────────────────────────────
 
@@ -2536,41 +2544,33 @@ class GitService {
    * git-lfs has already rounded to two decimal places.
    *
    * Falls back to `git lfs ls-files -s` if the attribute pathspec is
-   * unavailable (Git older than 2.18).
+   * unavailable - dugite's bundled Git is well past the 2.18 that added
+   * it, so this only covers the pin being moved backwards.
    */
-  private async lfsObjectTotals(repoPath: string): Promise<{ objects: number; totalBytes: number }> {
+  private async lfsObjectTotals(repoPath: string): Promise<LfsTotals> {
     const listed = await execSafe(['ls-files', '-z', ':(attr:filter=lfs)'], repoPath)
     if (listed.exitCode !== 0) return this.lfsObjectTotalsSlow(repoPath)
 
     const paths = listed.stdout.split('\0').filter(Boolean)
-    if (paths.length === 0) return { objects: 0, totalBytes: 0 }
-
-    // `cat-file --batch` reads one revision per line, and the bundled Git
-    // (2.26) predates the `-z` switch that would take NUL separators instead.
-    // A path containing a newline would therefore split into two bogus
-    // revisions, so those go through one at a time.
-    const batchable = paths.filter(p => !p.includes('\n'))
-    const awkward   = paths.filter(p =>  p.includes('\n'))
+    if (paths.length === 0) return { objects: 0, totalBytes: 0, lfsPaths: new Set() }
 
     // Pointer blobs are ~130 bytes plus a ~50-byte cat-file header, so this
-    // keeps each batch's stdout near 2 MB — well inside dugite's 10 MB buffer.
+    // keeps each batch's stdout near 2 MB - well inside dugite's 10 MB buffer.
+    // `-z` takes NUL-separated revisions (Git 2.36+), so a path containing a
+    // newline stays one revision rather than splitting into two bogus ones.
+    // Output stays LF-delimited either way.
     const BATCH = 10_000
     let totalBytes = 0
-    for (let i = 0; i < batchable.length; i += BATCH) {
-      const stdin = batchable.slice(i, i + BATCH).map(p => `:${p}`).join('\n') + '\n'
-      const batchRes = await execWithStdin(['cat-file', '--batch', '--buffer'], repoPath, stdin)
+    for (let i = 0; i < paths.length; i += BATCH) {
+      const stdin = paths.slice(i, i + BATCH).map(p => `:${p}`).join('\0') + '\0'
+      const batchRes = await execWithStdin(['cat-file', '--batch', '--buffer', '-z'], repoPath, stdin)
       totalBytes += sumPointerSizes(batchRes.stdout)
     }
-    for (const p of awkward) {
-      const one = await execSafe(['cat-file', 'blob', `:${p}`], repoPath)
-      if (one.exitCode === 0) totalBytes += sumPointerSizes(one.stdout)
-    }
-
-    return { objects: paths.length, totalBytes }
+    return { objects: paths.length, totalBytes, lfsPaths: new Set(paths) }
   }
 
-  /** Pre-2.18 fallback: ask git-lfs directly, at the cost of a full object scan. */
-  private async lfsObjectTotalsSlow(repoPath: string): Promise<{ objects: number; totalBytes: number }> {
+  /** Fallback for a Git without attribute pathspecs: ask git-lfs, at the cost of a full scan. */
+  private async lfsObjectTotalsSlow(repoPath: string): Promise<LfsTotals> {
     let objects = 0, totalBytes = 0
     const lsRes = await execSafe(['lfs', 'ls-files', '-s'], repoPath)
     if (lsRes.exitCode === 0 && lsRes.stdout.trim()) {
@@ -2588,7 +2588,7 @@ class GitService {
         }
       }
     }
-    return { objects, totalBytes }
+    return { objects, totalBytes, lfsPaths: null }
   }
 
   /** Parse .gitattributes + count LFS objects + suggest untracked binary exts. Cached 5 min. */
@@ -2610,20 +2610,31 @@ class GitService {
     } catch { /* no .gitattributes */ }
 
     // Count LFS objects and total bytes
-    const { objects, totalBytes } = await this.lfsObjectTotals(repoPath)
+    const { objects, totalBytes, lfsPaths } = await this.lfsObjectTotals(repoPath)
 
-    // Suggest binary extensions in the repo not yet covered by a tracked pattern
+    // Extensions named directly by a `filter=lfs` line. Only a fallback: a
+    // .gitattributes that applies the filter through a macro — `[attr]lfs
+    // filter=lfs` on one line, `*.uasset lfs` on another — carries no
+    // extension on the `filter=lfs` line at all, so every "pattern" found
+    // above is `[attr]lfs` and this set comes out empty. That is the standard
+    // Unreal setup, and judging coverage by it alone reported 43k
+    // already-tracked .uasset files as "not tracked in LFS".
     const trackedExts = new Set(
       tracked.map(p => path.extname(p.split('/').pop() ?? p).toLowerCase()).filter(Boolean)
     )
+
+    // Flag binary extensions present in the repo but genuinely outside LFS.
+    // `lfsPaths` is what git itself resolved the filter to, so an extension is
+    // suggested only when a real file carrying it is not an LFS object. The
+    // slow fallback cannot supply that set and matches on extension instead.
     const untrackedSet = new Set<string>()
     const lsFiles = await execSafe(['ls-files'], repoPath)
     if (lsFiles.exitCode === 0) {
       for (const f of lsFiles.stdout.trim().split('\n').filter(Boolean)) {
         const ext = path.extname(f).toLowerCase()
-        if (ext && BINARY_EXTS.has(ext) && !trackedExts.has(ext)) {
-          untrackedSet.add(`*${ext}`)
-        }
+        if (!ext || !BINARY_EXTS.has(ext)) continue
+        const covered = lfsPaths ? lfsPaths.has(f) : trackedExts.has(ext)
+        if (!covered) untrackedSet.add(`*${ext}`)
       }
     }
 
@@ -2743,6 +2754,49 @@ class GitService {
 
   async setGitConfig(repoPath: string, key: string, value: string): Promise<void> {
     await exec(['config', key, value], repoPath)
+  }
+
+  /**
+   * Add `repoPath` to git's global `safe.directory` list, then confirm the
+   * repository actually opens.
+   *
+   * Git 2.35.2 and later refuse to operate in a repository whose directory is
+   * owned by a different user ("detected dubious ownership"), because the
+   * repository's own config and hooks would otherwise run under this account.
+   * Studio setups trip this constantly — a project drive, a network share, a
+   * clone made by another Windows account.
+   *
+   * The exception has to be `--global`: while git distrusts the repository it
+   * will not read that repository's config, so a local setting can never take
+   * effect. For the same reason this runs from the home directory, so git
+   * never attempts repository discovery inside the distrusted path.
+   *
+   * Only ever adds the one specific path. A wildcard would switch the
+   * protection off for every repository on the machine.
+   */
+  async trustRepoDirectory(repoPath: string): Promise<{ trusted: boolean; alreadyTrusted: boolean; value: string }> {
+    const home = os.homedir()
+    // Git writes this path with forward slashes on Windows and compares
+    // against the same normalised form, so match it rather than the
+    // backslashed path the renderer holds.
+    const value = path.resolve(repoPath).replace(/\\/g, '/')
+
+    const existing = await execSafe(['config', '--global', '--get-all', 'safe.directory'], home)
+    const entries = existing.exitCode === 0
+      ? existing.stdout.split('\n').map(l => l.trim()).filter(Boolean)
+      : []
+    const alreadyTrusted = entries.some(e => e === value || e === '*')
+
+    if (!alreadyTrusted) {
+      // --add: safe.directory is multi-valued, and plain `config` would
+      // replace whatever exceptions the user already relies on.
+      await exec(['config', '--global', '--add', 'safe.directory', value], home)
+    }
+
+    // Report what actually happened rather than assuming the write was enough:
+    // the directory can be untrusted for a reason this does not address.
+    const check = await execSafe(['rev-parse', '--git-dir'], repoPath)
+    return { trusted: check.exitCode === 0, alreadyTrusted, value }
   }
 
   async getGitConfig(repoPath: string, key: string): Promise<string | null> {

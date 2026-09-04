@@ -701,6 +701,13 @@ export function registerHandlers(): void {
     gitService.getGitConfig(repoPath, key)
   )
 
+  // Writes a global git setting that relaxes a security check, so it stays a
+  // plain handler the user reaches through an explicit fix button — never part
+  // of any automatic recovery path.
+  handle(CHANNELS.GIT_TRUST_DIR, (_event, repoPath: string) =>
+    gitService.trustRepoDirectory(repoPath)
+  )
+
   handle(CHANNELS.GIT_GET_GLOBAL_IDENTITY, () =>
     gitService.getGlobalGitIdentity()
   )

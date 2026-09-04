@@ -92,6 +92,20 @@ export function ErrorPanel({ onReauth, onNavigateTab, onOpenMergeResolver }: Err
           setAutoFixResult(`Lock cache cleared — ${locks.length} lock${locks.length !== 1 ? 's' : ''} refreshed from the server.`)
           break
         }
+
+        case 'trust-repo-directory': {
+          const res = await ipc.trustRepoDirectory(repoPath)
+          // The service re-opens the repo before answering, so this reports
+          // what is actually true rather than that a command was run.
+          if (res.trusted) {
+            setAutoFixResult(res.alreadyTrusted
+              ? `${res.value} was already trusted — the repository opens now. If this keeps happening, something else is changing the folder's owner.`
+              : `Trusted ${res.value}. The repository opens now — retry what you were doing.`)
+          } else {
+            setAutoFixResult(`Added ${res.value} to safe.directory, but git still will not open the repository. The cause is something other than folder ownership — see the git output above.`)
+          }
+          break
+        }
       }
     } catch (e) {
       setAutoFixResult(`Fix failed: ${String(e)}`)

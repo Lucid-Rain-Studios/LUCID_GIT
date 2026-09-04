@@ -14,6 +14,7 @@ export type FixAction =
   | { type: 'increase-buffer' }
   | { type: 'retry-with-ssh' }
   | { type: 'clear-lock-cache' }
+  | { type: 'trust-repo-directory' }
 
 export interface FixStep {
   label: string
@@ -48,6 +49,29 @@ interface ErrorDef {
 }
 
 const DEFS: ErrorDef[] = [
+  {
+    // Git 2.35.2+ refuses a repository whose folder belongs to another user.
+    // Studios hit this constantly — project drives, network shares, a clone
+    // made under a different Windows account — and before this entry the raw
+    // git text was all the user got.
+    code: 'DUBIOUS_OWNERSHIP',
+    test: /detected dubious ownership|unsafe repository|owned by someone else/i,
+    title: 'Repository owned by another user',
+    description: "Git will not open this repository because its folder belongs to a different user account than the one running Lucid Git. Git blocks this by default, because a repository's own config and hooks would otherwise run under your account. If this is a project you recognise — a team share, a drive from another PC — trusting it is safe and takes one click.",
+    causes: [
+      'The project lives on a shared drive or network share owned by another account',
+      'It was cloned by a different Windows user on this machine, or by a build agent or installer',
+      'The folder was restored from a backup or copied from another PC',
+      'Your Git was recently updated — this check did not exist before Git 2.35',
+    ],
+    severity: 'error',
+    canAutoFix: true,
+    fixes: [
+      { label: 'Trust this repository — adds only this folder to git\'s global safe.directory list', action: { type: 'trust-repo-directory' } },
+      { label: 'Or run it yourself, using the exact path git printed above', command: 'git config --global --add safe.directory <path>' },
+      { label: 'If you do not recognise this project, do not trust it — check who owns the folder first' },
+    ],
+  },
   {
     code: 'DISK_SPACE',
     test: /no space left|disk quota exceeded|ENOSPC|not enough space/i,

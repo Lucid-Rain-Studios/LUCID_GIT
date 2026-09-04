@@ -104,6 +104,7 @@ export const CHANNELS = {
   GIT_SET_UPSTREAM:  'git:set-upstream',
   GIT_SET_CONFIG:    'git:set-config',
   GIT_GET_CONFIG:    'git:get-config',
+  GIT_TRUST_DIR:     'git:trust-directory',
 
   // Hooks
   HOOK_LIST:            'hook:list',
