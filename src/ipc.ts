@@ -794,7 +794,7 @@ export interface LucidGitAPI {
   } | null>
   cherryPickContinue: (repoPath: string) => Promise<void>
   cherryPickAbort: (repoPath: string) => Promise<void>
-  getIndexLockInfo: (repoPath: string) => Promise<{ path: string; ageSeconds: number } | null>
+  getIndexLockInfo: (repoPath: string) => Promise<{ path: string; ageSeconds: number; mtimeMs: number } | null>
   removeIndexLock: (repoPath: string) => Promise<boolean>
   aheadFilePaths: (repoPath: string) => Promise<string[]>
   gitResetTo: (repoPath: string, hash: string, mode: 'soft' | 'mixed' | 'hard') => Promise<void>

@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import fs from 'fs'
 import path from 'path'
-import { exec, execSafe, execWithProgress, execWithStdin, gitAuthArgs, ProgressCallback } from '../util/dugite-exec'
+import { exec, execSafe, execWithProgress, execWithStdin, gitAuthArgs, gitOpActivity, ProgressCallback } from '../util/dugite-exec'
 import { authService } from './AuthService'
 import { logService } from './LogService'
 import { parseGitLog, GIT_LOG_FORMAT } from '../util/git-log-parse'
@@ -10,6 +10,11 @@ import { FileStatus, BranchInfo, CommitEntry, ChangelogEntry, ChangelogQuery, Di
 // Brief fallback delay for a genuinely concurrent repack. Persistent missing
 // indexes are repaired directly before this delay is considered.
 const STALE_PACK_RETRY_DELAY_MS = 2000
+
+// A .git/index.lock this old was left behind by a process that is no longer
+// writing — git removes its own lock within milliseconds of finishing. Matches
+// the threshold the cherry-pick conflict dialog uses for its manual prompt.
+const STALE_INDEX_LOCK_S = 5
 
 // ── Diff helpers ──────────────────────────────────────────────────────────────
 
@@ -249,6 +254,11 @@ class GitService {
     const MAX_SKIPS = 20
     const skipped: string[] = []
     let remaining = paths
+    // A crashed git/git-lfs subprocess leaves .git/index.lock behind and every
+    // later index write fails until it is gone. Clear it once, for a lock old
+    // enough that nothing can still be writing it, rather than making the user
+    // stage, fail, and hunt for the file by hand.
+    let indexLockCleared = false
     try {
       while (remaining.length > 0) {
         try {
@@ -259,6 +269,11 @@ class GitService {
           )
           break
         } catch (err) {
+          if (!indexLockCleared && this.isStaleIndexLockError(err)) {
+            indexLockCleared = true
+            if (await this.clearStaleIndexLock(repoPath)) continue
+            throw err
+          }
           const msg = err instanceof Error ? err.message : String(err)
           const bad = msg.match(/Unable to process path (.+?)\s*$/m)?.[1]
           if (bad === undefined || !remaining.includes(bad) || skipped.length >= MAX_SKIPS) throw err
@@ -537,8 +552,7 @@ class GitService {
         onProgress,
       )
     } catch (error) {
-      if (!this.shouldRunLfsRecovery(error)) throw error
-      await this.recoverLfsAndMergeState(repoPath)
+      if (!await this.recoverForRetry(repoPath, error)) throw error
       const remoteUrl = await this.getRemoteUrl(repoPath)
       await execWithProgress([...gitAuthArgs(token, remoteUrl), 'pull', '--progress'], repoPath, onProgress)
     }
@@ -949,21 +963,145 @@ class GitService {
     try {
       await this.withStalePackRetry(repoPath, () => execWithProgress(mergeArgs, repoPath, onProgress), onProgress)
     } catch (error) {
-      if (!this.shouldRunLfsRecovery(error)) throw error
-      await this.recoverLfsAndMergeState(repoPath)
+      if (!await this.recoverForRetry(repoPath, error)) throw error
       await execWithProgress(mergeArgs, repoPath, onProgress)
     }
   }
 
-  private async runWithLfsRecovery(repoPath: string, args: string[]): Promise<void> {
+  /**
+   * Run a git command, repairing the Git LFS state that most often makes an
+   * otherwise-successful command exit non-zero, then retrying once.
+   *
+   * `options.alreadyDone` lets a caller declare the work complete without a
+   * retry — a corrupt lock cache fails git-lfs *after* git finished its own
+   * work, so the command's effect is already on disk and re-running the exact
+   * same args can fail for a second, unrelated reason (`checkout --track -b`
+   * on a branch that now exists). `options.retryArgs` supplies an idempotent
+   * form of the command for the cases where a retry is still wanted.
+   */
+  private async runWithLfsRecovery(
+    repoPath: string,
+    args: string[],
+    options: { retryArgs?: () => Promise<string[]>; alreadyDone?: () => Promise<boolean> } = {},
+  ): Promise<void> {
     try {
       // Wrapped here rather than at the call sites (checkout / merge / conflict
       // resolution) so they all get the retry without nesting two of them.
       await this.withStalePackRetry(repoPath, () => exec(args, repoPath))
+      return
     } catch (error) {
-      if (!this.shouldRunLfsRecovery(error)) throw error
+      if (!await this.recoverForRetry(repoPath, error)) throw error
+      if (options.alreadyDone && await options.alreadyDone()) return
+      await exec(options.retryArgs ? await options.retryArgs() : args, repoPath)
+    }
+  }
+
+  /**
+   * Repair the repository state behind `error` and report whether re-running
+   * the command is worth it. Returns false for anything we cannot fix, so the
+   * caller rethrows the original failure untouched.
+   */
+  private async recoverForRetry(repoPath: string, error: unknown): Promise<boolean> {
+    // Real conflicts are the caller's to resolve, and a second run of the same
+    // command would report "you have not concluded your merge" instead, hiding
+    // what actually needs attention.
+    if (this.isMergeConflictError(error)) return false
+
+    const lockCacheFailure = this.isLfsLockCacheError(error)
+    const indexLockFailure = this.isStaleIndexLockError(error)
+
+    if (lockCacheFailure) {
+      // git-lfs cannot open its lock database, so every command it filters
+      // exits non-zero even though git itself succeeded. The cache is a pure
+      // rebuild-on-demand artefact — deleting it is safe, and is exactly what
+      // the "Clear Lock Cache" maintenance action does.
+      const cleared = await this.clearLfsLockCache(repoPath)
+      logService.warn(
+        'git.lfs-lock-cache-recovery',
+        `Cleared ${cleared} unreadable Git LFS lock cache file(s) after:\n${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+
+    if (lockCacheFailure || indexLockFailure) {
+      // A git or git-lfs subprocess that died mid-write leaves index.lock
+      // behind, and every later index write fails until it is removed. Only a
+      // lock old enough that nothing can still own it is cleared; a fresh one
+      // is left for the caller to surface, since removing it during a real
+      // write corrupts the index.
+      const removed = await this.clearStaleIndexLock(repoPath)
+      return !indexLockFailure || removed
+    }
+
+    if (this.shouldRunLfsRecovery(error)) {
       await this.recoverLfsAndMergeState(repoPath)
-      await exec(args, repoPath)
+      return true
+    }
+
+    return false
+  }
+
+  /**
+   * git-lfs failed to open `.git/lfs/lockcache.db`. This is reported on stderr
+   * and turns the exit code non-zero, but git's own work (the checkout, the
+   * merge) has already been written to disk by the time it fires.
+   */
+  private isLfsLockCacheError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
+    return (
+      message.includes('unable to create lock system') ||
+      message.includes('init lock cache') ||
+      message.includes('lockcache.db')
+    )
+  }
+
+  /** `fatal: Unable to create '<path>/index.lock': File exists.` */
+  private isStaleIndexLockError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error)
+    return /unable to create '.*index\.lock'.*file exists/is.test(message)
+  }
+
+  /**
+   * Remove an orphaned `.git/index.lock`. Returns false — leaving the lock in
+   * place — when it may belong to a live writer, so callers surface the
+   * failure instead of racing it.
+   *
+   * Age alone is not enough to decide. A lock our own crashed git/git-lfs
+   * subprocess left one second ago is indistinguishable by age from one Unreal
+   * created one second ago, and inside an active flow (resolve conflict →
+   * `git add`) the orphan never gets a chance to age out — the user just loops
+   * on the same error, because the command that trips over the lock is never
+   * the command that created it. So ownership is the primary test: a lock
+   * whose mtime falls inside a window where one of our own git processes was
+   * running belongs to us, and once none of ours are in flight it is orphaned.
+   * Age remains the fallback for locks predating this app session.
+   */
+  private async clearStaleIndexLock(repoPath: string): Promise<boolean> {
+    // Snapshot before any further git command — `getIndexLockInfo` runs
+    // rev-parse, which would otherwise show up as one of our in-flight
+    // processes and as a run window of its own.
+    const ops = gitOpActivity(repoPath)
+
+    const info = await this.getIndexLockInfo(repoPath)
+    if (!info) return true            // nothing to clear; retry is unblocked
+
+    // Anything of ours still running means the lock may be legitimately held
+    // by that process — never touch it.
+    const ourProcessOrphaned = ops.inFlight === 0 && ops.ranDuring(info.mtimeMs)
+
+    const agedOut = info.ageSeconds >= STALE_INDEX_LOCK_S
+    if (!ourProcessOrphaned && !agedOut) return false
+
+    try {
+      await fs.promises.rm(info.path, { force: true })
+      logService.warn(
+        'git.index-lock-recovery',
+        ourProcessOrphaned
+          ? `Removed an index lock orphaned by our own git subprocess: ${info.path}`
+          : `Removed a stale ${info.ageSeconds}s-old index lock: ${info.path}`,
+      )
+      return true
+    } catch {
+      return false
     }
   }
 
@@ -1453,7 +1591,24 @@ class GitService {
 
   /** Switch to an existing branch. */
   async checkout(repoPath: string, branch: string): Promise<void> {
-    const checkout = async (args: string[]) => this.runWithLfsRecovery(repoPath, await this.authenticatedArgs(repoPath, args))
+    // A git-lfs lock-cache failure surfaces *after* git has already moved HEAD,
+    // so recovery must first ask whether the switch happened rather than blindly
+    // re-running — `checkout --track -b` would then fail with "branch already
+    // exists" and turn a recoverable hiccup into a hard stop.
+    const checkout = async (args: string[]) => this.runWithLfsRecovery(
+      repoPath,
+      await this.authenticatedArgs(repoPath, args),
+      {
+        alreadyDone: async () => (await this.currentBranch(repoPath)) === branch,
+        // If the branch was created before git-lfs failed, the plain switch is
+        // the idempotent form. If it was not, the original command is still
+        // the right one to repeat.
+        retryArgs: async () => {
+          const exists = (await this.refNames(repoPath, 'refs/heads/')).includes(branch)
+          return this.authenticatedArgs(repoPath, exists ? ['checkout', branch] : args)
+        },
+      },
+    )
 
     // Match against the ref store rather than `rev-parse --verify`, which
     // resolves through the filesystem and so confirms any casing of a name
@@ -1590,6 +1745,16 @@ class GitService {
     const stage = choice === 'ours' ? '2' : '3'
     const stageRes = await execSafe(['ls-files', '-u', '--', filePath], repoPath)
 
+    // The checkout immediately before these also writes the index, and a
+    // git-lfs filter that dies during it leaves index.lock behind — so the
+    // add/rm that follow need the same recovery, not a bare exec. Both are
+    // idempotent, so re-running once the lock is cleared is safe.
+    const stageResolved = () => this.runWithLfsRecovery(repoPath, ['add', '--', filePath])
+    const removeResolved = () => this.runWithLfsRecovery(repoPath, ['rm', '-f', '--', filePath], {
+      alreadyDone: async () =>
+        (await execSafe(['ls-files', '--error-unmatch', '--', filePath], repoPath)).exitCode !== 0,
+    })
+
     // No unmerged stages: git auto-resolved this file (often a binary with a
     // `merge=ours` driver). Override by checking out the requested side from
     // the explicit ref. HEAD already holds our pre-merge version; MERGE_HEAD
@@ -1599,14 +1764,14 @@ class GitService {
       const showRes = await execSafe(['cat-file', '-e', `${ref}:${filePath}`], repoPath)
       if (showRes.exitCode !== 0) {
         // The chosen side deleted the file — remove it from the index/worktree.
-        await exec(['rm', '-f', '--', filePath], repoPath)
+        await removeResolved()
         return
       }
       await this.runWithLfsRecovery(
         repoPath,
         await this.authenticatedArgs(repoPath, ['checkout', ref, '--', filePath]),
       )
-      await exec(['add', '--', filePath], repoPath)
+      await stageResolved()
       return
     }
 
@@ -1619,12 +1784,12 @@ class GitService {
         repoPath,
         await this.authenticatedArgs(repoPath, ['checkout', choice === 'theirs' ? '--theirs' : '--ours', '--', filePath]),
       )
-      await exec(['add', '--', filePath], repoPath)
+      await stageResolved()
       return
     }
 
     // The selected side deleted the file in a delete/modify conflict.
-    await exec(['rm', '-f', '--', filePath], repoPath)
+    await removeResolved()
   }
 
   async continueMerge(repoPath: string, targetBranch: string): Promise<void> {
@@ -1635,7 +1800,10 @@ class GitService {
     }
     // Use git's prepared MERGE_MSG (matches GitHub Desktop's "Merge branch
     // 'X' into Y" format). The fallback only fires if MERGE_MSG is missing.
-    await exec(['commit', '--no-edit'], repoPath).catch(async () => {
+    // Recovery-wrapped: this is the write that finalizes a conflict resolution,
+    // so it lands right after the checkout/add pair most likely to have left an
+    // orphaned index.lock behind.
+    await this.runWithLfsRecovery(repoPath, ['commit', '--no-edit']).catch(async () => {
       const branchLabel = targetBranch.replace(/^origin\//, '')
       await exec(['commit', '-m', `Merge branch '${branchLabel}'`], repoPath)
     })
@@ -1857,7 +2025,7 @@ class GitService {
    * removes it when done. A leftover lock means a previous git/LFS subprocess
    * crashed or was killed mid-write. Returns null if no lock exists.
    */
-  async getIndexLockInfo(repoPath: string): Promise<{ path: string; ageSeconds: number } | null> {
+  async getIndexLockInfo(repoPath: string): Promise<{ path: string; ageSeconds: number; mtimeMs: number } | null> {
     const gitDirRes = await execSafe(['rev-parse', '--git-dir'], repoPath)
     if (gitDirRes.exitCode !== 0) return null
     const gitDir = path.resolve(repoPath, gitDirRes.stdout.trim())
@@ -1865,7 +2033,7 @@ class GitService {
     try {
       const stat = await fs.promises.stat(lockPath)
       const ageSeconds = Math.max(0, Math.floor((Date.now() - stat.mtimeMs) / 1000))
-      return { path: lockPath, ageSeconds }
+      return { path: lockPath, ageSeconds, mtimeMs: stat.mtimeMs }
     } catch {
       return null
     }

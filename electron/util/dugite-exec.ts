@@ -1,8 +1,90 @@
 import { GitProcess } from 'dugite'
+import path from 'path'
 import { OperationStep } from '../types'
 import { logService } from '../services/LogService'
 
 export type ProgressCallback = (step: OperationStep) => void
+
+// ── Git process bookkeeping ──────────────────────────────────────────────────
+//
+// Tracks, per repository, how many git processes Lucid Git currently has in
+// flight and when the oldest of them started. That is what distinguishes a
+// `.git/index.lock` left behind by one of our own crashed subprocesses — safe
+// to remove the moment the process exits — from one a live external writer
+// (an Unreal source-control plugin, another git client) genuinely owns. Age
+// alone cannot tell those apart: a lock our checkout orphaned one second ago
+// looks exactly like a lock Unreal created one second ago.
+
+/** Clock-granularity slack when matching a file mtime against a run window. */
+const RUN_WINDOW_SLACK_MS = 1000
+/** How long a finished run stays relevant for ownership questions. */
+const RUN_WINDOW_TTL_MS = 5 * 60_000
+const MAX_RUN_WINDOWS = 100
+
+interface RepoGitOps {
+  inFlight: number
+  /** [start, end] of git processes we ran and that have since exited. */
+  windows: { start: number; end: number }[]
+}
+
+const repoGitOps = new Map<string, RepoGitOps>()
+
+export interface GitOpActivity {
+  /** Git processes Lucid Git has running in this repo right now. */
+  inFlight: number
+  /** True when `at` falls inside a window where one of our git processes ran. */
+  ranDuring: (at: number) => boolean
+}
+
+const opsKey = (repoPath: string): string => path.resolve(repoPath).toLowerCase()
+
+/**
+ * Snapshot of git-process activity for a repo. Take it BEFORE running any
+ * further git command, or `inFlight` describes your own probe.
+ *
+ * `ranDuring` answers the question age cannot: a `.git/index.lock` whose mtime
+ * lands inside one of our own run windows was created by a git or git-lfs
+ * subprocess we started, so once nothing of ours is in flight it is orphaned
+ * and safe to delete — no matter how recent it is.
+ */
+export function gitOpActivity(repoPath: string): GitOpActivity {
+  const entry = repoGitOps.get(opsKey(repoPath))
+  const windows = entry ? [...entry.windows] : []
+  return {
+    inFlight: entry?.inFlight ?? 0,
+    ranDuring: (at: number) => windows.some(
+      w => at >= w.start - RUN_WINDOW_SLACK_MS && at <= w.end + RUN_WINDOW_SLACK_MS,
+    ),
+  }
+}
+
+function entryFor(repoPath: string): RepoGitOps {
+  const key = opsKey(repoPath)
+  let entry = repoGitOps.get(key)
+  if (!entry) {
+    entry = { inFlight: 0, windows: [] }
+    repoGitOps.set(key, entry)
+  }
+  return entry
+}
+
+/** Run `fn` with this repo counted as having a git process in flight. */
+async function trackGitOp<T>(repoPath: string, fn: () => Promise<T>): Promise<T> {
+  const entry = entryFor(repoPath)
+  const start = Date.now()
+  entry.inFlight++
+  try {
+    return await fn()
+  } finally {
+    entry.inFlight = Math.max(0, entry.inFlight - 1)
+    const end = Date.now()
+    entry.windows.push({ start, end })
+    const cutoff = end - RUN_WINDOW_TTL_MS
+    if (entry.windows.length > MAX_RUN_WINDOWS || entry.windows[0].end < cutoff) {
+      entry.windows = entry.windows.filter(w => w.end >= cutoff).slice(-MAX_RUN_WINDOWS)
+    }
+  }
+}
 
 // ── Progress parser ───────────────────────────────────────────────────────────
 
@@ -83,6 +165,14 @@ export async function execWithProgress(
   repoPath: string,
   onProgress?: ProgressCallback
 ): Promise<{ stdout: string; stderr: string }> {
+  return trackGitOp(repoPath, () => execWithProgressInner(args, repoPath, onProgress))
+}
+
+async function execWithProgressInner(
+  args: string[],
+  repoPath: string,
+  onProgress?: ProgressCallback
+): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const proc = GitProcess.spawn(args, repoPath, {
       env: {
@@ -151,13 +241,13 @@ export async function exec(
   args: string[],
   repoPath: string
 ): Promise<{ stdout: string; stderr: string }> {
-  const result = await GitProcess.exec(args, repoPath, {
+  const result = await trackGitOp(repoPath, () => GitProcess.exec(args, repoPath, {
     env: {
       ...process.env,
       GIT_TERMINAL_PROMPT: '0',
       GIT_ASKPASS: 'echo',
     },
-  })
+  }))
 
   if (result.exitCode !== 0) {
     const combined = [result.stderr, result.stdout].filter(Boolean).join('\n')
@@ -179,7 +269,7 @@ export async function execWithStdin(
   repoPath: string,
   stdin: string,
 ): Promise<{ stdout: string; stderr: string }> {
-  const result = await GitProcess.exec(args, repoPath, {
+  const result = await trackGitOp(repoPath, () => GitProcess.exec(args, repoPath, {
     env: {
       ...process.env,
       GIT_TERMINAL_PROMPT: '0',
@@ -187,7 +277,7 @@ export async function execWithStdin(
     },
     stdin,
     stdinEncoding: 'utf8',
-  })
+  }))
   if (result.exitCode !== 0) {
     const combined = [result.stderr, result.stdout].filter(Boolean).join('\n')
     throw new Error(`git ${detectGitSubcommand(args)} failed (exit ${result.exitCode}):\n${combined}`)
@@ -257,13 +347,13 @@ export async function execSafe(
   args: string[],
   repoPath: string
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const result = await GitProcess.exec(args, repoPath, {
+  const result = await trackGitOp(repoPath, () => GitProcess.exec(args, repoPath, {
     env: {
       ...process.env,
       GIT_TERMINAL_PROMPT: '0',
       GIT_ASKPASS: 'echo',
     },
-  })
+  }))
   return {
     stdout: result.stdout,
     stderr: result.stderr,

@@ -16,6 +16,8 @@ const SCOPE_VALIDATION_TTL_MS = 10 * 60 * 1000
 // After an inconclusive validation (GitHub outage / rate limit), wait this
 // long before trying to validate again instead of re-fetching on every call.
 const INDETERMINATE_RETRY_MS = 60 * 1000
+const PROFILE_RETRY_DELAYS_MS = [1_000, 2_000, 4_000]
+const PROFILE_REQUEST_TIMEOUT_MS = 15_000
 
 // ── Tiny JSON store for non-secret account metadata ───────────────────────────
 
@@ -64,10 +66,73 @@ function hasRequiredScopes(scopes: Set<string>): boolean {
   return scopes.has('repo')
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function profileRetryDelayMs(res: Response, attempt: number): number {
+  const retryAfter = Number(res.headers.get('retry-after'))
+  if (Number.isFinite(retryAfter) && retryAfter > 0) return retryAfter * 1_000
+  return PROFILE_RETRY_DELAYS_MS[attempt] + Math.floor(Math.random() * 250)
+}
+
+async function fetchGitHubProfile(accessToken: string): Promise<Response> {
+  const maxAttempts = PROFILE_RETRY_DELAYS_MS.length + 1
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), PROFILE_REQUEST_TIMEOUT_MS)
+    let res: Response
+
+    try {
+      res = await fetch('https://api.github.com/user', {
+        headers: {
+          Authorization:          `Bearer ${accessToken}`,
+          Accept:                 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+          'User-Agent':           'LucidGit',
+        },
+        signal: controller.signal,
+      })
+    } catch (error) {
+      if (attempt < maxAttempts - 1) {
+        const delay = PROFILE_RETRY_DELAYS_MS[attempt] + Math.floor(Math.random() * 250)
+        logService.warn('auth.deviceFlow', `GitHub profile request failed; retrying in ${delay}ms (${attempt + 1}/${maxAttempts})`)
+        await sleep(delay)
+        continue
+      }
+      throw new Error(
+        `GitHub is temporarily unreachable. Please try signing in again. (${error instanceof Error ? error.message : String(error)})`,
+      )
+    } finally {
+      clearTimeout(timeout)
+    }
+
+    const transient = res.status === 429 || res.status >= 500
+    if (transient && attempt < maxAttempts - 1) {
+      const delay = profileRetryDelayMs(res, attempt)
+      logService.warn('auth.deviceFlow', `GitHub profile request returned ${res.status}; retrying in ${delay}ms (${attempt + 1}/${maxAttempts})`)
+      await sleep(delay)
+      continue
+    }
+
+    return res
+  }
+
+  throw new Error('GitHub is temporarily unavailable. Please try signing in again.')
+}
+
 // Outcome of checking a token against the GitHub API. 'indeterminate' means
 // we could not get a definitive answer (network failure, rate limiting, or a
 // GitHub outage) — callers must NOT treat that as a revoked token.
 type TokenValidity = 'valid' | 'invalid' | 'indeterminate'
+
+interface PendingDeviceToken {
+  access_token: string
+  refresh_token?: string
+  expires_in?: number
+  refresh_token_expires_in?: number
+}
 
 class AuthService {
   // userId → timestamp of last successful scope validation (in-memory only)
@@ -77,6 +142,10 @@ class AuthService {
   // userId → in-flight validation, shared by concurrent getToken calls so a
   // burst of callers (pollers, panel loads) produces one GET /user, not many
   private validationInFlight = new Map<string, Promise<TokenValidity>>()
+  // A device code can only be exchanged once. Keep its issued token in memory
+  // until profile loading succeeds so a transient /user outage does not force
+  // the user through another authorization flow.
+  private pendingDeviceTokens = new Map<string, PendingDeviceToken>()
 
   async startDeviceFlow(): Promise<DeviceFlowStart> {
     const res = await fetch('https://github.com/login/device/code', {
@@ -111,51 +180,62 @@ class AuthService {
 
   // Returns null while pending; throws on expired/denied; returns account on success.
   async pollDeviceFlow(deviceCode: string): Promise<{ token: string; userId: string } | null> {
-    const res = await fetch('https://github.com/login/oauth/access_token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Accept: 'application/json',
-      },
-      body: new URLSearchParams({
-        client_id:   CLIENT_ID,
-        device_code: deviceCode,
-        grant_type:  'urn:ietf:params:oauth:grant-type:device_code',
-      }).toString(),
-    })
-    if (!res.ok) {
-      const body = await res.text().catch(() => '')
-      throw new Error(`GitHub token poll failed: ${res.status} — ${body}`)
-    }
+    let d = this.pendingDeviceTokens.get(deviceCode)
+    if (!d) {
+      const res = await fetch('https://github.com/login/oauth/access_token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'application/json',
+        },
+        body: new URLSearchParams({
+          client_id:   CLIENT_ID,
+          device_code: deviceCode,
+          grant_type:  'urn:ietf:params:oauth:grant-type:device_code',
+        }).toString(),
+      })
+      if (!res.ok) {
+        const body = await res.text().catch(() => '')
+        throw new Error(`GitHub token poll failed: ${res.status} — ${body}`)
+      }
 
-    const d = await res.json() as {
-      access_token?: string
-      refresh_token?: string
-      expires_in?: number
-      refresh_token_expires_in?: number
-      error?: string
-      error_description?: string
-    }
+      const tokenResponse = await res.json() as Partial<PendingDeviceToken> & {
+        error?: string
+        error_description?: string
+      }
 
-    if (d.error) {
-      // These two mean "keep waiting"
-      if (d.error === 'authorization_pending' || d.error === 'slow_down') return null
-      throw new Error(d.error_description ?? d.error)
-    }
+      if (tokenResponse.error) {
+        // These two mean "keep waiting"
+        if (tokenResponse.error === 'authorization_pending' || tokenResponse.error === 'slow_down') return null
+        throw new Error(tokenResponse.error_description ?? tokenResponse.error)
+      }
 
-    if (!d.access_token) return null
+      if (!tokenResponse.access_token) return null
+      d = { ...tokenResponse, access_token: tokenResponse.access_token }
+      this.pendingDeviceTokens.set(deviceCode, d)
+    }
 
     // ── Fetch user profile ────────────────────────────────────────────────────
-    const userRes = await fetch('https://api.github.com/user', {
-      headers: {
-        Authorization:          `Bearer ${d.access_token}`,
-        Accept:                 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-      },
-    })
+    let userRes: Response
+    try {
+      userRes = await fetchGitHubProfile(d.access_token)
+    } catch (error) {
+      // Keep the exchanged token and let the renderer's normal poll interval
+      // retry profile loading. The device code itself cannot be exchanged again.
+      logService.warn('auth.deviceFlow', error instanceof Error ? error.message : String(error))
+      return null
+    }
     if (!userRes.ok) {
+      if (userRes.status === 429 || userRes.status >= 500) {
+        logService.warn('auth.deviceFlow', `GitHub profile temporarily unavailable after retries: ${userRes.status} ${userRes.statusText}`)
+        return null
+      }
+      this.pendingDeviceTokens.delete(deviceCode)
       logService.error('auth.deviceFlow', `Failed to fetch GitHub user profile: ${userRes.status} ${userRes.statusText}`)
-      throw new Error('Failed to fetch GitHub user profile')
+      if (userRes.status === 401) {
+        throw new Error('GitHub rejected the sign-in token. Please start sign-in again.')
+      }
+      throw new Error(`Failed to fetch GitHub user profile (${userRes.status})`)
     }
 
     const grantedScopes = parseScopes(userRes.headers.get('x-oauth-scopes'))
@@ -195,6 +275,7 @@ class AuthService {
     writeData(data)
 
     this.scopeValidatedAt.set(userId, Date.now())
+    this.pendingDeviceTokens.delete(deviceCode)
 
     logService.info('auth.deviceFlow', `Authenticated successfully as ${u.login} (userId: ${userId})`)
     return { token: d.access_token, userId }

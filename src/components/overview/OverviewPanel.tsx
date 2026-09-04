@@ -7,6 +7,7 @@ import {
 import { useRepoStore } from '@/stores/repoStore'
 import { useOperationStore } from '@/stores/operationStore'
 import { useStatusToastStore } from '@/stores/statusToastStore'
+import { useErrorStore } from '@/stores/errorStore'
 import { markFetchPerformed } from '@/lib/fetchState'
 import { FilePathText } from '@/components/ui/FilePathText'
 import { ActionBtn } from '@/components/ui/ActionBtn'
@@ -435,6 +436,7 @@ function ResolveDialog({
   const refreshStatus   = useRepoStore(s => s.refreshStatus)
   const [choice, setChoice] = useState<'accept' | 'decline'>('accept')
   const showStatusToast = useStatusToastStore(s => s.show)
+  const pushError       = useErrorStore(s => s.pushRaw)
   const [conflicts, setConflicts] = useState<ConflictPreviewFile[]>([])
   const [conflictChoices, setConflictChoices] = useState<Record<string, 'head' | 'base'>>({})
   const [conflictLoading, setConflictLoading] = useState(true)
@@ -565,6 +567,12 @@ function ResolveDialog({
       const mergeBlocked = /not up to date|update branch|head branch was modified|pull first|fetch first|failed to merge/i.test(msg)
       if (choice === 'accept' && mergeBlocked) {
         showStatusToast('Merge aborted, please fetch and pull first.')
+      } else {
+        // Anything else used to fail silently — the dialog just stopped and the
+        // only record was the devtools console, leaving the user with no idea
+        // why the PR never merged. Route it through the error panel so the
+        // parsed cause and its fixes are on screen.
+        pushError(msg)
       }
       console.error('PR merge/close failed', e)
     } finally { setBusy(false) }

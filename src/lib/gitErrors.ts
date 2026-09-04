@@ -123,6 +123,24 @@ const DEFS: ErrorDef[] = [
     ],
   },
   {
+    code: 'INDEX_LOCK',
+    test: /Unable to create '.*index\.lock'.*File exists|index\.lock.*File exists/is,
+    title: 'Git index is locked',
+    description: "A leftover .git/index.lock is blocking every write to the index. Lucid Git clears locks its own git subprocesses orphan, so seeing this means the lock was created by something outside the app and is too recent to assume it is dead — another program is probably still using the repository.",
+    causes: [
+      'A game editor with a source-control plugin (Unreal, Unity) is writing to the repo right now',
+      'Another git client or terminal has a command in flight',
+      'Antivirus or a sync client (OneDrive, Dropbox) is holding files under .git',
+    ],
+    severity: 'error',
+    canAutoFix: false,
+    fixes: [
+      { label: 'Close Unreal Editor / other git clients, then retry — the lock clears itself when the writer finishes' },
+      { label: 'Check who is holding it', command: 'git status' },
+      { label: 'If nothing is running, remove the lock by hand (destructive during a real write)', command: 'git rm -f .git/index.lock' },
+    ],
+  },
+  {
     code: 'WORKING_TREE_LOCKED',
     test: /unable to unlink old.*Invalid argument|unable to unlink old.*Permission denied|unable to (?:create|write) file.*(Permission denied|Access is denied|Invalid argument)|being used by another process|cannot access the file because it is being used|The process cannot access the file/i,
     title: 'Files locked by another program',
