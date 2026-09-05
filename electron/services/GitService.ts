@@ -676,21 +676,45 @@ class GitService {
       .filter(Boolean)
   }
 
+  /**
+   * How a pull should reconcile divergent branches.
+   *
+   * Since git 2.27 a `pull` that has to reconcile divergent branches aborts
+   * with "Need to specify how to reconcile divergent branches" unless one of
+   * `pull.rebase` / `pull.ff` is configured. Dugite runs its bundled git with
+   * GIT_CONFIG_NOSYSTEM, so the system-level `pull.rebase = false` that Git
+   * for Windows ships — the reason the same pull succeeds in a terminal — is
+   * invisible to us and every such pull fails here.
+   *
+   * We honour an explicit user preference from any scope git can still see,
+   * and otherwise default to a merge, which is the right default for the
+   * binary-heavy Unreal branches this app is built around: rebasing them
+   * replays every conflicting .uasset one commit at a time.
+   */
+  private async pullReconcileArgs(repoPath: string): Promise<string[]> {
+    for (const key of ['pull.rebase', 'pull.ff']) {
+      const res = await execSafe(['config', '--get', key], repoPath)
+      if (res.exitCode === 0 && res.stdout.trim()) return []
+    }
+    return ['--no-rebase']
+  }
+
   /** Pull current branch. Streams progress. */
   async pull(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
     onProgress?.({ id: 'pull-auth', label: 'Preparing credentials', status: 'running', progress: 6 })
     const token = await authService.getCurrentToken()
+    const reconcile = await this.pullReconcileArgs(repoPath)
     try {
       const remoteUrl = await this.getRemoteUrl(repoPath)
       onProgress?.({ id: 'pull-connect', label: 'Connecting to remote', status: 'running', progress: 12 })
       await this.withStalePackRetry(repoPath,
-        () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'pull', '--progress'], repoPath, onProgress),
+        () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'pull', ...reconcile, '--progress'], repoPath, onProgress),
         onProgress,
       )
     } catch (error) {
       if (!await this.recoverForRetry(repoPath, error)) throw error
       const remoteUrl = await this.getRemoteUrl(repoPath)
-      await execWithProgress([...gitAuthArgs(token, remoteUrl), 'pull', '--progress'], repoPath, onProgress)
+      await execWithProgress([...gitAuthArgs(token, remoteUrl), 'pull', ...reconcile, '--progress'], repoPath, onProgress)
     }
   }
 
