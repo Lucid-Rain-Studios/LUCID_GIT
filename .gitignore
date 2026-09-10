@@ -10,3 +10,6 @@ npm-debug.log*
 Thumbs.db
 .env
 .env.local
+
+# Playwright run output
+test-results/

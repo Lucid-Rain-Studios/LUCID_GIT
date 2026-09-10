@@ -2563,13 +2563,23 @@ class GitService {
   // than a good answer deserves expiring, and an explicit Refresh bypasses it.
   private static readonly LFS_FAILURE_TTL = 30 * 1000 // 30 seconds
   /**
-   * Budget for a full LFS scan, deliberately under the 30s read deadline.
-   * When the handler's deadline wins instead, `lfsStatus` is left running —
-   * nothing tells it that its caller stopped waiting — and carries on into the
-   * `git lfs ls-files` fallback for minutes with no one to receive the result.
-   * Giving up on our own terms records the failure and leaves nothing behind.
+   * Budget for a full LFS scan. Sits just inside the handler's 30s read
+   * deadline rather than comfortably under it, and the margin is the whole
+   * point of the number.
+   *
+   * The budget exists because when the handler's deadline wins, `lfsStatus` is
+   * left running — nothing tells it its caller stopped waiting — and carries
+   * on into the `git lfs ls-files` fallback for minutes with no one to receive
+   * the result. Giving up on our own terms records the failure and leaves
+   * nothing behind.
+   *
+   * But a budget shorter than it needs to be fails scans that used to finish:
+   * at 20s, a repository answering in 25s went from working to broken purely
+   * because of this constant. At 28s nothing that beat the handler's deadline
+   * before loses now — the two-second margin only decides who reports the
+   * failure, not whether there is one.
    */
-  private static readonly LFS_SCAN_BUDGET_MS = 20_000
+  private static readonly LFS_SCAN_BUDGET_MS = 28_000
 
   // The default branch is asked for repeatedly and changes almost never, and
   // resolving it may have to go out to the network. See remoteDefaultBranch.
