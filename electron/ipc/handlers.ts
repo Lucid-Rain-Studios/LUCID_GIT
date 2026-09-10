@@ -586,13 +586,13 @@ export function registerHandlers(): void {
   })
 
   handle(CHANNELS.LFS_LOCKS_CHECK, async (_event, repoPath: string) => {
-    return gitService.lfsLocksMaintenance(repoPath, false)
+    return lockService.locksMaintenance(repoPath, false)
   })
 
   handle(CHANNELS.LFS_LOCKS_REPAIR, async (_event, repoPath: string) => {
     // The renderer reloads locks immediately after this returns. Avoid a
     // duplicate remote `git lfs locks --json` round trip here.
-    return gitService.lfsLocksMaintenance(repoPath, true)
+    return lockService.locksMaintenance(repoPath, true)
   })
 
   handle(CHANNELS.LOCK_UNLOCK_BATCH, async (event, repoPath: string, targets: Array<{ filePath: string; force?: boolean; lockId?: string }>) => {
