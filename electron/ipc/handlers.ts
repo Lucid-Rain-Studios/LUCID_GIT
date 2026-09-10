@@ -569,8 +569,8 @@ export function registerHandlers(): void {
     })
   })
 
-  handleRead(CHANNELS.LFS_STATUS, async (_event, repoPath: string) => {
-    return gitService.lfsStatus(repoPath)
+  handleRead(CHANNELS.LFS_STATUS, async (_event, repoPath: string, force?: boolean) => {
+    return gitService.lfsStatus(repoPath, force ?? false)
   })
 
   handle(CHANNELS.LFS_TRACK, async (_event, repoPath: string, patterns: string[]) => {

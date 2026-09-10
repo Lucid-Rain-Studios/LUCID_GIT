@@ -155,8 +155,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.UNLOCK_FOLDER_MINE, repoPath, folderPath),
 
   // ── LFS ───────────────────────────────────────────────────────────────────
-  lfsStatus: (repoPath: string) =>
-    ipcRenderer.invoke(CHANNELS.LFS_STATUS, repoPath),
+  lfsStatus: (repoPath: string, force?: boolean) =>
+    ipcRenderer.invoke(CHANNELS.LFS_STATUS, repoPath, force),
   lfsTrack: (repoPath: string, patterns: string[]) =>
     ipcRenderer.invoke(CHANNELS.LFS_TRACK, repoPath, patterns),
   lfsUntrack: (repoPath: string, pattern: string) =>

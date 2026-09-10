@@ -744,7 +744,7 @@ export interface LucidGitAPI {
   unlockFolderMine: (repoPath: string, folderPath: string) => Promise<{ unlocked: number; failed: number }>
 
   // LFS
-  lfsStatus:    (repoPath: string) => Promise<LFSStatus>
+  lfsStatus:    (repoPath: string, force?: boolean) => Promise<LFSStatus>
   lfsTrack:     (repoPath: string, patterns: string[]) => Promise<void>
   lfsUntrack:   (repoPath: string, pattern: string) => Promise<void>
   lfsMigrate:   (repoPath: string, patterns: string[]) => Promise<void>

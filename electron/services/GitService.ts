@@ -2,7 +2,7 @@ import Database from 'better-sqlite3'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { exec, execSafe, execWithProgress, execWithStdin, gitAuthArgs, gitOpActivity, waitForGitOpsToDrain, ProgressCallback } from '../util/dugite-exec'
+import { exec, execSafe, execWithProgress, execWithStdin, gitAuthArgs, gitOpActivity, waitForGitOpsToDrain, withGitTimeout, ProgressCallback } from '../util/dugite-exec'
 import { authService } from './AuthService'
 import { logService } from './LogService'
 import { parseGitLog, GIT_LOG_FORMAT } from '../util/git-log-parse'
@@ -16,6 +16,18 @@ const STALE_PACK_RETRY_DELAY_MS = 2000
 // writing — git removes its own lock within milliseconds of finishing. Matches
 // the threshold the cherry-pick conflict dialog uses for its manual prompt.
 const STALE_INDEX_LOCK_S = 5
+
+/**
+ * Throw if `deadline` (epoch ms) has passed. Used to abandon a scan on our own
+ * terms rather than leaving it running past the point anyone is still waiting.
+ */
+function assertWithinBudget(deadline: number, what: string): void {
+  if (Date.now() <= deadline) return
+  throw new Error(
+    `${what} took too long and was abandoned. This repository is large enough that a full LFS `
+    + `scan does not finish in the time the UI can wait for it.`
+  )
+}
 
 // How long to let our own in-flight git processes finish before judging who
 // owns an index.lock. Long enough to cover a status refresh crawling under an
@@ -264,27 +276,86 @@ class GitService {
   }
 
   private async remoteDefaultBranch(repoPath: string): Promise<{ name: string; ref: string }> {
+    const key = path.resolve(repoPath).toLowerCase()
+    const cached = this._defaultBranchCache.get(key)
+    if (cached && Date.now() - cached.ts < GitService.DEFAULT_BRANCH_TTL) return cached.value
+
+    const pending = this._defaultBranchInFlight.get(key)
+    if (pending) return pending
+
+    const request = this.resolveDefaultBranch(repoPath)
+      .then(({ value, resolved }) => {
+        // The main/master guess is what we return when nothing resolved.
+        // Caching it would keep answering from a failure for the whole TTL.
+        if (resolved) this._defaultBranchCache.set(key, { ts: Date.now(), value })
+        return value
+      })
+      .finally(() => { this._defaultBranchInFlight.delete(key) })
+
+    this._defaultBranchInFlight.set(key, request)
+    return request
+  }
+
+  /** Cheapest-first resolution. `resolved` is false for the closing guess. */
+  private async resolveDefaultBranch(
+    repoPath: string,
+  ): Promise<{ value: { name: string; ref: string }; resolved: boolean }> {
     const symbolic = await execSafe(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], repoPath)
     if (symbolic.exitCode === 0) {
       const ref = symbolic.stdout.trim()
       const name = ref.replace(/^origin\//, '')
-      if (name) return { name, ref }
+      if (name) return { value: { name, ref }, resolved: true }
     }
 
-    const remoteShow = await execSafe(['remote', 'show', 'origin'], repoPath)
-    if (remoteShow.exitCode === 0) {
-      const match = remoteShow.stdout.match(/HEAD branch:\s*(\S+)/)
-      if (match?.[1]) return { name: match[1], ref: `origin/${match[1]}` }
-    }
+    const remoteHead = await this.probeRemoteHead(repoPath)
+    if (remoteHead) return { value: remoteHead, resolved: true }
 
     for (const name of ['main', 'master']) {
       const remote = await execSafe(['rev-parse', '--verify', `refs/remotes/origin/${name}`], repoPath)
-      if (remote.exitCode === 0) return { name, ref: `origin/${name}` }
+      if (remote.exitCode === 0) return { value: { name, ref: `origin/${name}` }, resolved: true }
       const local = await execSafe(['rev-parse', '--verify', `refs/heads/${name}`], repoPath)
-      if (local.exitCode === 0) return { name, ref: name }
+      if (local.exitCode === 0) return { value: { name, ref: name }, resolved: true }
     }
 
-    return { name: 'main', ref: 'origin/main' }
+    return { value: { name: 'main', ref: 'origin/main' }, resolved: false }
+  }
+
+  /**
+   * Ask the remote which branch its HEAD points at, or null if it cannot say
+   * in time. Reached only when the local `refs/remotes/origin/HEAD` is unset,
+   * which is common enough — a shallow or mirrored clone never gets one.
+   *
+   * This was `git remote show origin`, and it is the one network call sitting
+   * on a path the UI blocks on. Two things made it a hang rather than a slow
+   * answer. It ran without `gitAuthArgs`, leaving git's configured credential
+   * helper live, so a private repo could stop dead on a Git Credential Manager
+   * dialog that GIT_TERMINAL_PROMPT cannot suppress. And nothing bounded it, so
+   * a stalled connection simply never returned — `git:default-branch` left
+   * unanswered with the panel spinning behind it.
+   *
+   * `ls-remote --symref` answers the same question without enumerating every
+   * branch on the remote and diffing it against the local tracking refs, and
+   * `withGitTimeout` ends the process instead of abandoning it.
+   */
+  private async probeRemoteHead(repoPath: string): Promise<{ name: string; ref: string } | null> {
+    const remoteUrl = await this.getRemoteUrl(repoPath)
+    if (!remoteUrl) return null
+    const token = await authService.getCurrentToken()
+
+    try {
+      const res = await withGitTimeout(
+        () => execSafe([...gitAuthArgs(token, remoteUrl), 'ls-remote', '--symref', 'origin', 'HEAD'], repoPath),
+        GitService.REMOTE_HEAD_PROBE_MS,
+        'git:remote-head',
+      )
+      if (res.exitCode !== 0) return null
+      const name = res.stdout.match(/^ref:\s+refs\/heads\/(\S+)\s+HEAD$/m)?.[1]
+      return name ? { name, ref: `origin/${name}` } : null
+    } catch {
+      // Unreachable or out of time. The local probe that follows is a better
+      // answer than none, and this is not an error the user needs to see.
+      return null
+    }
   }
 
   /** Returns the bundled git version string. */
@@ -1066,9 +1137,12 @@ class GitService {
     return request
   }
 
-  /** Drop the cached origin URL — call if the remote is reconfigured. */
+  /** Drop what we remember about origin — call if the remote is reconfigured. */
   invalidateRemoteUrl(repoPath: string): void {
-    this._remoteUrlCache.delete(path.resolve(repoPath).toLowerCase())
+    const key = path.resolve(repoPath).toLowerCase()
+    this._remoteUrlCache.delete(key)
+    // Derived from the same remote, so it goes stale for the same reason.
+    this._defaultBranchCache.delete(key)
   }
 
   /** Return ahead/behind counts for HEAD vs its upstream. */
@@ -2451,8 +2525,30 @@ class GitService {
 
   private _sizeCache = new Map<string, { ts: number; result: SizeBreakdown }>()
   private _lfsCache  = new Map<string, { ts: number; result: LFSStatus }>()
+  // Failures are cached too, and the in-flight promise is shared. See lfsStatus.
+  private _lfsFailures = new Map<string, { ts: number; message: string }>()
+  private _lfsInFlight = new Map<string, Promise<LFSStatus>>()
   private static readonly SIZE_TTL = 2  * 60 * 1000 // 2 minutes
   private static readonly LFS_TTL  = 5  * 60 * 1000 // 5 minutes
+  // Shorter than the success TTL: a repo that failed deserves retrying sooner
+  // than a good answer deserves expiring, and an explicit Refresh bypasses it.
+  private static readonly LFS_FAILURE_TTL = 30 * 1000 // 30 seconds
+  /**
+   * Budget for a full LFS scan, deliberately under the 30s read deadline.
+   * When the handler's deadline wins instead, `lfsStatus` is left running —
+   * nothing tells it that its caller stopped waiting — and carries on into the
+   * `git lfs ls-files` fallback for minutes with no one to receive the result.
+   * Giving up on our own terms records the failure and leaves nothing behind.
+   */
+  private static readonly LFS_SCAN_BUDGET_MS = 20_000
+
+  // The default branch is asked for repeatedly and changes almost never, and
+  // resolving it may have to go out to the network. See remoteDefaultBranch.
+  private _defaultBranchCache = new Map<string, { ts: number; value: { name: string; ref: string } }>()
+  private _defaultBranchInFlight = new Map<string, Promise<{ name: string; ref: string }>>()
+  private static readonly DEFAULT_BRANCH_TTL = 5 * 60 * 1000 // 5 minutes
+  /** Ceiling for the one network call on a read handler's path. */
+  private static readonly REMOTE_HEAD_PROBE_MS = 8_000
   private static readonly SIZE_WALK_BUDGET_MS = 12_000 // cap LFS/logs walk — handler aborts at 30s
 
   /**
@@ -2809,9 +2905,16 @@ class GitService {
    * unavailable - dugite's bundled Git is well past the 2.18 that added
    * it, so this only covers the pin being moved backwards.
    */
-  private async lfsObjectTotals(repoPath: string): Promise<LfsTotals> {
+  private async lfsObjectTotals(repoPath: string, deadline: number): Promise<LfsTotals> {
     const listed = await execSafe(['ls-files', '-z', ':(attr:filter=lfs)'], repoPath)
-    if (listed.exitCode !== 0) return this.lfsObjectTotalsSlow(repoPath)
+    if (listed.exitCode !== 0) {
+      // Normally an old Git without attribute pathspecs — but a non-zero exit
+      // is also what a killed process reports, and the fallback below is the
+      // two-minute scan this method exists to avoid. Never start it on a
+      // budget that is already spent.
+      assertWithinBudget(deadline, 'Listing LFS-tracked files')
+      return this.lfsObjectTotalsSlow(repoPath)
+    }
 
     const paths = listed.stdout.split('\0').filter(Boolean)
     if (paths.length === 0) return { objects: 0, totalBytes: 0, lfsPaths: new Set() }
@@ -2824,6 +2927,7 @@ class GitService {
     const BATCH = 10_000
     let totalBytes = 0
     for (let i = 0; i < paths.length; i += BATCH) {
+      assertWithinBudget(deadline, `Measuring ${paths.length} LFS objects`)
       const stdin = paths.slice(i, i + BATCH).map(p => `:${p}`).join('\0') + '\0'
       const batchRes = await execWithStdin(['cat-file', '--batch', '--buffer', '-z'], repoPath, stdin)
       totalBytes += sumPointerSizes(batchRes.stdout)
@@ -2853,10 +2957,59 @@ class GitService {
     return { objects, totalBytes, lfsPaths: null }
   }
 
-  /** Parse .gitattributes + count LFS objects + suggest untracked binary exts. Cached 5 min. */
-  async lfsStatus(repoPath: string): Promise<LFSStatus> {
-    const cached = this._lfsCache.get(repoPath)
-    if (cached && Date.now() - cached.ts < GitService.LFS_TTL) return cached.result
+  /**
+   * Parse .gitattributes + count LFS objects + suggest untracked binary exts.
+   * Successes cached 5 min, failures 30s, and concurrent callers share one scan.
+   *
+   * All three matter at Unreal scale, where this is a whole-index `ls-files`
+   * plus a `cat-file --batch` over every pointer in the repo. Three panels ask
+   * for it on repo open — Sidebar, Overview and the LFS panel — so without a
+   * shared in-flight promise the app runs that same scan three times at once
+   * against one disk. And with only successes cached, a scan that blew its
+   * deadline left nothing behind at all: every re-render started the full scan
+   * again, so the repos slow enough to fail were the ones asked most often.
+   *
+   * `force` skips both caches — for a scan the user explicitly asked for,
+   * where returning a remembered failure would make Refresh look broken.
+   */
+  async lfsStatus(repoPath: string, force = false): Promise<LFSStatus> {
+    const key = path.resolve(repoPath).toLowerCase()
+
+    if (force) {
+      this._lfsCache.delete(key)
+      this._lfsFailures.delete(key)
+    } else {
+      const cached = this._lfsCache.get(key)
+      if (cached && Date.now() - cached.ts < GitService.LFS_TTL) return cached.result
+
+      const failed = this._lfsFailures.get(key)
+      if (failed && Date.now() - failed.ts < GitService.LFS_FAILURE_TTL) throw new Error(failed.message)
+    }
+
+    // A forced scan still joins one already running: it is the same work, and
+    // starting a second copy is what this map exists to prevent.
+    const pending = this._lfsInFlight.get(key)
+    if (pending) return pending
+
+    const request = this.lfsStatusUncached(repoPath)
+      .then(result => {
+        this._lfsCache.set(key, { ts: Date.now(), result })
+        this._lfsFailures.delete(key)
+        return result
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error)
+        this._lfsFailures.set(key, { ts: Date.now(), message })
+        throw error
+      })
+      .finally(() => { this._lfsInFlight.delete(key) })
+
+    this._lfsInFlight.set(key, request)
+    return request
+  }
+
+  private async lfsStatusUncached(repoPath: string): Promise<LFSStatus> {
+    const deadline = Date.now() + GitService.LFS_SCAN_BUDGET_MS
 
     // Tracked patterns from .gitattributes
     const tracked: string[] = []
@@ -2872,7 +3025,7 @@ class GitService {
     } catch { /* no .gitattributes */ }
 
     // Count LFS objects and total bytes
-    const { objects, totalBytes, lfsPaths } = await this.lfsObjectTotals(repoPath)
+    const { objects, totalBytes, lfsPaths } = await this.lfsObjectTotals(repoPath, deadline)
 
     // Extensions named directly by a `filter=lfs` line. Only a fallback: a
     // .gitattributes that applies the filter through a macro — `[attr]lfs
@@ -2890,6 +3043,7 @@ class GitService {
     // suggested only when a real file carrying it is not an LFS object. The
     // slow fallback cannot supply that set and matches on extension instead.
     const untrackedSet = new Set<string>()
+    assertWithinBudget(deadline, 'Listing tracked files')
     const lsFiles = await execSafe(['ls-files'], repoPath)
     if (lsFiles.exitCode === 0) {
       for (const f of lsFiles.stdout.trim().split('\n').filter(Boolean)) {
@@ -2900,14 +3054,16 @@ class GitService {
       }
     }
 
-    const result: LFSStatus = { tracked, untracked: [...untrackedSet].sort(), objects, totalBytes }
-    this._lfsCache.set(repoPath, { ts: Date.now(), result })
-    return result
+    return { tracked, untracked: [...untrackedSet].sort(), objects, totalBytes }
   }
 
   /** Invalidate the LFS cache for a repo (call after lfsTrack/Untrack). */
   invalidateLfsCache(repoPath: string): void {
-    this._lfsCache.delete(repoPath)
+    const key = path.resolve(repoPath).toLowerCase()
+    this._lfsCache.delete(key)
+    // The remembered failure goes too: whatever just changed .gitattributes is
+    // exactly the kind of event that makes a previous failure not worth keeping.
+    this._lfsFailures.delete(key)
   }
 
   /** Run `git lfs track` for each pattern. */

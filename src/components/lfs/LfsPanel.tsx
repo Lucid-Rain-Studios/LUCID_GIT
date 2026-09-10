@@ -35,7 +35,7 @@ export function LfsPanel({ repoPath }: LfsPanelProps) {
     setLoading(true)
     setError(null)
     try {
-      const result = await opRun('Scanning LFS…', () => ipc.lfsStatus(repoPath))
+      const result = await opRun('Scanning LFS…', () => ipc.lfsStatus(repoPath, true))
       setStatus(result)
     } catch (e) {
       setError(String(e))
