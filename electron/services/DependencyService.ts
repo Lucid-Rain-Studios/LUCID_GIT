@@ -177,6 +177,17 @@ class DependencyService {
       const nodes: DepNodeInfo[] = []
 
       for (const relPath of chunk) {
+        // Yield before each file. Everything below — statSync, readSync of up
+        // to 4 MB, and a latin1 decode plus global regex over that whole
+        // buffer — is synchronous, and so is the SQLite transaction that ends
+        // each batch, so without this the loop holds the main process from the
+        // first asset to the last. On an Unreal project that is tens of
+        // thousands of files and minutes of dead app: no IPC reply is
+        // delivered, no git process exit is observed, and every armed read
+        // deadline expires unheard and then fires in a burst on recovery. One
+        // yield per file bounds the block to a single asset.
+        await new Promise(resolve => setImmediate(resolve))
+
         const absPath = path.join(repoPath, relPath)
         try {
           const stat = fs.statSync(absPath)

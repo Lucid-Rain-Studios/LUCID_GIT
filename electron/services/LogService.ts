@@ -1,5 +1,7 @@
 import fs from 'fs'
 import path from 'path'
+import { performance } from 'node:perf_hooks'
+import { setInterval as setNodeInterval, clearInterval as clearNodeInterval } from 'node:timers'
 
 export type LogLevel = 'INFO' | 'WARN' | 'ERROR'
 
@@ -27,11 +29,28 @@ const PAD_TIME     = 12  // "HH:MM:SS.mmm"
 const PAD_LEVEL    = 5   // "ERROR"
 const PAD_SOURCE   = 20
 
+// ── Event-loop monitor ────────────────────────────────────────────────────────
+//
+// A blocked main process is invisible in its own log. Nothing can write a line
+// while the loop is stalled, so the gap left behind is indistinguishable from
+// an idle app — and every deadline armed before the stall fires the moment it
+// clears, arriving as a burst of unrelated-looking timeouts that name only the
+// symptom. Sampling the drift of a fixed-period timer catches the stall
+// itself: the tick that came due mid-block reports how long it waited, as soon
+// as there is a loop free enough to report it.
+
+const LAG_SAMPLE_MS = 500
+/** Below this a late tick is ordinary scheduling jitter, not a stall. */
+const LAG_REPORT_MS = 1000
+
 class LogService {
   private storePath: string | null = null
   private pastSessions: LogSession[] = []
   private current: LogSession | null = null
   private flushTimer: ReturnType<typeof setTimeout> | null = null
+  private lagTimer: ReturnType<typeof setNodeInterval> | null = null
+  private lagDueAt = 0
+  private worstLagMs = 0
 
   // ── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -48,10 +67,56 @@ class LogService {
   }
 
   endSession(): void {
+    this.stopEventLoopMonitor()
     if (!this.current) return
+    if (this.worstLagMs > 0) {
+      this.add('INFO', 'perf.event-loop', `Worst main-process stall this session: ${(this.worstLagMs / 1000).toFixed(1)}s`)
+    }
     this.add('INFO', 'app', 'Session ended')
     this.current.endedAt = new Date().toISOString()
     this.persist(true)
+  }
+
+  // ── Event-loop monitor ────────────────────────────────────────────────────────
+
+  /**
+   * Start sampling how late a fixed-period timer runs, and log any tick held
+   * up past `LAG_REPORT_MS`. The reported figure is the length of the block
+   * the tick sat through, so a line here dates the *end* of a stall — nothing
+   * can be written during one.
+   *
+   * A value in the minutes on a laptop is worth reading twice: OS sleep also
+   * stops timers firing, and looks identical from in here.
+   */
+  startEventLoopMonitor(): void {
+    if (this.lagTimer) return
+    this.lagDueAt = performance.now() + LAG_SAMPLE_MS
+    this.lagTimer = setNodeInterval(() => {
+      const now = performance.now()
+      const lag = now - this.lagDueAt
+      this.lagDueAt = now + LAG_SAMPLE_MS
+      if (lag < LAG_REPORT_MS) return
+      this.worstLagMs = Math.max(this.worstLagMs, lag)
+      this.warn(
+        'perf.event-loop',
+        `Main process event loop blocked for ${(lag / 1000).toFixed(1)}s — timers, IPC replies and `
+        + `git process exits were all held up for that long, and any deadline that came due is `
+        + `about to fire late.`,
+      )
+    }, LAG_SAMPLE_MS)
+    // Never a reason to hold the process open on our account.
+    this.lagTimer.unref()
+  }
+
+  stopEventLoopMonitor(): void {
+    if (!this.lagTimer) return
+    clearNodeInterval(this.lagTimer)
+    this.lagTimer = null
+  }
+
+  /** Longest main-process stall observed this session, in ms (0 if none). */
+  worstEventLoopLagMs(): number {
+    return this.worstLagMs
   }
 
   // ── Logging API ───────────────────────────────────────────────────────────────

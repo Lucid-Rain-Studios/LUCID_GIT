@@ -1,6 +1,7 @@
 import { GitProcess } from 'dugite'
 import path from 'path'
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { performance } from 'node:perf_hooks'
 import { execFile, type ChildProcess } from 'node:child_process'
 import { OperationStep } from '../types'
 import { logService } from '../services/LogService'
@@ -412,10 +413,43 @@ export async function execWithStdin(
 
 // ── withTimeout — races a promise against a deadline ─────────────────────────
 
+/** Ordinary timer jitter. A deadline later than this was held up by the loop. */
+const TIMER_OVERSHOOT_TOLERANCE_MS = 1000
+
+const secs = (ms: number): string => (ms / 1000).toFixed(1).replace(/\.0$/, '')
+
+/**
+ * Message for an expired deadline, reporting how long the timer *actually*
+ * took to fire rather than what it was set to.
+ *
+ * The nominal value is a misleading thing to log on its own. A `setTimeout`
+ * runs only once the event loop is free, so a main process blocked by a long
+ * synchronous scan defers every armed deadline until it recovers, then fires
+ * them all in one burst — each still claiming the nominal figure. That is how
+ * a single 7-minute stall came to look like eight independent 30s hangs,
+ * `git rev-parse --abbrev-ref HEAD` among them, which cannot take 30s under
+ * any circumstance. Naming the overshoot separates a genuinely slow git
+ * command from one that was never given the chance to report back.
+ */
+function timeoutMessage(label: string, deadlineMs: number, elapsedMs: number): string {
+  const overshoot = elapsedMs - deadlineMs
+  if (overshoot <= TIMER_OVERSHOOT_TOLERANCE_MS) {
+    return `${label} timed out after ${secs(elapsedMs)}s`
+  }
+  return `${label} timed out after ${secs(elapsedMs)}s — its ${secs(deadlineMs)}s deadline fired `
+    + `${secs(overshoot)}s late, so the main process event loop was blocked and the git command `
+    + `may have finished on time`
+}
+
 export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout>
+  // Monotonic: a wall-clock read would fold an NTP step into the elapsed time.
+  const armedAt = performance.now()
   const deadline = new Promise<T>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms)
+    timer = setTimeout(
+      () => reject(new Error(timeoutMessage(label, ms, performance.now() - armedAt))),
+      ms,
+    )
   })
   return Promise.race([
     promise.finally(() => clearTimeout(timer)),
@@ -443,9 +477,13 @@ export async function withGitTimeout<T>(fn: () => Promise<T>, ms: number, label:
       // Only a timeout leaves processes behind with nobody to collect them; a
       // command that failed on its own has already exited.
       if (error instanceof Error && error.message.includes('timed out after')) {
+        // Count with care when reading this line back: a process is dropped
+        // from the registry by its `close` handler, which cannot run while the
+        // loop is blocked. Under a stall, processes that already exited are
+        // still listed here and get counted as killed.
         const killed = killGitProcesses(scope)
         if (killed > 0) {
-          logService.warn('git.timeout', `${label} timed out after ${ms / 1000}s; killed ${killed} orphaned git process(es)`)
+          logService.warn('git.timeout', `${error.message}; killed ${killed} orphaned git process(es)`)
         }
       }
       throw error

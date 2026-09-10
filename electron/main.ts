@@ -287,6 +287,7 @@ app.commandLine.appendSwitch('disable-features', 'AutofillServerCommunication')
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null)
   logService.init(app.getPath('userData'))
+  logService.startEventLoopMonitor()
   registerHandlers()
   registerUpdaterHandlers()
   registerWindowHandlers()
