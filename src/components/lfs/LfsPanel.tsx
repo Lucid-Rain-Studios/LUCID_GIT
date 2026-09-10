@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { ipc, LFSStatus } from '@/ipc'
 import { useOperationStore } from '@/stores/operationStore'
 import { useDialogStore } from '@/stores/dialogStore'
+import { useRepoStore } from '@/stores/repoStore'
 import { cn } from '@/lib/utils'
 
 interface LfsPanelProps {
@@ -30,6 +31,13 @@ export function LfsPanel({ repoPath }: LfsPanelProps) {
   const [migrateOk, setMigrateOk]  = useState(false)
   const opRun  = useOperationStore(s => s.run)
   const dialog = useDialogStore()
+  const refreshStatus = useRepoStore(s => s.refreshStatus)
+
+  const [restoring, setRestoring]     = useState(false)
+  const [restoreMsg, setRestoreMsg]   = useState<string | null>(null)
+  // Set when the cached repair left files that only the remote can supply.
+  // Holds the price of that download so the user agrees to it knowingly.
+  const [pendingDownload, setPendingDownload] = useState<{ files: number; bytes: number } | null>(null)
 
   const load = async () => {
     setLoading(true)
@@ -45,6 +53,42 @@ export function LfsPanel({ repoPath }: LfsPanelProps) {
   }
 
   useEffect(() => { load() }, [repoPath])
+
+  const doRestore = async (download = false) => {
+    setRestoring(true)
+    setError(null)
+    setRestoreMsg(null)
+    try {
+      const r = await opRun(
+        download ? 'Downloading file contents…' : 'Restoring file contents…',
+        () => ipc.lfsRestore(repoPath, download),
+      )
+
+      setPendingDownload(r.remaining > 0 ? { files: r.remaining, bytes: r.remainingBytes } : null)
+      setRestoreMsg(
+        r.restored > 0
+          ? `✓ Restored ${r.restored} file${r.restored === 1 ? '' : 's'}.`
+          : r.remaining === 0
+            ? '✓ Nothing to restore — every LFS file already has its content on disk.'
+            : null
+      )
+      // Only a download that came back with work still outstanding is a
+      // failure; the first pass leaving files behind is the expected case.
+      if (download && r.remaining > 0) {
+        setError(
+          `${r.remaining} file${r.remaining === 1 ? '' : 's'} could not be downloaded. ` +
+          `Check that you are online and signed in to GitHub, then try again.`
+        )
+      }
+      // The point is to clear the phantom rows, so refresh what shows them.
+      await refreshStatus()
+      await load()
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setRestoring(false)
+    }
+  }
 
   const doTrack = async (patterns: string[]) => {
     setTracking(true)
@@ -189,6 +233,46 @@ export function LfsPanel({ repoPath }: LfsPanelProps) {
             >
               {tracking ? '…' : '+ Track'}
             </button>
+          </div>
+        </Section>
+
+        {/* ── Repair ────────────────────────────────────────────────── */}
+        <Section label="Repair file contents">
+          <div className="px-3 py-2 space-y-2">
+            <div className="text-[10px] font-mono text-lg-text-secondary leading-relaxed">
+              If a checkout was interrupted, files can be left holding LFS pointers where the real
+              content belongs — sometimes showing as modified rows you never edited, sometimes
+              looking perfectly clean. This rewrites them from the local LFS cache, which is free
+              and offline; anything the cache cannot supply is priced first and downloaded only if
+              you say so. Files you have genuinely edited are left untouched, and neither your
+              history nor the index is involved.
+            </div>
+            <button
+              onClick={() => doRestore(false)}
+              disabled={restoring}
+              className="px-2 h-6 rounded text-[10px] font-mono border border-lg-border text-lg-text-secondary hover:border-lg-accent hover:text-lg-accent disabled:opacity-40 transition-colors"
+            >
+              {restoring ? 'Restoring…' : '↻ Restore file contents'}
+            </button>
+            {restoreMsg && (
+              <div className="text-[10px] font-mono text-lg-success whitespace-pre-wrap">{restoreMsg}</div>
+            )}
+            {pendingDownload && (
+              <div className="space-y-1.5 pt-1 border-t border-lg-border/50">
+                <div className="text-[10px] font-mono text-lg-warning">
+                  {pendingDownload.files} file{pendingDownload.files === 1 ? '' : 's'} still
+                  need{pendingDownload.files === 1 ? 's' : ''} content that isn't in the local cache
+                  — {formatBytes(pendingDownload.bytes)} to download from the remote.
+                </div>
+                <button
+                  onClick={() => doRestore(true)}
+                  disabled={restoring}
+                  className="px-2 h-6 rounded text-[10px] font-mono border border-lg-warning/50 text-lg-warning hover:bg-lg-warning/10 disabled:opacity-40 transition-colors"
+                >
+                  {restoring ? 'Downloading…' : `↓ Download ${formatBytes(pendingDownload.bytes)}`}
+                </button>
+              </div>
+            )}
           </div>
         </Section>
 

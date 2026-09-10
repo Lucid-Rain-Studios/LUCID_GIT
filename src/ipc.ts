@@ -745,6 +745,7 @@ export interface LucidGitAPI {
 
   // LFS
   lfsStatus:    (repoPath: string, force?: boolean) => Promise<LFSStatus>
+  lfsRestore:   (repoPath: string, download?: boolean) => Promise<{ restored: number; remaining: number; remainingBytes: number }>
   lfsTrack:     (repoPath: string, patterns: string[]) => Promise<void>
   lfsUntrack:   (repoPath: string, pattern: string) => Promise<void>
   lfsMigrate:   (repoPath: string, patterns: string[]) => Promise<void>

@@ -17,6 +17,12 @@ const STALE_PACK_RETRY_DELAY_MS = 2000
 // the threshold the cherry-pick conflict dialog uses for its manual prompt.
 const STALE_INDEX_LOCK_S = 5
 
+// Every Git LFS pointer opens with this line, and the spec caps the whole file
+// at 1 KB. Together they identify a pointer left on disk by a failed smudge
+// without mistaking an edited asset for one.
+const LFS_POINTER_MAGIC = 'version https://git-lfs.github.com/spec/v1'
+const LFS_POINTER_MAX_BYTES = 1024
+
 /**
  * Throw if `deadline` (epoch ms) has passed. Used to abandon a scan on our own
  * terms rather than leaving it running past the point anyone is still waiting.
@@ -815,8 +821,15 @@ class GitService {
   }
 
   private async recoverLfsAndMergeState(repoPath: string): Promise<void> {
-    await execSafe(['lfs', 'uninstall'], repoPath)
-    await execSafe(['lfs', 'install'], repoPath)
+    // `--local` on both: without it these edit the user's ~/.gitconfig, so a
+    // failed fetch in one repository reconfigures Git LFS for every repository
+    // on the machine. Git for Windows also writes the filters into the system
+    // config, which masked the damage there — but where git-lfs was installed
+    // on its own, the global entries are the only ones, and the window between
+    // uninstall and install is one where LFS is simply not set up. Repo-local
+    // entries take precedence over both scopes, so the repair still works.
+    await execSafe(['lfs', 'uninstall', '--local'], repoPath)
+    await execSafe(['lfs', 'install', '--local'], repoPath)
     await execSafe(['merge', '--abort'], repoPath)
 
     const gitDirRes = await execSafe(['rev-parse', '--git-dir'], repoPath)
@@ -1929,7 +1942,10 @@ class GitService {
 
     if (message.includes('smudge filter lfs failed') || message.includes('git-lfs filter-process')) {
       return `Git LFS could not restore the original file contents. ` +
-             `Check that you are online and that Git LFS is installed, then discard again.`
+             `Check that you are online and that Git LFS is installed. ` +
+             `If these files show as modified but you never edited them, an interrupted checkout ` +
+             `left LFS pointers on disk — use LFS → Restore file contents, which repairs them ` +
+             `from the local cache instead of re-downloading every file.`
     }
 
     if (this.isStaleIndexLockError(lastError)) {
@@ -3068,6 +3084,110 @@ class GitService {
     }
 
     return { tracked, untracked: [...untrackedSet].sort(), objects, totalBytes }
+  }
+
+  /**
+   * Count LFS files whose working copy is still a pointer rather than content.
+   *
+   * `git status` cannot answer this. Git trusts the stat data it recorded when
+   * it wrote the file, so a checkout that skipped or failed the smudge leaves a
+   * tree full of 131-byte pointers that git reports as perfectly clean — it
+   * never re-reads them to notice. `git lfs ls-files` marks each path `*` when
+   * the content is present in the working tree and `-` when only the pointer
+   * is, which is the state this repair actually cares about.
+   */
+  private async lfsPointerFiles(repoPath: string): Promise<{ path: string; size: number }[]> {
+    const res = await execSafe(['lfs', 'ls-files'], repoPath)
+    if (res.exitCode !== 0) return []
+
+    // `-` marks a path whose working copy is not the tracked object. That
+    // covers two very different files: one still holding its pointer, and one
+    // the user has edited — an edit is not the tracked object either. Only the
+    // first is repairable, and rewriting the second would destroy unsaved
+    // work, so the mark on its own cannot be the test.
+    const candidates = res.stdout.split('\n')
+      .map(line => /^[0-9a-f]+ - (.+)$/.exec(line.trimEnd())?.[1])
+      .filter((p): p is string => Boolean(p))
+
+    const pointers: { path: string; size: number }[] = []
+    for (const rel of candidates) {
+      try {
+        const full = path.join(repoPath, rel)
+        // A pointer is ~130 bytes and the spec caps it at 1 KB, so size alone
+        // rules out an edited asset without opening it — which on an Unreal
+        // project is almost all of them.
+        const stat = await fs.promises.lstat(full)
+        if (!stat.isFile() || stat.size > LFS_POINTER_MAX_BYTES) continue
+
+        const buf = await fs.promises.readFile(full)
+        const text = buf.toString('utf8')
+        if (!text.startsWith(LFS_POINTER_MAGIC)) continue
+
+        // The pointer states the real byte count, so the download it stands
+        // for can be priced without asking the remote anything.
+        pointers.push({ path: rel, size: Number(/^size (\d+)$/m.exec(text)?.[1] ?? 0) })
+      } catch {
+        // Unreadable or already gone — not something this repair can fix.
+      }
+    }
+    return pointers
+  }
+
+  /**
+   * Rewrite working-tree files whose content never made it out of Git LFS,
+   * without going near the index.
+   *
+   * A checkout killed partway — the app force-quit mid-fetch, a smudge filter
+   * that died on a rejected token — leaves LFS *pointers* on disk where the
+   * real content belongs. How that surfaces depends on whether git's stat
+   * cache still matches: where it does, the repo reports clean while the
+   * assets on disk are unusable 131-byte stubs; where an interrupted write
+   * invalidated it, git re-hashes and the same files appear as thousands of
+   * modified rows nobody edited. Both are the same damage and take the same
+   * repair.
+   *
+   * Discard is the wrong repair and an expensive one: `git restore` re-runs
+   * the smudge filter over every path and re-downloads anything absent from
+   * the local cache. `lfs checkout` writes content for objects already cached
+   * and costs nothing, so it always runs.
+   *
+   * `download` gates the part that is not free. What the cache cannot satisfy
+   * has to come from the remote, and on an Unreal project that is readily tens
+   * of gigabytes — so the first call reports the size instead of spending it,
+   * and the caller comes back having asked.
+   */
+  async lfsRestore(
+    repoPath: string,
+    download = false,
+    onProgress?: ProgressCallback,
+  ): Promise<{ restored: number; remaining: number; remainingBytes: number }> {
+    const done = (restored: number, remaining: { size: number }[]) => {
+      onProgress?.({ id: 'lfs-restore', label: 'Restoring file contents', status: 'done' })
+      this.invalidateLfsCache(repoPath)
+      return {
+        restored,
+        remaining: remaining.length,
+        remainingBytes: remaining.reduce((sum, f) => sum + f.size, 0),
+      }
+    }
+
+    const before = await this.lfsPointerFiles(repoPath)
+    if (before.length === 0) return done(0, [])
+
+    onProgress?.({ id: 'lfs-restore', label: 'Restoring cached file contents', status: 'running' })
+    await execWithProgress(['lfs', 'checkout'], repoPath, onProgress)
+
+    let remaining = await this.lfsPointerFiles(repoPath)
+    if (remaining.length > 0 && download) {
+      // Whatever is left was never in the local cache, so it has to come down
+      // from the remote — the one part of this that needs our token.
+      onProgress?.({ id: 'lfs-restore', label: 'Downloading missing file contents', status: 'running' })
+      const auth = await this.authenticatedArgs(repoPath, [])
+      await execWithProgress([...auth, 'lfs', 'pull'], repoPath, onProgress)
+      remaining = await this.lfsPointerFiles(repoPath)
+    }
+
+    return done(Math.max(0, before.length - remaining.length), remaining)
   }
 
   /** Invalidate the LFS cache for a repo (call after lfsTrack/Untrack). */

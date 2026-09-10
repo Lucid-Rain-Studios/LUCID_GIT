@@ -606,6 +606,16 @@ export function registerHandlers(): void {
     return result
   })
 
+  // Writes working-tree content from the local LFS cache (and downloads what
+  // is missing). Nothing leaves this clone and no history is touched, so it
+  // needs no permission gate — and no read deadline either: restoring a large
+  // Unreal project legitimately runs for minutes, and it streams progress.
+  handle(CHANNELS.LFS_RESTORE, async (event, repoPath: string, download?: boolean) => {
+    return gitService.lfsRestore(repoPath, download ?? false, (step) => {
+      if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
+    })
+  })
+
   handle(CHANNELS.LFS_MIGRATE, async (event, repoPath: string, patterns: string[]) => {
     await requireAdmin(repoPath)
     return gitService.lfsMigrate(repoPath, patterns, (step) => {

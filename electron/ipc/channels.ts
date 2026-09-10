@@ -74,6 +74,7 @@ export const CHANNELS = {
   LFS_TRACK:      'lfs:track',
   LFS_UNTRACK:    'lfs:untrack',
   LFS_MIGRATE:    'lfs:migrate',
+  LFS_RESTORE:    'lfs:restore',
   LFS_AUTODETECT: 'lfs:autodetect',
   LFS_LOCKS_CHECK:  'lfs:locks-check',
   LFS_LOCKS_REPAIR: 'lfs:locks-repair',

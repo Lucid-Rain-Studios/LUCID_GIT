@@ -157,6 +157,8 @@ const api = {
   // ── LFS ───────────────────────────────────────────────────────────────────
   lfsStatus: (repoPath: string, force?: boolean) =>
     ipcRenderer.invoke(CHANNELS.LFS_STATUS, repoPath, force),
+  lfsRestore: (repoPath: string, download?: boolean) =>
+    ipcRenderer.invoke(CHANNELS.LFS_RESTORE, repoPath, download),
   lfsTrack: (repoPath: string, patterns: string[]) =>
     ipcRenderer.invoke(CHANNELS.LFS_TRACK, repoPath, patterns),
   lfsUntrack: (repoPath: string, pattern: string) =>
