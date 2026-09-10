@@ -1752,9 +1752,15 @@ class GitService {
       for (const p of paths) {
         try {
           const fullPath = path.join(repoPath, p)
-          const stat = fs.lstatSync(fullPath)
-          if (stat.isDirectory()) fs.rmSync(fullPath, { recursive: true, force: true })
-          else fs.unlinkSync(fullPath)
+          // Async throughout: the sync calls this replaced ran the whole
+          // deletion on the main thread without ever yielding, so discarding a
+          // large changeset froze the app for its full duration — no progress
+          // event delivered, no window redraw, and the longer the list the
+          // more certain it looked like a crash. These hand the filesystem
+          // work to the threadpool and give the loop a turn per file.
+          const stat = await fs.promises.lstat(fullPath)
+          if (stat.isDirectory()) await fs.promises.rm(fullPath, { recursive: true, force: true })
+          else await fs.promises.unlink(fullPath)
         } catch { /* ignore */ }
         processed++
         // Throttle: emit every 25 files (or on the final file) to avoid IPC flood on huge lists.
@@ -1856,7 +1862,14 @@ class GitService {
 
       for (const p of orphans) {
         try {
-          fs.rmSync(path.join(repoPath, p), { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+          // `retryDelay` is a *synchronous* busy-wait in the Sync form: an
+          // asset the editor still holds open costs 3 retries at 100ms with
+          // the main thread pinned throughout, and nothing here yielded
+          // between files. Measured against a real exclusive lock that is
+          // 600ms of frozen app per file — twenty minutes across a 2,000-file
+          // discard, which is the freeze that reads as a hang and ends in a
+          // force quit. The async form waits on a timer instead.
+          await fs.promises.rm(path.join(repoPath, p), { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
         } catch (e) {
           lastError = e instanceof Error ? e.message : String(e)
         }
