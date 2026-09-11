@@ -67,6 +67,15 @@ function killProcessTree(pid: number, child: ChildProcess): void {
 }
 
 /**
+ * An argument whose value must never reach a log file. Mirrors the redaction
+ * `sanitizeForLog` applies to IPC arguments, and exists for the same reason:
+ * `gitAuthArgs` passes the GitHub token inline as
+ * `http.<origin>.extraheader=AUTHORIZATION: basic <token>`, and these logs are
+ * written to disk and routinely pasted into bug reports.
+ */
+const SENSITIVE_GIT_ARG = /token|authorization|password|secret|credential|extraheader/i
+
+/**
  * One line per git process currently running, oldest first.
  *
  * Fed to the event-loop monitor's stall report. A stall line on its own says
@@ -74,14 +83,22 @@ function killProcessTree(pid: number, child: ChildProcess): void {
  * question worth asking about one — a `status --untracked-files=all` sitting
  * at three minutes names the culprit immediately, where "blocked for 246.8s"
  * begins a fresh investigation every time.
+ *
+ * The subcommand leads because the arguments do not: `gitAuthArgs` prepends
+ * four `-c` pairs to every authenticated command, so a plain join reads as a
+ * run of config flags and truncates away the verb.
  */
 export function describeLiveGitProcesses(): string[] {
   const now = Date.now()
   return [...liveGitProcesses.values()]
     .sort((a, b) => a.startedAt - b.startedAt)
     .map(p => {
-      const args = p.args.join(' ')
-      return `git ${args.length > 90 ? args.slice(0, 90) + '…' : args} (${Math.round((now - p.startedAt) / 1000)}s)`
+      const age = Math.round((now - p.startedAt) / 1000)
+      const detail = p.args
+        .map(arg => (SENSITIVE_GIT_ARG.test(arg) ? '[REDACTED]' : arg))
+        .join(' ')
+      const shown = detail.length > 120 ? detail.slice(0, 120) + '…' : detail
+      return `git ${detectGitSubcommand(p.args)} (${age}s) — ${shown}`
     })
 }
 

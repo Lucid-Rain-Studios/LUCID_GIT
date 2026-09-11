@@ -87,6 +87,44 @@ test('a stall report names what was in flight when the loop froze', async () => 
   expect(logged).not.toContain('broken probe')
 })
 
+test('the git probe names the subcommand and never logs the auth token', async () => {
+  const { describeLiveGitProcesses } = require(path.join(DIST, 'util', 'dugite-exec.js'))
+  const { execSafe } = require(path.join(DIST, 'util', 'dugite-exec.js'))
+
+  // The real shape of an authenticated command: gitAuthArgs puts the GitHub
+  // token inline, four `-c` pairs before the verb ever appears.
+  const TOKEN = 'ghp_exampleSecretValue0000000000000000'
+  const authArgs = [
+    '-c', 'maintenance.autoDetach=false',
+    '-c', 'gc.autoDetach=false',
+    '-c', 'credential.helper=',
+    '-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${Buffer.from('x-access-token:' + TOKEN).toString('base64')}`,
+    'status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored',
+  ]
+
+  const running = execSafe(authArgs, path.join(__dirname, '..')).catch(() => {})
+  // Poll rather than sleep a fixed amount: the child has to spawn and register
+  // before it can be described, and how long that git command runs depends on
+  // how warm the filesystem cache is.
+  let described = ''
+  const deadline = Date.now() + 15000
+  while (Date.now() < deadline) {
+    described = describeLiveGitProcesses().join(' | ')
+    if (described.length > 0) break
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
+  await running
+  expect(described, 'no git process was observed in flight').not.toBe('')
+
+  // A log line that only says "-c ... -c ... -c ..." answers nothing.
+  expect(described).toContain('git status')
+  // And one that says the token answers far too much: these logs are written
+  // to disk and pasted into bug reports.
+  expect(described).not.toContain(TOKEN)
+  expect(described).not.toContain('AUTHORIZATION')
+  expect(described).toContain('[REDACTED]')
+})
+
 test('deleting a large batch of files leaves the loop time to run', async () => {
   const dir = tmpDir('lg-bulk-')
   const files = []
