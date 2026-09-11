@@ -51,6 +51,7 @@ class LogService {
   private lagTimer: ReturnType<typeof setNodeInterval> | null = null
   private lagDueAt = 0
   private worstLagMs = 0
+  private activityProbes: { name: string; describe: () => string[] }[] = []
 
   // ── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -101,11 +102,41 @@ class LogService {
         'perf.event-loop',
         `Main process event loop blocked for ${(lag / 1000).toFixed(1)}s — timers, IPC replies and `
         + `git process exits were all held up for that long, and any deadline that came due is `
-        + `about to fire late.`,
+        + `about to fire late.`
+        + this.describeActivity(),
       )
     }, LAG_SAMPLE_MS)
     // Never a reason to hold the process open on our account.
     this.lagTimer.unref()
+  }
+
+  /**
+   * Register a source of "what was running" detail for stall reports.
+   *
+   * The monitor can say the loop froze; it cannot say what froze it, and that
+   * is the only question a stall raises. The layers that do know — the git
+   * subprocess registry, the IPC handler table — supply it through here.
+   * Passing the probes in rather than importing them keeps this service free
+   * of the dependency cycle that would otherwise form, since both of those
+   * already log through it.
+   */
+  registerActivityProbe(name: string, describe: () => string[]): void {
+    this.activityProbes.push({ name, describe })
+  }
+
+  /** What the probes report, as indented lines under a stall warning. */
+  private describeActivity(): string {
+    const sections: string[] = []
+    for (const probe of this.activityProbes) {
+      let lines: string[] = []
+      // A probe must never be the reason a stall goes unreported.
+      try { lines = probe.describe() } catch { continue }
+      if (lines.length === 0) continue
+      sections.push(`  ${probe.name}:`, ...lines.map(line => `    ${line}`))
+    }
+    return sections.length === 0
+      ? '\n  Nothing was in flight — the block was synchronous work on the main thread itself.'
+      : '\n' + sections.join('\n')
   }
 
   stopEventLoopMonitor(): void {

@@ -34,6 +34,29 @@ type IpcHandler<TArgs extends unknown[]> = (event: IpcMainInvokeEvent, ...args: 
 // error instead of an endless spinner.
 const READ_TIMEOUT_MS = 30_000
 
+// ── In-flight IPC registry ───────────────────────────────────────────────────
+//
+// Which handlers are mid-call, for the event-loop monitor's stall report. A
+// frozen main process cannot answer IPC, so the calls piled up behind a stall
+// are the shortest description of what the app was trying to do when it
+// stopped — and the handler that entered first is usually the one to blame.
+
+interface InFlightCall {
+  channel: string
+  startedAt: number
+}
+
+const inFlightIpc = new Map<number, InFlightCall>()
+let nextIpcCallId = 0
+
+/** One line per IPC call currently executing, oldest first. */
+export function describeInFlightIpc(): string[] {
+  const now = Date.now()
+  return [...inFlightIpc.values()]
+    .sort((a, b) => a.startedAt - b.startedAt)
+    .map(c => `${c.channel} (${Math.round((now - c.startedAt) / 1000)}s)`)
+}
+
 function sanitizeForLog(value: unknown, depth = 0): unknown {
   if (depth > 4) return '[MaxDepth]'
   if (value instanceof Error) {
@@ -100,6 +123,8 @@ async function requireWrite(repoPath: string): Promise<void> {
 export function registerHandlers(): void {
   const handle = <TArgs extends unknown[]>(channel: string, fn: IpcHandler<TArgs>): void => {
     ipcMain.handle(channel, async (event, ...args) => {
+      const callId = nextIpcCallId++
+      inFlightIpc.set(callId, { channel, startedAt: Date.now() })
       try {
         return await fn(event, ...(args as TArgs))
       } catch (error) {
@@ -111,6 +136,8 @@ export function registerHandlers(): void {
           })
         }
         throw error
+      } finally {
+        inFlightIpc.delete(callId)
       }
     })
   }

@@ -66,6 +66,25 @@ function killProcessTree(pid: number, child: ChildProcess): void {
   try { child.kill('SIGKILL') } catch { /* already gone */ }
 }
 
+/**
+ * One line per git process currently running, oldest first.
+ *
+ * Fed to the event-loop monitor's stall report. A stall line on its own says
+ * the main process froze but not what it was doing, and that is the only
+ * question worth asking about one — a `status --untracked-files=all` sitting
+ * at three minutes names the culprit immediately, where "blocked for 246.8s"
+ * begins a fresh investigation every time.
+ */
+export function describeLiveGitProcesses(): string[] {
+  const now = Date.now()
+  return [...liveGitProcesses.values()]
+    .sort((a, b) => a.startedAt - b.startedAt)
+    .map(p => {
+      const args = p.args.join(' ')
+      return `git ${args.length > 90 ? args.slice(0, 90) + '…' : args} (${Math.round((now - p.startedAt) / 1000)}s)`
+    })
+}
+
 /** Kill the given git processes. Returns how many were still alive. */
 export function killGitProcesses(pids: Iterable<number>): number {
   let killed = 0

@@ -422,6 +422,36 @@ class GitService {
     return parseStatus(stdout)
   }
 
+  /**
+   * `git status`, limited to `paths`.
+   *
+   * An unscoped status walks the whole working tree, and on an Unreal project
+   * using One File Per Actor that is hundreds of thousands of files — measured
+   * at over three minutes on a real `Content/__ExternalActors__` repository,
+   * still unfinished. `discardAll` verified its work by calling the unscoped
+   * form up to eight times, so on a repository that size the operation could
+   * not complete at all, however long it was left: the user sees a progress
+   * label that never advances and force-quits, which is where the orphaned
+   * git processes and the half-written index come from.
+   *
+   * Verification only ever asks about paths already known to be dirty, and a
+   * pathspec confines git to exactly those. Chunked for the same reason every
+   * other path list here is: Windows caps a command line at ~32k characters.
+   */
+  private async statusOfPaths(repoPath: string, paths: string[]): Promise<FileStatus[]> {
+    if (paths.length === 0) return []
+    const found: FileStatus[] = []
+    await runInPathChunks(paths, async chunk => {
+      const { exitCode, stdout, stderr } = await execSafe(
+        [NO_OPTIONAL_LOCKS, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--', ...chunk],
+        repoPath,
+      )
+      if (exitCode !== 0) throw new Error(stderr || `git status failed (exit ${exitCode})`)
+      found.push(...parseStatus(stdout))
+    })
+    return found
+  }
+
   /** Returns the short name of HEAD (branch name, or "HEAD" if detached). */
   async currentBranch(repoPath: string): Promise<string> {
     const { exitCode, stdout } = await execSafe(
@@ -1846,9 +1876,15 @@ class GitService {
       noteFailure(await execSafe(['rm', '-r', '-f', '--cached', '--ignore-unmatch', '--', '.'], repoPath))
     }
 
+    // Everything the discard is responsible for. `reset --hard` cannot dirty a
+    // path that was clean, and a staged addition it unstages is already listed
+    // here, so this set is complete — which is what lets every later check be
+    // scoped to it instead of walking the tree again.
+    const watched = before.map(f => f.path)
+
     let leftover: FileStatus[] = []
     for (let attempt = 0; attempt < 3; attempt++) {
-      leftover = (await this.status(repoPath)).filter(isLeftover)
+      leftover = (await this.statusOfPaths(repoPath, watched)).filter(isLeftover)
       if (leftover.length === 0) {
         report('done')
         return
@@ -1867,7 +1903,10 @@ class GitService {
         await runInPathChunks(stagedPaths, c => execSafe([...unstageArgs, ...c], repoPath).then(noteFailure))
       }
 
-      const stillDirty = (await this.status(repoPath)).filter(isLeftover)
+      // Re-reading only makes sense if the unstage above changed something.
+      const stillDirty = stagedPaths.length === 0
+        ? leftover
+        : (await this.statusOfPaths(repoPath, watched)).filter(isLeftover)
       // Untracked at this point means the file only ever existed in the index
       // (staged add, or a rename target) — nothing to restore it from.
       const orphans = stillDirty.filter(f => f.workingStatus === '?').map(f => f.path)
@@ -1902,7 +1941,7 @@ class GitService {
       await new Promise(r => setTimeout(r, 200))
     }
 
-    leftover = (await this.status(repoPath)).filter(isLeftover)
+    leftover = (await this.statusOfPaths(repoPath, watched)).filter(isLeftover)
     if (leftover.length === 0) {
       report('done')
       return

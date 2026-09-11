@@ -59,6 +59,34 @@ test('the event-loop monitor records a stall and survives being restarted', asyn
   logService.stopEventLoopMonitor() // also idempotent
 })
 
+test('a stall report names what was in flight when the loop froze', async () => {
+  logService.init(tmpDir('lg-probe-'))
+  logService.registerActivityProbe('git processes running', () => [
+    'git status --porcelain=v1 -z --untracked-files=all (191s)',
+  ])
+  logService.registerActivityProbe('IPC calls in flight', () => ['git:discard-all (206s)'])
+  // A probe that throws must not cost us the stall report itself.
+  logService.registerActivityProbe('broken probe', () => { throw new Error('nope') })
+  logService.startEventLoopMonitor()
+
+  // Comfortably past the 1s report floor: a sampled tick reports the block
+  // minus the sample interval, so a 1.5s block lands right on the boundary.
+  const until = Date.now() + 2500
+  while (Date.now() < until) { /* block */ }
+  await new Promise(resolve => setTimeout(resolve, 700))
+  logService.stopEventLoopMonitor()
+
+  const logged = logService.getFormattedText()
+  expect(logged).toContain('Main process event loop blocked')
+  // "blocked for 246.8s" alone starts a fresh investigation every time; these
+  // two lines are what turn it into an answer.
+  expect(logged).toContain('git processes running:')
+  expect(logged).toContain('--untracked-files=all (191s)')
+  expect(logged).toContain('IPC calls in flight:')
+  expect(logged).toContain('git:discard-all (206s)')
+  expect(logged).not.toContain('broken probe')
+})
+
 test('deleting a large batch of files leaves the loop time to run', async () => {
   const dir = tmpDir('lg-bulk-')
   const files = []

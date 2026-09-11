@@ -1,13 +1,13 @@
 import { app, BrowserWindow, Menu, shell, ipcMain } from 'electron'
 import path from 'path'
 import { autoUpdater } from 'electron-updater'
-import { registerHandlers } from './ipc/handlers'
+import { registerHandlers, describeInFlightIpc } from './ipc/handlers'
 import { CHANNELS } from './ipc/channels'
 import { watcherService } from './services/WatcherService'
 import { logService } from './services/LogService'
 import { desktopNotificationService } from './services/DesktopNotificationService'
 import { settingsService } from './services/SettingsService'
-import { killAllGitProcesses } from './util/dugite-exec'
+import { killAllGitProcesses, describeLiveGitProcesses } from './util/dugite-exec'
 
 const isDev = !app.isPackaged
 const openDevToolsOnStart = process.env.LUCID_OPEN_DEVTOOLS === '1'
@@ -287,6 +287,10 @@ app.commandLine.appendSwitch('disable-features', 'AutofillServerCommunication')
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null)
   logService.init(app.getPath('userData'))
+  // Registered before the monitor starts, so the very first stall is reported
+  // with the git processes and IPC calls that were outstanding during it.
+  logService.registerActivityProbe('git processes running', describeLiveGitProcesses)
+  logService.registerActivityProbe('IPC calls in flight', describeInFlightIpc)
   logService.startEventLoopMonitor()
   registerHandlers()
   registerUpdaterHandlers()
