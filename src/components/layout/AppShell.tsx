@@ -17,6 +17,7 @@ import { CloneDialog } from '@/components/repo/CloneDialog'
 import { DeviceFlowLogin } from '@/components/auth/DeviceFlowLogin'
 import { BranchPanel } from '@/components/branches/BranchPanel'
 import { MergePreviewDialog } from '@/components/merge/MergeDialog'
+import { useConflictStore } from '@/stores/conflictStore'
 import { CherryPickConflictDialog } from '@/components/merge/CherryPickConflictDialog'
 import { PushBlockedByLocksDialog } from '@/components/locks/PushBlockedByLocksDialog'
 import { LfsPanel } from '@/components/lfs/LfsPanel'
@@ -150,7 +151,12 @@ export function AppShell() {
   const [showCloneDialog,  setShowCloneDialog]  = useState(false)
   const [showLoginDialog,  setShowLoginDialog]  = useState(false)
   const [leftTab, setLeftTab] = useState<TabId>('dashboard')
-  const [mergeTarget, setMergeTarget] = useState<string | null>(null)
+  // Held in a store rather than local state: conflicts are raised from panels
+  // nested well below this one — a stash apply conflicts as readily as a merge
+  // — and they all need to reach the same resolver.
+  const mergeTarget = useConflictStore(s => s.target)
+  const setMergeTarget = useConflictStore(s => s.open)
+  const closeMergeTarget = useConflictStore(s => s.close)
   const [cherryPickConflict, setCherryPickConflict] = useState(false)
   const [pushBlockedError, setPushBlockedError] = useState<string | null>(null)
   const [cmdOpen, setCmdOpen] = useState(false)
@@ -735,8 +741,8 @@ export function AppShell() {
       {mergeTarget && (
         <MergePreviewDialog
           targetBranch={mergeTarget}
-          onClose={() => setMergeTarget(null)}
-          onMerged={() => { setMergeTarget(null); handleRefresh() }}
+          onClose={closeMergeTarget}
+          onMerged={() => { closeMergeTarget(); handleRefresh() }}
         />
       )}
       {cherryPickConflict && (
@@ -765,7 +771,8 @@ export function AppShell() {
           // the MergePreviewDialog on it. Falling back to the current branch
           // would render the wrong "ours/theirs" labels.
           const inProgress = await ipc.mergeInProgress(repoPath).catch(() => null)
-          setMergeTarget(inProgress?.mergedBranch ?? null)
+          if (inProgress) setMergeTarget(inProgress.mergedBranch)
+          else closeMergeTarget()
         }}
       />
       <CommandPalette

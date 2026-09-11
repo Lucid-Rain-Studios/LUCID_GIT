@@ -3,6 +3,7 @@ import { ipc, StashEntry, CommitFileChange, DiffContent } from '@/ipc'
 import { useOperationStore } from '@/stores/operationStore'
 import { useRepoStore } from '@/stores/repoStore'
 import { useDialogStore } from '@/stores/dialogStore'
+import { routeConflictToResolver } from '@/stores/conflictStore'
 import { ActionBtn } from '@/components/ui/ActionBtn'
 import { AppCheckbox } from '@/components/ui/AppCheckbox'
 import { TextDiff } from '@/components/diff/TextDiff'
@@ -81,7 +82,17 @@ export function StashPanel({ repoPath, onRefresh }: StashPanelProps) {
   const wrap = async (label: string, entry: StashEntry, op: () => Promise<void>) => {
     setActionId(entry.index); setError(null)
     try { await opRun(label, op); await load(); onRefresh() }
-    catch (e) { setError(String(e)) }
+    catch (e) {
+      // Applying a stash merges it into the working tree, so it conflicts the
+      // same way a branch merge does. Send those to the resolver rather than
+      // printing git's raw CONFLICT output, which leaves the user stuck with
+      // unmerged files and no way to choose a side.
+      if (routeConflictToResolver(e, `the stashed changes`)) {
+        await load(); onRefresh()
+      } else {
+        setError(String(e))
+      }
+    }
     finally { setActionId(null) }
   }
 

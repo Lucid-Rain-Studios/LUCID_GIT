@@ -57,6 +57,35 @@ const AUDIO_EXTS   = new Set(['.wav', '.mp3', '.ogg', '.flac', '.aif', '.aiff', 
 const VIDEO_EXTS   = new Set(['.mp4', '.avi', '.mov', '.wmv', '.mkv', '.bk2'])
 const LFS_POINTER  = 'version https://git-lfs.github.com/spec/v1'
 const CACHE_BASE   = path.join(os.homedir(), '.lucid-git', 'cache', 'asset-diffs')
+
+// ── Thumbnail concurrency ────────────────────────────────────────────────────
+//
+// A file list asks for every visible thumbnail at once, and each request runs
+// a `git cat-file`, scans the blob for an embedded PNG, and may hand it to
+// sharp to decode. Caught in the act during a 13,000-file merge: fifteen of
+// these in flight simultaneously, all twelve seconds old, while the main
+// process was already blocked for eight seconds. Ungated they compete with the
+// git operation the user is actually waiting on.
+//
+// The cap is small on purpose. These are previews — arriving a moment later
+// costs nothing, where starving a merge of CPU costs the whole window.
+const THUMBNAIL_CONCURRENCY = 3
+let activeThumbnails = 0
+const waitingThumbnails: (() => void)[] = []
+
+async function withThumbnailSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (activeThumbnails >= THUMBNAIL_CONCURRENCY) {
+    await new Promise<void>(resolve => { waitingThumbnails.push(resolve) })
+  }
+  activeThumbnails++
+  try {
+    return await fn()
+  } finally {
+    activeThumbnails--
+    // Hand the slot straight to whoever has been waiting longest.
+    waitingThumbnails.shift()?.()
+  }
+}
 const CACHE_MAX_BYTES = 5 * 1024 * 1024 * 1024 // 5 GB
 
 // ── Sharp (optional native dep) ───────────────────────────────────────────────
@@ -427,9 +456,22 @@ class AssetDiffService {
     const dir = path.join(CACHE_BASE, hash8(repoPath), `thumb-${hash8(filePath)}-${hash8(ref)}`)
     fs.mkdirSync(dir, { recursive: true })
 
+    // A cache hit costs nothing, so it answers without taking a slot — a
+    // scrolled-back file list is almost entirely cache hits and should not
+    // queue behind three cold renders.
     const outPng = path.join(dir, 'thumb.png')
     if (fs.existsSync(outPng)) return outPng
 
+    return withThumbnailSlot(async () => {
+      // Another request may have rendered this while we waited for the slot.
+      if (fs.existsSync(outPng)) return outPng
+      return this.renderThumbnailUncapped(repoPath, filePath, ref, dir, outPng)
+    })
+  }
+
+  private async renderThumbnailUncapped(
+    repoPath: string, filePath: string, ref: string, dir: string, outPng: string,
+  ): Promise<string | null> {
     const blob = await this.extractBlob(repoPath, filePath, ref, dir, 'left')
     if (!blob.blobPath) return null
 

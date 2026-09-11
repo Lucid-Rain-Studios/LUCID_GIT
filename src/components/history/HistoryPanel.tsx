@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { ipc, CommitEntry, CommitFileChange, BranchInfo, BlameEntry, StashEntry } from '@/ipc'
 import { useOperationStore } from '@/stores/operationStore'
 import { useDialogStore } from '@/stores/dialogStore'
+import { routeConflictToResolver } from '@/stores/conflictStore'
 import { useRepoStore } from '@/stores/repoStore'
 import { computeGraph, GraphNode, LANE_W, ROW_H, DOT_R, GRAPH_PAD, LineSegment } from './graphLayout'
 import { AppCheckbox } from '@/components/ui/AppCheckbox'
@@ -615,7 +616,16 @@ function StashPanel({ repoPath }: { repoPath: string }) {
       await opRun('Applying stash…', () => ipc.stashApply(repoPath, s.ref))
       bumpSyncTick()
       load()
-    } catch (e) { await dialog.alert({ title: 'Apply failed', message: String(e) }) }
+    } catch (e) {
+      // A stash applies by merging, so it conflicts like one. The resolver is
+      // a better answer than an alert containing git's raw CONFLICT output.
+      if (routeConflictToResolver(e, 'the stashed changes')) {
+        bumpSyncTick()
+        load()
+      } else {
+        await dialog.alert({ title: 'Apply failed', message: String(e) })
+      }
+    }
   }
 
   const handleDrop = async (s: StashEntry) => {

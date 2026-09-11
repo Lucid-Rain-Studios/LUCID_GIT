@@ -5,6 +5,7 @@ import { performance } from 'node:perf_hooks'
 import { execFile, type ChildProcess } from 'node:child_process'
 import { OperationStep } from '../types'
 import { logService } from '../services/LogService'
+import { isReadOnlyCommand } from './git-command'
 
 export type ProgressCallback = (step: OperationStep) => void
 
@@ -25,6 +26,8 @@ interface LiveGitProcess {
   child: ChildProcess
   args: string[]
   startedAt: number
+  repoKey: string
+  readOnly: boolean
 }
 
 const liveGitProcesses = new Map<number, LiveGitProcess>()
@@ -37,11 +40,15 @@ const liveGitProcesses = new Map<number, LiveGitProcess>()
 const gitProcessScope = new AsyncLocalStorage<Set<number>>()
 
 /** Record a freshly spawned git process, and forget it once it exits. */
-function registerGitProcess(child: ChildProcess, args: string[]): void {
+function registerGitProcess(child: ChildProcess, args: string[], repoPath = ''): void {
   const pid = child.pid
   if (pid === undefined) return
 
-  liveGitProcesses.set(pid, { child, args, startedAt: Date.now() })
+  liveGitProcesses.set(pid, {
+    child, args, startedAt: Date.now(),
+    repoKey: repoPath ? path.resolve(repoPath).toLowerCase() : '',
+    readOnly: isReadOnlyCommand(args),
+  })
   gitProcessScope.getStore()?.add(pid)
 
   const forget = () => { liveGitProcesses.delete(pid) }
@@ -100,6 +107,31 @@ export function describeLiveGitProcesses(): string[] {
       const shown = detail.length > 120 ? detail.slice(0, 120) + '…' : detail
       return `git ${detectGitSubcommand(p.args)} (${age}s) — ${shown}`
     })
+}
+
+/**
+ * End read-only git processes running against `repoPath`.
+ *
+ * Called when a write has waited too long for the repository. These are UI
+ * queries whose callers already handle failure and will ask again; a read that
+ * has not finished in ten seconds is not about to, and the operation the user
+ * asked for should not queue behind it indefinitely. Writes are never touched.
+ */
+export function preemptRepoReads(repoPath: string): number {
+  const key = path.resolve(repoPath).toLowerCase()
+  const doomed = [...liveGitProcesses.entries()]
+    .filter(([, p]) => p.readOnly && p.repoKey === key)
+    .map(([pid]) => pid)
+  if (doomed.length === 0) return 0
+
+  const killed = killGitProcesses(doomed)
+  if (killed > 0) {
+    logService.warn(
+      'git.gate',
+      `Ended ${killed} read-only git process(es) holding ${repoPath} so a waiting write could start.`,
+    )
+  }
+  return killed
 }
 
 /** Kill the given git processes. Returns how many were still alive. */
@@ -341,7 +373,7 @@ async function execWithProgressInner(
         GIT_LFS_FORCE_PROGRESS: '1',
       },
     })
-    registerGitProcess(proc, args)
+    registerGitProcess(proc, args, repoPath)
 
     let stdout = ''
     let stderr = ''
@@ -411,7 +443,7 @@ export async function exec(
 ): Promise<{ stdout: string; stderr: string }> {
   const result = await trackGitOp(repoPath, () => GitProcess.exec(args, repoPath, {
     env: { ...process.env, ...GIT_BASE_ENV },
-    processCallback: child => registerGitProcess(child, args),
+    processCallback: child => registerGitProcess(child, args, repoPath),
   }))
 
   if (result.exitCode !== 0) {
@@ -436,7 +468,7 @@ export async function execWithStdin(
 ): Promise<{ stdout: string; stderr: string }> {
   const result = await trackGitOp(repoPath, () => GitProcess.exec(args, repoPath, {
     env: { ...process.env, ...GIT_BASE_ENV },
-    processCallback: child => registerGitProcess(child, args),
+    processCallback: child => registerGitProcess(child, args, repoPath),
     stdin,
     stdinEncoding: 'utf8',
   }))
@@ -578,7 +610,7 @@ export async function execSafe(
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const result = await trackGitOp(repoPath, () => GitProcess.exec(args, repoPath, {
     env: { ...process.env, ...GIT_BASE_ENV },
-    processCallback: child => registerGitProcess(child, args),
+    processCallback: child => registerGitProcess(child, args, repoPath),
   }))
   return {
     stdout: result.stdout,

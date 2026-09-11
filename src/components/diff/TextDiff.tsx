@@ -1,13 +1,18 @@
 import React from 'react'
 import { DiffEditor } from '@monaco-editor/react'
 import { DiffContent } from '@/ipc'
+import { DiffErrorBoundary } from './DiffErrorBoundary'
 
 interface TextDiffProps {
   diff: DiffContent
 }
 
 export function TextDiff({ diff }: TextDiffProps) {
+  // Keyed on what is being shown, so a failure clears when the file changes.
+  const resetKey = `${diff.language}:${diff.oldContent.length}:${diff.newContent.length}`
+
   return (
+    <DiffErrorBoundary resetKey={resetKey}>
     <DiffEditor
       original={diff.oldContent}
       modified={diff.newContent}
@@ -34,5 +39,6 @@ export function TextDiff({ diff }: TextDiffProps) {
         </div>
       }
     />
+    </DiffErrorBoundary>
   )
 }

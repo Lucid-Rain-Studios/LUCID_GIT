@@ -1,8 +1,9 @@
-// Discard All: correctness, and the cost of verifying its own work.
+// Discard All: correctness, and what it costs to get there.
 //
 // An unscoped `git status` walks the whole working tree. On a One File Per
-// Actor Unreal project that is minutes, and this operation used to run one up
-// to eight times — so on a repository that size it could never finish at all.
+// Actor Unreal project that was measured at over three minutes and routinely
+// did not finish, and this operation used to run one before anything else —
+// so a discard could sit for an hour without ever reaching the reset.
 const { test, expect } = require('@playwright/test')
 const fs = require('fs')
 const path = require('path')
@@ -30,15 +31,46 @@ function dirtyRepo() {
   return repo
 }
 
-/** Record every `git status` this ran, split by whether it was scoped. */
+/** A repo left mid-merge by a conflict git could not resolve on its own. */
+function conflictedRepo() {
+  const repo = tmpDir('lg-conflict-')
+  git(repo, 'init', '-q', '-b', 'main', '.')
+  git(repo, 'config', 'user.email', 'test@example.com')
+  git(repo, 'config', 'user.name', 'Test')
+  git(repo, 'config', 'core.autocrlf', 'false')
+  fs.writeFileSync(path.join(repo, 'shared.txt'), 'base\n')
+  git(repo, 'add', '-A')
+  git(repo, 'commit', '-qm', 'base')
+
+  git(repo, 'checkout', '-q', '-b', 'feature')
+  fs.writeFileSync(path.join(repo, 'shared.txt'), 'feature\n')
+  fs.writeFileSync(path.join(repo, 'only-on-feature.txt'), 'f\n')
+  git(repo, 'add', '-A')
+  git(repo, 'commit', '-qm', 'feature')
+
+  git(repo, 'checkout', '-q', 'main')
+  fs.writeFileSync(path.join(repo, 'shared.txt'), 'main\n')
+  git(repo, 'add', '-A')
+  git(repo, 'commit', '-qm', 'main change')
+
+  try {
+    git(repo, 'merge', '--no-edit', 'feature')
+  } catch {
+    // Expected: this is the state under test.
+  }
+  return repo
+}
+
+/** Classify every `git status` this ran, by how much of the tree it walks. */
 async function recordStatusCalls(fn) {
   const dugite = require(path.join(__dirname, '..', 'node_modules', 'dugite'))
   const real = dugite.GitProcess.exec.bind(dugite.GitProcess)
-  const calls = { full: 0, scoped: 0 }
+  const calls = { fullWalk: 0, trackedOnly: 0, scoped: 0 }
   dugite.GitProcess.exec = (args, ...rest) => {
     if (Array.isArray(args) && args.includes('status')) {
       if (args.includes('--')) calls.scoped++
-      else calls.full++
+      else if (args.includes('--untracked-files=no')) calls.trackedOnly++
+      else calls.fullWalk++   // -uall over the whole tree: the three-minute one
     }
     return real(args, ...rest)
   }
@@ -70,29 +102,45 @@ test('discard all leaves untracked files that were never staged', async () => {
   expect(fs.readFileSync(path.join(repo, 'never-staged.txt'), 'utf8')).toBe('mine\n')
 })
 
-test('discard all walks the whole tree once, and verifies scoped thereafter', async () => {
+test('a clean discard never walks the working tree at all', async () => {
   const repo = dirtyRepo()
   const calls = await recordStatusCalls(() => gitService.discardAll(repo))
 
-  // One unscoped walk to learn what is dirty. Everything after that asks only
-  // about those paths, which is what makes this survivable on a large repo.
-  expect(calls.full).toBe(1)
+  // Everything it needs comes from the index. The walk this replaced ran
+  // before the reset, which is why a discard could hang without starting.
+  expect(calls.fullWalk).toBe(0)
+  expect(calls.trackedOnly).toBe(0)
+  expect(calls.scoped).toBe(0)
 })
 
-test('a discard that has to retry still only walks the whole tree once', async () => {
-  const repo = dirtyRepo()
-  // Leave a path git cannot restore cleanly so the retry loop engages: a
-  // directory standing where a staged file belongs.
-  fs.writeFileSync(path.join(repo, 'blocker.txt'), 'x\n')
-  git(repo, 'add', 'blocker.txt')
-  fs.rmSync(path.join(repo, 'blocker.txt'))
-  fs.mkdirSync(path.join(repo, 'blocker.txt'))
-  fs.writeFileSync(path.join(repo, 'blocker.txt', 'inside.txt'), 'y\n')
+test('a conflicted merge is aborted, not unpicked file by file', async () => {
+  const repo = conflictedRepo()
+  expect(fs.existsSync(path.join(repo, '.git', 'MERGE_HEAD'))).toBe(true)
 
-  const calls = await recordStatusCalls(async () => {
-    try { await gitService.discardAll(repo) } catch { /* may legitimately fail */ }
-  })
+  const calls = await recordStatusCalls(() => gitService.discardAll(repo))
 
-  expect(calls.full).toBe(1)
-  expect(calls.scoped).toBeGreaterThan(0)
+  // The merge is gone and the branch is back at its committed state.
+  expect(fs.existsSync(path.join(repo, '.git', 'MERGE_HEAD'))).toBe(false)
+  expect(git(repo, 'status', '--porcelain').trim()).toBe('')
+  expect(fs.readFileSync(path.join(repo, 'shared.txt'), 'utf8')).toBe('main\n')
+  // Files the merge was bringing in must not survive it.
+  expect(fs.existsSync(path.join(repo, 'only-on-feature.txt'))).toBe(false)
+  expect(calls.fullWalk).toBe(0)
+})
+
+test('a repo with no commits yet still discards its staged files', async () => {
+  const repo = tmpDir('lg-nohead-')
+  git(repo, 'init', '-q', '.')
+  git(repo, 'config', 'user.email', 'test@example.com')
+  git(repo, 'config', 'user.name', 'Test')
+  fs.writeFileSync(path.join(repo, 'staged.txt'), 'x\n')
+  git(repo, 'add', '-A')
+  fs.writeFileSync(path.join(repo, 'loose.txt'), 'y\n')
+
+  // No HEAD means no tree to reset to, so the index is emptied instead and
+  // every entry in it is by definition an addition to remove.
+  await gitService.discardAll(repo)
+
+  expect(fs.existsSync(path.join(repo, 'staged.txt'))).toBe(false)
+  expect(fs.existsSync(path.join(repo, 'loose.txt'))).toBe(true)
 })

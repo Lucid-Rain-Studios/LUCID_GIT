@@ -97,6 +97,10 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
   const [inConflictResolution, setInConflictResolution] = useState(false)
   const [preselectedChoices, setPreselectedChoices] = useState<Record<string, 'ours' | 'theirs'>>({})
   const [recoveredMergeBranch, setRecoveredMergeBranch] = useState<string | null>(null)
+  // Conflicts from a stash apply resolve per file exactly like a merge, but
+  // there is no merge to conclude and none to abort. The two buttons that
+  // assume otherwise have to say something different.
+  const [isRealMerge, setIsRealMerge] = useState(true)
   const opRun = useOperationStore(s => s.run)
   const displayMergeBranch = recoveredMergeBranch ?? targetBranch
   // Auto-resolved files don't need a choice — git already wrote one to the
@@ -121,6 +125,7 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
     ipc.mergeInProgress(repoPath)
       .then(async (inProgress) => {
         if (inProgress) {
+          setIsRealMerge(inProgress.kind === 'merge')
           setRecoveredMergeBranch(inProgress.mergedBranch)
           setConflicts(inProgress.conflicts)
           setInConflictResolution(true)
@@ -199,7 +204,8 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
         if (!choice) continue
         await opRun(`Resolving ${c.path}…`, () => ipc.mergeResolveText(repoPath, c.path, choice))
       }
-      await opRun('Finalizing merge...', () => ipc.mergeContinue(repoPath, displayMergeBranch))
+      await opRun(isRealMerge ? 'Finalizing merge...' : 'Applying choices...',
+        () => ipc.mergeContinue(repoPath, displayMergeBranch))
       await refreshStatus()
       bumpSyncTick()
       onMerged()
@@ -273,7 +279,9 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
             <div className="flex flex-col items-center justify-center py-10 gap-2">
               <div className="text-lg-success text-2xl">✓</div>
               <div className="text-xs font-mono text-lg-text-primary font-semibold">
-                {inConflictResolution ? 'Merge ready to finalize' : 'No conflicts'}
+                {inConflictResolution
+                  ? (isRealMerge ? 'Merge ready to finalize' : 'Conflicts ready to resolve')
+                  : 'No conflicts'}
               </div>
               <div className="text-[10px] font-mono text-lg-text-secondary text-center max-w-sm">
                 {inConflictResolution
@@ -435,13 +443,16 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
             {conflicts.length === 0 && <div />}
             <div className="flex gap-2 shrink-0">
               <ActionBtn
-                onClick={inConflictResolution ? abortMerge : onClose}
+                onClick={inConflictResolution && isRealMerge ? abortMerge : onClose}
                 disabled={merging}
-                color={inConflictResolution ? '#e84545' : undefined}
+                color={inConflictResolution && isRealMerge ? '#e84545' : undefined}
                 size="sm"
+                title={inConflictResolution && !isRealMerge
+                  ? 'These conflicts came from applying changes into the working tree, so there is no merge to abort. Closing leaves them unresolved.'
+                  : undefined}
                 style={{ height: 28, paddingLeft: 12, paddingRight: 12, fontSize: 11, fontFamily: 'var(--lg-font-mono)' }}
               >
-                {inConflictResolution ? 'Abort merge' : 'Cancel'}
+                {inConflictResolution && isRealMerge ? 'Abort merge' : 'Cancel'}
               </ActionBtn>
               {inConflictResolution ? (
                 <button
@@ -450,7 +461,9 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
                   className="px-3 h-7 rounded text-[11px] font-mono bg-lg-success/20 border border-lg-success/60 text-lg-success hover:bg-lg-success/30 transition-colors disabled:opacity-40"
                   title={!allChoicesMade && !canFinalizeWithoutChoices ? 'Pick a side for every conflicted file first' : undefined}
                 >
-                  {merging ? 'Completing merge…' : 'Complete merge'}
+                  {isRealMerge
+                    ? (merging ? 'Completing merge…' : 'Complete merge')
+                    : (merging ? 'Applying choices…' : 'Keep these choices')}
                 </button>
               ) : (
                 <button

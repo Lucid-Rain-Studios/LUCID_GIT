@@ -725,7 +725,14 @@ export interface LucidGitAPI {
   mergeContinue: (repoPath: string, targetBranch: string) => Promise<void>
   mergeAbort: (repoPath: string) => Promise<void>
   mergeInProgress: (repoPath: string) => Promise<{
-    mergeHead: string
+    /**
+     * 'merge' when MERGE_HEAD exists and the merge can be concluded or aborted.
+     * 'conflict' when the working tree has unmerged files but no merge to
+     * finish — what `git stash apply` leaves behind. Same resolution per file,
+     * but nothing to commit and nothing to abort.
+     */
+    kind: 'merge' | 'conflict'
+    mergeHead: string | null
     mergedBranch: string
     unresolvedFiles: string[]
     conflicts: ConflictPreviewFile[]

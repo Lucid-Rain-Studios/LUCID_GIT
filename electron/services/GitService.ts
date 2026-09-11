@@ -172,7 +172,6 @@ function sumPointerSizes(raw: string): number {
 // regardless (re-verified against the bundled Git 2.43.4), so adding it there would
 // buy nothing. Mandatory locks — add, commit, checkout — are not optional
 // locks and are unaffected either way.
-const NO_OPTIONAL_LOCKS = '--no-optional-locks'
 
 interface MergeTreeReport {
   /** Paths git could not merge on its own. */
@@ -410,46 +409,94 @@ class GitService {
 
   /** git status --porcelain=v1 */
   async status(repoPath: string): Promise<FileStatus[]> {
+    // No `--no-optional-locks` here, deliberately. It stops git writing back
+    // the index it just refreshed, so after a merge changes every file's stat
+    // data each status re-hashes all of them through the LFS clean filter and
+    // never gets to keep the result — measured repeating at 2658ms against
+    // 31ms once the refresh is persisted, which is how this reached a 30s
+    // timeout four times in a row. The lock is optional in git's own sense:
+    // when it cannot be taken, git skips the write instead of failing.
+    //
     // -uall lists every untracked file individually instead of collapsing a
     // new directory into one "dir/" entry. stage() feeds these paths to
     // `git update-index`, which takes literal file paths and cannot expand
     // directories, so file granularity here is load-bearing.
     const { exitCode, stdout, stderr } = await execSafe(
-      [NO_OPTIONAL_LOCKS, 'status', '--porcelain=v1', '-z', '--untracked-files=all'],
+      ['status', '--porcelain=v1', '-z', '--untracked-files=all'],
       repoPath
     )
     if (exitCode !== 0) throw new Error(stderr || `git status failed (exit ${exitCode})`)
     return parseStatus(stdout)
   }
 
+  /** Absolute path to this repository's .git directory. */
+  private async gitDirOf(repoPath: string): Promise<string | null> {
+    const res = await execSafe(['rev-parse', '--git-dir'], repoPath)
+    if (res.exitCode !== 0) return null
+    return path.resolve(repoPath, res.stdout.trim())
+  }
+
   /**
-   * `git status`, limited to `paths`.
+   * The operation git has left half-finished, if any.
    *
-   * An unscoped status walks the whole working tree, and on an Unreal project
-   * using One File Per Actor that is hundreds of thousands of files — measured
-   * at over three minutes on a real `Content/__ExternalActors__` repository,
-   * still unfinished. `discardAll` verified its work by calling the unscoped
-   * form up to eight times, so on a repository that size the operation could
-   * not complete at all, however long it was left: the user sees a progress
-   * label that never advances and force-quits, which is where the orphaned
-   * git processes and the half-written index come from.
-   *
-   * Verification only ever asks about paths already known to be dirty, and a
-   * pathspec confines git to exactly those. Chunked for the same reason every
-   * other path list here is: Windows caps a command line at ~32k characters.
+   * Read from marker files rather than inferred from status, so it costs four
+   * `access` calls instead of a walk of the working tree. It has to be cheap
+   * because it runs before anything else a discard does.
    */
-  private async statusOfPaths(repoPath: string, paths: string[]): Promise<FileStatus[]> {
-    if (paths.length === 0) return []
-    const found: FileStatus[] = []
-    await runInPathChunks(paths, async chunk => {
-      const { exitCode, stdout, stderr } = await execSafe(
-        [NO_OPTIONAL_LOCKS, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--', ...chunk],
-        repoPath,
-      )
-      if (exitCode !== 0) throw new Error(stderr || `git status failed (exit ${exitCode})`)
-      found.push(...parseStatus(stdout))
-    })
-    return found
+  private async inProgressOperation(
+    repoPath: string,
+  ): Promise<'merge' | 'rebase' | 'cherry-pick' | 'revert' | null> {
+    const gitDir = await this.gitDirOf(repoPath)
+    if (!gitDir) return null
+    const exists = (name: string) =>
+      fs.promises.access(path.join(gitDir, name)).then(() => true, () => false)
+
+    if (await exists('MERGE_HEAD')) return 'merge'
+    if (await exists('rebase-merge') || await exists('rebase-apply')) return 'rebase'
+    if (await exists('CHERRY_PICK_HEAD')) return 'cherry-pick'
+    if (await exists('REVERT_HEAD')) return 'revert'
+    return null
+  }
+
+  /**
+   * Paths that exist in the index but not in HEAD — the files `reset --hard`
+   * will leave behind on disk as untracked, and which a discard must delete.
+   *
+   * Compares the index against a tree, so it never touches the working tree.
+   * That is the whole point: the walk this replaces was `git status
+   * --untracked-files=all`, measured at over three minutes on an Unreal
+   * project using One File Per Actor and routinely not finishing at all. It
+   * ran first, so a discard could sit for an hour without reaching the reset.
+   *
+   * `--no-renames` because rename detection over a large changeset is its own
+   * multi-second cost, and a rename reported as delete-plus-add is exactly the
+   * answer wanted here anyway.
+   */
+  private async stagedAdditions(repoPath: string, headExists: boolean): Promise<string[]> {
+    // With no commit yet there is no tree to compare against, and every entry
+    // in the index is by definition an addition.
+    const args = headExists
+      ? ['diff', '--cached', '--name-only', '--diff-filter=A', '--no-renames', '-z']
+      : ['ls-files', '-z']
+    const res = await execSafe(args, repoPath)
+    if (res.exitCode !== 0) return []
+    return res.stdout.split('\0').filter(Boolean)
+  }
+
+  /**
+   * Tracked files still differing from HEAD. Used only after something has
+   * already failed, so the cost is paid on the unhappy path alone.
+   *
+   * `--untracked-files=no` skips the untracked-directory recursion, which is
+   * the expensive half of a status on a repository of this shape.
+   */
+  private async dirtyTrackedPaths(repoPath: string): Promise<string[]> {
+    const res = await execSafe(
+      ['status', '--porcelain=v1', '-z', '--untracked-files=no'],
+      repoPath,
+    )
+    if (res.exitCode !== 0) return []
+    return parseStatus(res.stdout).map(f => f.path)
   }
 
   /** Returns the short name of HEAD (branch name, or "HEAD" if detached). */
@@ -1841,21 +1888,13 @@ class GitService {
     const report = (status: 'running' | 'done' = 'running', detail?: string) =>
       onProgress?.({ id: 'discard-all', label: 'Discarding changes', status, detail })
 
-    report('running', 'Reading status…')
-    const before = await this.status(repoPath)
-    // Files that are untracked *and* were never staged stay put — the button
-    // is offered on that basis, and deleting them would be a surprise.
-    const keep = new Set(before.filter(f => f.indexStatus === '?').map(f => f.path))
-    const isLeftover = (f: FileStatus) => !keep.has(f.path)
-
     const headExists = (await execSafe(['rev-parse', '--verify', 'HEAD'], repoPath)).exitCode === 0
 
-    // `reset --hard` and `restore` rewrite tracked files through the Git LFS
-    // smudge filter, which fetches any object that is not in the local LFS
-    // cache. That fetch needs our token — unauthenticated it falls through to
-    // the system credential manager, whose stale entry the LFS batch API
-    // rejects with "Bad credentials", and every affected file survives the
-    // discard.
+    // `reset --hard` rewrites tracked files through the Git LFS smudge filter,
+    // which fetches any object that is not in the local LFS cache. That fetch
+    // needs our token — unauthenticated it falls through to the system
+    // credential manager, whose stale entry the LFS batch API rejects with
+    // "Bad credentials", and every affected file survives the discard.
     const auth = await this.authenticatedArgs(repoPath, [])
 
     let lastError = ''
@@ -1863,97 +1902,107 @@ class GitService {
       if (res.exitCode !== 0) lastError = (res.stderr || res.stdout).trim()
     }
 
-    report('running', 'Resetting working tree…')
+    // ── 1. Undo whatever git left half-finished ──────────────────────────────
+    //
+    // A conflicted merge is the case that used to make this unusable. Its
+    // thirteen thousand staged entries are one operation to git and thirteen
+    // thousand separate problems to anything that works file by file, and an
+    // unmerged index makes `reset --hard` reconcile every one of them. Asking
+    // git to abort its own operation is a single index write.
+    const inProgress = await this.inProgressOperation(repoPath)
+    if (inProgress) {
+      report('running', `Aborting ${inProgress}…`)
+      const abort = await execSafe([...auth, inProgress, '--abort'], repoPath)
+      // Not fatal on its own: the reset below reaches the same end state, and
+      // reporting an abort failure would hide the more useful error from it.
+      if (abort.exitCode !== 0) lastError = (abort.stderr || abort.stdout).trim()
+    }
+
+    // ── 2. Note what only exists because it was staged ───────────────────────
+    //
+    // Read after the abort, so it describes the index the reset will act on,
+    // and read from the index rather than the working tree — this is the query
+    // that replaced the three-minute walk.
+    const stagedAdditions = await this.stagedAdditions(repoPath, headExists)
+
+    // ── 3. Reset ─────────────────────────────────────────────────────────────
+    report('running', 'Restoring tracked files…')
     if (headExists) {
-      // Clears the index, restores tracked files, deletes index-only files, and
-      // drops any half-finished merge state — all in one index rewrite.
+      // Clears the index, restores tracked files, and drops any remaining
+      // merge state — one index rewrite for the whole tree.
       noteFailure(await execSafe([...auth, 'reset', '--hard', 'HEAD'], repoPath))
     } else {
       // No commits yet, so nothing to restore to and `reset --hard` cannot run.
       // Emptying the index turns every staged file into an untracked one, which
-      // the loop below then deletes — the same net effect `reset --hard` has on
-      // a staged addition.
+      // step 4 then deletes — the same net effect on a staged addition.
       noteFailure(await execSafe(['rm', '-r', '-f', '--cached', '--ignore-unmatch', '--', '.'], repoPath))
     }
 
-    // Everything the discard is responsible for. `reset --hard` cannot dirty a
-    // path that was clean, and a staged addition it unstages is already listed
-    // here, so this set is complete — which is what lets every later check be
-    // scoped to it instead of walking the tree again.
-    const watched = before.map(f => f.path)
-
-    let leftover: FileStatus[] = []
-    for (let attempt = 0; attempt < 3; attempt++) {
-      leftover = (await this.statusOfPaths(repoPath, watched)).filter(isLeftover)
-      if (leftover.length === 0) {
-        report('done')
-        return
-      }
-
-      report('running', `Clearing ${leftover.length} remaining file${leftover.length === 1 ? '' : 's'}…`)
-
-      // Unstage first so the working-tree state below is the real one.
-      // `restore --staged` needs a HEAD to restore the index from; without one
-      // the only way back is to drop the entry outright.
-      const stagedPaths = leftover.filter(f => f.staged).map(f => f.path)
-      if (stagedPaths.length > 0) {
-        const unstageArgs = headExists
-          ? [...auth, 'restore', '--staged', '--']
-          : [...auth, 'rm', '-r', '-f', '--cached', '--ignore-unmatch', '--']
-        await runInPathChunks(stagedPaths, c => execSafe([...unstageArgs, ...c], repoPath).then(noteFailure))
-      }
-
-      // Re-reading only makes sense if the unstage above changed something.
-      const stillDirty = stagedPaths.length === 0
-        ? leftover
-        : (await this.statusOfPaths(repoPath, watched)).filter(isLeftover)
-      // Untracked at this point means the file only ever existed in the index
-      // (staged add, or a rename target) — nothing to restore it from.
-      const orphans = stillDirty.filter(f => f.workingStatus === '?').map(f => f.path)
-      const tracked = stillDirty.filter(f => f.workingStatus !== '?').map(f => f.path)
-
-      for (const p of orphans) {
+    // ── 4. Delete what the reset left on disk ────────────────────────────────
+    //
+    // Unstaging an addition leaves the file behind as untracked; there is no
+    // committed version to restore it from. Untracked files that were never
+    // staged are not in this list and are deliberately left alone — the button
+    // is offered on that basis and deleting them would be a surprise.
+    if (stagedAdditions.length > 0) {
+      report('running', `Removing ${stagedAdditions.length} staged addition${stagedAdditions.length === 1 ? '' : 's'}…`)
+      for (const rel of stagedAdditions) {
         try {
-          // `retryDelay` is a *synchronous* busy-wait in the Sync form: an
-          // asset the editor still holds open costs 3 retries at 100ms with
-          // the main thread pinned throughout, and nothing here yielded
-          // between files. Measured against a real exclusive lock that is
-          // 600ms of frozen app per file — twenty minutes across a 2,000-file
-          // discard, which is the freeze that reads as a hang and ends in a
-          // force quit. The async form waits on a timer instead.
-          await fs.promises.rm(path.join(repoPath, p), { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+          await fs.promises.rm(path.join(repoPath, rel), {
+            recursive: true, force: true, maxRetries: 3, retryDelay: 100,
+          })
         } catch (e) {
           lastError = e instanceof Error ? e.message : String(e)
         }
       }
-      if (tracked.length > 0 && headExists) {
-        await runInPathChunks(tracked, c => execSafe([...auth, 'restore', '--', ...c], repoPath).then(noteFailure))
-      }
-
-      // A git or git-lfs subprocess that died mid-write leaves .git/index.lock
-      // behind, and every index write after that fails with the same error no
-      // matter how many passes we make. Repair what is repairable — the
-      // orphaned lock, an unreadable LFS lock cache, a broken LFS filter
-      // install — so the next attempt is not a replay of the last one.
-      if (lastError) await this.recoverForRetry(repoPath, new Error(lastError)).catch(() => false)
-
-      // A file an external tool has open fails now and succeeds a moment later.
-      await new Promise(r => setTimeout(r, 200))
     }
 
-    leftover = (await this.statusOfPaths(repoPath, watched)).filter(isLeftover)
+    // ── 5. Verify only if something complained ───────────────────────────────
+    //
+    // Git reports what it could not write, so a clean exit needs no proof and
+    // the happy path never walks the tree at all. The retry exists for the one
+    // failure that recurs here: an asset the Unreal editor still holds open,
+    // which fails now and succeeds a moment later.
+    if (!lastError) {
+      report('done')
+      return
+    }
+
+    report('running', 'Checking what could not be restored…')
+    let leftover = await this.dirtyTrackedPaths(repoPath)
+    if (leftover.length === 0) {
+      report('done')
+      return
+    }
+
+    // A git or git-lfs subprocess that died mid-write leaves .git/index.lock
+    // behind, and every index write after that fails the same way however many
+    // passes are made. Repair what is repairable before trying again.
+    await this.recoverForRetry(repoPath, new Error(lastError)).catch(() => false)
+    await new Promise(resolve => setTimeout(resolve, 200))
+
+    if (headExists) {
+      report('running', `Retrying ${leftover.length} file${leftover.length === 1 ? '' : 's'}…`)
+      await runInPathChunks(leftover, c =>
+        execSafe([...auth, 'restore', '--', ...c], repoPath).then(noteFailure))
+      leftover = await this.dirtyTrackedPaths(repoPath)
+    }
+
     if (leftover.length === 0) {
       report('done')
       return
     }
 
     report('done')
-    const names = leftover.slice(0, 10).map(f => f.path)
+    const names = leftover.slice(0, 10)
     const more  = leftover.length > names.length ? `\n…and ${leftover.length - names.length} more` : ''
     throw new Error(
       `Could not discard ${leftover.length} file${leftover.length === 1 ? '' : 's'}:\n${names.join('\n')}${more}\n\n` +
       this.discardFailureHint(lastError) +
-      (lastError ? `\n\nGit reported:\n${lastError}` : '')
+      (lastError ? `
+
+Git reported:
+${lastError}` : '')
     )
   }
 
@@ -2266,6 +2315,20 @@ class GitService {
     // holds theirs. This lets the user reverse git's auto-pick.
     if (!stageRes.stdout.trim()) {
       const ref = choice === 'ours' ? 'HEAD' : 'MERGE_HEAD'
+
+      // Without a merge in progress there is no MERGE_HEAD to read "theirs"
+      // from — a stash apply leaves conflicts but no such ref. Treating that
+      // as "the chosen side deleted the file" would delete a file the user
+      // asked to keep, so refuse instead. Files with real stages never reach
+      // here; this branch is only for ones git already auto-resolved.
+      if (ref === 'MERGE_HEAD' && !(await this.hasRef(repoPath, 'MERGE_HEAD'))) {
+        throw new Error(
+          `Cannot take the incoming version of ${filePath}: it was already resolved and there is no `
+          + `merge in progress to recover the other side from. Keep the current version, or re-apply `
+          + `the change that conflicted.`,
+        )
+      }
+
       const showRes = await execSafe(['cat-file', '-e', `${ref}:${filePath}`], repoPath)
       if (showRes.exitCode !== 0) {
         // The chosen side deleted the file — remove it from the index/worktree.
@@ -2303,6 +2366,14 @@ class GitService {
     if (unresolvedFiles.length > 0) {
       throw new Error(`Resolve all merge conflicts before finalizing:\n${unresolvedFiles.join('\n')}`)
     }
+
+    // Conflicts from a stash apply have no MERGE_HEAD and nothing to conclude:
+    // resolving each file already staged the chosen side, and the result
+    // belongs in the working tree as uncommitted work. Committing here would
+    // silently turn an applied stash into a commit nobody asked for.
+    const state = await this.mergeInProgress(repoPath)
+    if (state === null || state.kind === 'conflict') return
+
     // Use git's prepared MERGE_MSG (matches GitHub Desktop's "Merge branch
     // 'X' into Y" format). The fallback only fires if MERGE_MSG is missing.
     // Recovery-wrapped: this is the write that finalizes a conflict resolution,
@@ -2314,7 +2385,22 @@ class GitService {
     })
   }
 
+  /** True when `ref` resolves in this repository. */
+  private async hasRef(repoPath: string, ref: string): Promise<boolean> {
+    return (await execSafe(['rev-parse', '--verify', '--quiet', ref], repoPath)).exitCode === 0
+  }
+
   async abortMerge(repoPath: string): Promise<void> {
+    // `merge --abort` needs a merge. Conflicts from a stash apply have none,
+    // and git's own error for that ("no merge to abort") tells the user
+    // nothing about the state they are actually in.
+    if (!(await this.hasRef(repoPath, 'MERGE_HEAD'))) {
+      throw new Error(
+        'There is no merge to abort. These conflicts came from applying changes into the working '
+        + 'tree, so resolve each file instead — or use Discard All to return the branch to its '
+        + 'last commit.',
+      )
+    }
     const res = await execSafe(['merge', '--abort'], repoPath)
     if (res.exitCode !== 0) {
       throw new Error(res.stderr || res.stdout || 'No merge is currently in progress.')
@@ -2332,30 +2418,41 @@ class GitService {
    *   files needing user input).
    */
   async mergeInProgress(repoPath: string): Promise<{
-    mergeHead: string
+    kind: 'merge' | 'conflict'
+    mergeHead: string | null
     mergedBranch: string
     unresolvedFiles: string[]
   } | null> {
     const gitDirRes = await execSafe(['rev-parse', '--git-dir'], repoPath)
     if (gitDirRes.exitCode !== 0) return null
     const gitDir = path.resolve(repoPath, gitDirRes.stdout.trim())
-    const mergeHeadPath = path.join(gitDir, 'MERGE_HEAD')
 
-    let mergeHead: string
+    let mergeHead: string | null = null
     try {
-      mergeHead = (await fs.promises.readFile(mergeHeadPath, 'utf8')).trim().split(/\s+/)[0]
+      const raw = await fs.promises.readFile(path.join(gitDir, 'MERGE_HEAD'), 'utf8')
+      mergeHead = raw.trim().split(/\s+/)[0] || null
     } catch {
-      return null
+      // No merge in progress. There may still be conflicts — see below.
     }
-    if (!mergeHead) return null
-
-    const branchRes = await execSafe(['for-each-ref', '--points-at', mergeHead, '--format=%(refname:short)', 'refs/heads/', 'refs/remotes/'], repoPath)
-    const mergedBranch = branchRes.stdout.trim().split('\n').filter(Boolean)[0] ?? mergeHead.slice(0, 7)
 
     const unresolvedRes = await execSafe(['diff', '--name-only', '--diff-filter=U'], repoPath)
     const unresolvedFiles = unresolvedRes.stdout.split('\n').map(s => s.trim()).filter(Boolean)
 
-    return { mergeHead, mergedBranch, unresolvedFiles }
+    // A conflict does not imply a merge. `git stash apply` merges the stashed
+    // changes into the working tree and can conflict exactly as a merge does —
+    // the same unmerged stages, the same resolution — but it writes no
+    // MERGE_HEAD. Keyed off MERGE_HEAD alone, the resolver never opened for it
+    // and the user was handed a raw "CONFLICT (content)" dump with nowhere to
+    // go. A cherry-pick or revert left mid-flight has the same shape.
+    if (!mergeHead) {
+      if (unresolvedFiles.length === 0) return null
+      return { kind: 'conflict', mergeHead: null, mergedBranch: 'the incoming changes', unresolvedFiles }
+    }
+
+    const branchRes = await execSafe(['for-each-ref', '--points-at', mergeHead, '--format=%(refname:short)', 'refs/heads/', 'refs/remotes/'], repoPath)
+    const mergedBranch = branchRes.stdout.trim().split('\n').filter(Boolean)[0] ?? mergeHead.slice(0, 7)
+
+    return { kind: 'merge', mergeHead, mergedBranch, unresolvedFiles }
   }
 
   /**

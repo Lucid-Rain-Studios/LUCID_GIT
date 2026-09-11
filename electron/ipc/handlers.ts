@@ -8,7 +8,8 @@ import { assetDiffService } from '../services/AssetDiffService'
 import { presenceService } from '../services/PresenceService'
 import type { PresenceEntry } from '../types'
 import { CHANNELS } from './channels'
-import { withGitTimeout } from '../util/dugite-exec'
+import { withGitTimeout, preemptRepoReads } from '../util/dugite-exec'
+import { withRepoSlot } from '../util/repo-gate'
 import { gitService } from '../services/GitService'
 import { authService } from '../services/AuthService'
 import { logService } from '../services/LogService'
@@ -33,6 +34,59 @@ type IpcHandler<TArgs extends unknown[]> = (event: IpcMainInvokeEvent, ...args: 
 // slow disk still answers, short enough that a wedged process surfaces as an
 // error instead of an endless spinner.
 const READ_TIMEOUT_MS = 30_000
+
+// Channels whose handlers stream operation progress to the renderer. When one
+// of them throws, the progress it was drawing needs a terminal event or the
+// bar is left mid-flight.
+//
+// The renderer's `opRun` already does this in its own catch, so for anything
+// invoked that way this is belt-and-braces. It exists for the callers that are
+// not, and because a bar that never resolves is indistinguishable from a hung
+// app — which is exactly how a merge that failed on four conflicts came to be
+// reported as a freeze.
+//
+// Previously this covered push and pull alone, and every other long operation
+// here had no terminator at all.
+const PROGRESS_CHANNELS = new Set<string>([
+  CHANNELS.CLEANUP_GC, CHANNELS.CLEANUP_SHALLOW, CHANNELS.CLEANUP_SIZE,
+  CHANNELS.CLEANUP_UNSHALLOW, CHANNELS.DEP_BUILD_GRAPH, CHANNELS.GIT_CLONE,
+  CHANNELS.GIT_DISCARD, CHANNELS.GIT_DISCARD_ALL, CHANNELS.GIT_FETCH,
+  CHANNELS.GIT_PULL, CHANNELS.GIT_PUSH, CHANNELS.GIT_STAGE, CHANNELS.GIT_UNSTAGE,
+  CHANNELS.GIT_UPDATE_FROM_MAIN, CHANNELS.LFS_MIGRATE, CHANNELS.LFS_RESTORE,
+  CHANNELS.LOCK_FILE, CHANNELS.LOCK_FOLDER, CHANNELS.LOCK_UNLOCK,
+  CHANNELS.LOCK_UNLOCK_BATCH, CHANNELS.UNLOCK_FOLDER_MINE,
+])
+
+// Channels that must hold the repository exclusively while they run.
+//
+// Everything here rewrites the index or the working tree, so interleaving one
+// with a background query is at best wasted work and at worst contention for
+// `.git/index.lock`. Reads are not blocked outright — they run a few at a time
+// and step aside for these.
+const EXCLUSIVE_CHANNELS = new Set<string>([
+  CHANNELS.GIT_DISCARD, CHANNELS.GIT_DISCARD_ALL, CHANNELS.GIT_STAGE,
+  CHANNELS.GIT_UNSTAGE, CHANNELS.GIT_COMMIT, CHANNELS.GIT_PULL,
+  CHANNELS.GIT_PUSH, CHANNELS.GIT_UPDATE_FROM_MAIN, CHANNELS.GIT_CHECKOUT,
+  CHANNELS.GIT_MERGE, CHANNELS.LFS_MIGRATE, CHANNELS.LFS_RESTORE,
+  CHANNELS.CLEANUP_GC,
+])
+
+/**
+ * The repository an IPC call operates on, when the first argument names one.
+ *
+ * Every handler in EXCLUSIVE_CHANNELS takes it first; anything else is not
+ * gated, which is the safe direction to be wrong in.
+ */
+function repoArgOf(args: unknown[]): string | null {
+  const first = args[0]
+  return typeof first === 'string' && first.length > 0 ? first : null
+}
+
+/** Human label for the failure toast, derived from the channel name. */
+function failureLabel(channel: string): string {
+  const verb = channel.split(':').pop()?.replace(/-/g, ' ') ?? channel
+  return `${verb.charAt(0).toUpperCase()}${verb.slice(1)} failed`
+}
 
 // ── In-flight IPC registry ───────────────────────────────────────────────────
 //
@@ -125,13 +179,16 @@ export function registerHandlers(): void {
     ipcMain.handle(channel, async (event, ...args) => {
       const callId = nextIpcCallId++
       inFlightIpc.set(callId, { channel, startedAt: Date.now() })
+      const repoPath = EXCLUSIVE_CHANNELS.has(channel) ? repoArgOf(args) : null
       try {
-        return await fn(event, ...(args as TArgs))
+        return repoPath === null
+          ? await fn(event, ...(args as TArgs))
+          : await withRepoSlot(repoPath, 'write', () => Promise.resolve(fn(event, ...(args as TArgs))), preemptRepoReads)
       } catch (error) {
         logService.error(`ipc.${channel}`, formatIpcFailure(channel, args, error))
-        if ((channel === CHANNELS.GIT_PUSH || channel === CHANNELS.GIT_PULL) && !event.sender.isDestroyed()) {
+        if (PROGRESS_CHANNELS.has(channel) && !event.sender.isDestroyed()) {
           event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, {
-            id: `${channel}-error`, label: channel === CHANNELS.GIT_PUSH ? 'Push failed' : 'Pull failed',
+            id: `${channel}-error`, label: failureLabel(channel),
             status: 'error', detail: error instanceof Error ? error.message : String(error),
           })
         }
@@ -162,8 +219,15 @@ export function registerHandlers(): void {
    * accumulate idle Git/Git LFS processes for the life of the session.
    */
   const handleRead = <TArgs extends unknown[]>(channel: string, fn: IpcHandler<TArgs>): void => {
-    handle(channel, async (event, ...args) =>
-      withGitTimeout(() => Promise.resolve(fn(event, ...(args as TArgs))), READ_TIMEOUT_MS, channel))
+    handle(channel, async (event, ...args) => {
+      const run = () => withGitTimeout(
+        () => Promise.resolve(fn(event, ...(args as TArgs))), READ_TIMEOUT_MS, channel)
+      const repoPath = repoArgOf(args)
+      // Reads run a few at a time per repository and yield to a waiting write.
+      // The deadline still belongs to the work, not to the queue, so it is
+      // armed inside the slot rather than around the wait for one.
+      return repoPath === null ? run() : withRepoSlot(repoPath, 'read', run)
+    })
   }
 
   const runGitOp = async <T>(op: string, fn: () => Promise<T>): Promise<T> => {

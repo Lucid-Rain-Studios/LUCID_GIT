@@ -172,6 +172,22 @@ export function FileTree({
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
   const [hunkTarget, setHunkTarget] = useState<{ path: string; reverse: boolean } | null>(null)
   const opRun = useOperationStore(s => s.run)
+
+  // Discard All aborts a half-finished merge rather than unpicking its files
+  // one by one, so the button has to say which of the two it is about to do.
+  // Offering "Discard all changes" over thirteen thousand merge-staged files
+  // is what sent a user into an hour of waiting for the wrong operation.
+  const [mergeBranch, setMergeBranch] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    if (!repoPath) { setMergeBranch(null); return }
+    ipc.mergeInProgress(repoPath)
+      .then(m => { if (!cancelled) setMergeBranch(m ? (m.mergedBranch || 'the merge') : null) })
+      .catch(() => { if (!cancelled) setMergeBranch(null) })
+    return () => { cancelled = true }
+    // `files` stands in for "the working tree changed": a merge starting or
+    // ending always moves it.
+  }, [repoPath, files])
   const unlockFile = useLockStore(s => s.unlockFile)
   const { accounts, currentAccountId } = useAuthStore()
   const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login ?? null
@@ -362,18 +378,24 @@ export function FileTree({
           }}
         />
         <ActionBtn
-          label="Discard All"
+          label={mergeBranch ? 'Abort Merge' : 'Discard All'}
           danger
-          disabled={busy || discardCandidates.length === 0}
+          // A merge with nothing else staged still needs aborting, so the
+          // empty-changeset rule does not apply while one is in progress.
+          disabled={busy || (!mergeBranch && discardCandidates.length === 0)}
           onClick={async () => {
             const newFileCount = discardCandidates.filter(f => f.indexStatus === 'A' || f.indexStatus === 'R').length
             const ok = await dialog.confirm({
-              title: 'Discard all changes',
-              message: 'This will discard all staged and working-tree changes. This cannot be undone.',
-              detail: newFileCount > 0
-                ? `${newFileCount} staged new file${newFileCount === 1 ? '' : 's'} will be deleted from disk. Untracked files are kept.`
-                : 'Untracked files are kept.',
-              confirmLabel: 'Discard All', danger: true,
+              title: mergeBranch ? `Abort the merge from ${mergeBranch}` : 'Discard all changes',
+              message: mergeBranch
+                ? `This will abandon the in-progress merge and put the branch back where it was before it started. This cannot be undone.`
+                : 'This will discard all staged and working-tree changes. This cannot be undone.',
+              detail: mergeBranch
+                ? 'The files the merge was bringing in are discarded with it. Untracked files are kept.'
+                : newFileCount > 0
+                  ? `${newFileCount} staged new file${newFileCount === 1 ? '' : 's'} will be deleted from disk. Untracked files are kept.`
+                  : 'Untracked files are kept.',
+              confirmLabel: mergeBranch ? 'Abort Merge' : 'Discard All', danger: true,
             })
             if (!ok) return
             // Capture files locked by me before discarding so they can be unlocked after reset.
@@ -383,7 +405,7 @@ export function FileTree({
                   return lock?.owner.login === currentLogin
                 })
               : []
-            run('Discarding changes…', async () => {
+            run(mergeBranch ? 'Aborting merge…' : 'Discarding changes…', async () => {
               // Release locks even on a partial failure — whatever did get
               // reset should not stay locked behind the error.
               try {
