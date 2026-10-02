@@ -4,7 +4,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { performance } from 'node:perf_hooks'
-import { exec, execSafe, execWithProgress, execWithStdin, gitAuthArgs, withGitTimeout, ProgressCallback } from '../util/dugite-exec'
+import { exec, execSafe, execWithProgress, execWithStdin, gitAuthArgs, withGitTimeout, gitOpActivity, waitForGitOpsToDrain, ProgressCallback } from '../util/dugite-exec'
 import { nulPaths, parseNameStatus, parseNumstat } from '../util/git-paths'
 import { authService } from './AuthService'
 import { logService } from './LogService'
@@ -14,6 +14,7 @@ import { FileStatus, BranchInfo, CommitEntry, ChangelogEntry, ChangelogQuery, Di
 // Brief fallback delay for a genuinely concurrent repack. Persistent missing
 // indexes are repaired directly before this delay is considered.
 const STALE_PACK_RETRY_DELAY_MS = 2000
+const STALE_INDEX_LOCK_S = 5
 
 // Every Git LFS pointer opens with this line, and the spec caps the whole file
 // at 1 KB. Together they identify a pointer left on disk by a failed smudge
@@ -1384,11 +1385,18 @@ class GitService {
     return /unable to create '.*index\.lock'.*file exists/is.test(message)
   }
 
-  /** Git index locks carry no owner PID. Age and overlapping app activity
-   * cannot prove ownership, so leave an existing lock for deliberate recovery. */
+  /** Restore automatic orphan recovery. Age/activity are heuristics, not proof
+   * of external ownership; the team explicitly accepts this tradeoff. */
   private async clearStaleIndexLock(repoPath: string): Promise<boolean> {
+    // Snapshot before the Git-path probe, which itself records app activity.
+    let ops = gitOpActivity(repoPath)
+    if (ops.inFlight > 0) {
+      await waitForGitOpsToDrain(repoPath, 5_000)
+      ops = gitOpActivity(repoPath)
+    }
     const info = await this.getIndexLockInfo(repoPath)
     if (!info) return true
+    if (ops.inFlight > 0) return false
     const deadline = performance.now() + 2_000
     // Resolve the Git path once. Poll only its metadata, yielding between
     // checks; no Git processes, repository scans or unbounded retries.
@@ -1400,7 +1408,19 @@ class GitService {
         throw error
       }
     }
-    return false
+    const current = await fs.promises.stat(info.path).catch(error => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw error
+    })
+    if (!current) return true
+    // Do not remove a lock replaced/refreshed during the bounded wait, or one
+    // while another app command has started. No process scans or extra Git calls.
+    if (current.mtimeMs !== info.mtimeMs || gitOpActivity(repoPath).inFlight > 0) return false
+    const orphanedDuringAppWork = ops.ranDuring(info.mtimeMs)
+    if (!orphanedDuringAppWork && (Date.now() - current.mtimeMs) / 1000 < STALE_INDEX_LOCK_S) return false
+    await fs.promises.rm(info.path, { force: true })
+    logService.warn('git.index-lock-recovery', `Automatically removed index lock using ${orphanedDuringAppWork ? 'app activity' : 'five-second age'} heuristic: ${info.path}`)
+    return true
   }
 
   private async authenticatedArgs(repoPath: string, args: string[]): Promise<string[]> {
@@ -1971,8 +1991,8 @@ ${lastError}` : '')
     }
 
     if (this.isStaleIndexLockError(lastError)) {
-      return `A Git operation or an interrupted write left index.lock present. Its owner is unknown. ` +
-             `Wait for running Git commands to finish. If the lock remains, verify all writers have stopped before manual recovery.`
+      return `A Git operation or an interrupted write left index.lock present. ` +
+             `Wait for running Git commands to finish, then retry. Lucid Git automatically clears eligible stale locks before retrying once.`
     }
 
     return `They are usually held open by another program (the Unreal editor, an IDE, or an antivirus scan). ` +
@@ -2601,8 +2621,18 @@ ${lastError}` : '')
     throw new Error('Cannot prove the owner of index.lock has stopped. Close other Git clients and verify no Git operation is running before manually removing ' + info.path)
   }
 
-  /** Preserve the selected local or remote ref; never substitute another branch. */
+  /** Preserve the selected local/remote ref or full reviewed commit ID. */
   private async resolveBranchRef(repoPath: string, targetBranch: string): Promise<string> {
+    const isCommitId = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(targetBranch)
+    if (isCommitId) {
+      const result = await execSafe(['rev-parse', '--verify', '--end-of-options', `${targetBranch}^{commit}`], repoPath)
+      const commitId = result.stdout.trim()
+      // Reject a missing object even if a branch happens to have that hex name.
+      if (result.exitCode !== 0 || commitId !== targetBranch.toLowerCase()) {
+        throw new Error(`Reviewed commit is unavailable locally: ${targetBranch}. Fetch and reopen the PR preview.`)
+      }
+      return commitId
+    }
     const ref = targetBranch.startsWith('refs/') ? targetBranch
       : targetBranch.startsWith('origin/') ? `refs/remotes/${targetBranch}`
       : `refs/heads/${targetBranch}`
