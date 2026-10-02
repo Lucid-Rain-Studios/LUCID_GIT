@@ -244,6 +244,69 @@ test('persistent lock is preserved, waiting is bounded and stat permission failu
   finally { fs.promises.stat = stat }
 })
 
+test('stale lock recovery retries a real merge once without manual removal', async () => {
+  const repo = repository()
+  git(repo, 'checkout', '-qb', 'incoming')
+  fs.writeFileSync(path.join(repo, 'file.txt'), 'incoming')
+  git(repo, 'add', '.')
+  git(repo, '-c', 'core.hooksPath=', 'commit', '-qm', 'incoming')
+  const target = git(repo, 'rev-parse', 'HEAD').trim()
+  git(repo, 'checkout', '-q', 'main')
+  const lock = path.join(repo, '.git/index.lock')
+  fs.writeFileSync(lock, '')
+  fs.utimesSync(lock, new Date(0), new Date(0))
+  let calls = 0
+  const service = component('electron/services/GitService.ts', {
+    './LogService': { logService: { warn() {} } },
+    '../util/dugite-exec': { ...runner, exec: async (...args) => { calls++; return runner.exec(...args) } },
+  }, { Buffer }).exports.gitService
+  await service.runWithLfsRecovery(repo, ['merge', '--ff-only', 'incoming'])
+  expect(calls).toBe(2)
+  expect(fs.existsSync(lock)).toBe(false)
+  expect(git(repo, 'rev-parse', 'HEAD').trim()).toBe(target)
+  expect(fs.readFileSync(path.join(repo, 'file.txt'), 'utf8')).toBe('incoming')
+})
+
+test('automatic stale recovery leaves locks intact while Lucid Git tasks remain active', async () => {
+  const repo = repository(), lock = path.join(repo, '.git/index.lock')
+  fs.writeFileSync(lock, 'active writer')
+  fs.utimesSync(lock, new Date(0), new Date(0))
+  const service = component('electron/services/GitService.ts', {
+    '../util/dugite-exec': { ...runner,
+      gitOpActivity: () => ({ inFlight: 1, ranDuring: () => true }),
+      waitForGitOpsToDrain: async () => false,
+    },
+  }, { Buffer }).exports.gitService
+  expect(await service.clearStaleIndexLock(repo)).toBe(false)
+  expect(fs.readFileSync(lock, 'utf8')).toBe('active writer')
+})
+
+test('automatic recovery clears a fresh app-activity orphan without changing staged bytes', async () => {
+  const repo = repository(), lock = path.join(repo, '.git/index.lock')
+  fs.writeFileSync(path.join(repo, 'file.txt'), 'staged')
+  git(repo, 'add', '.')
+  const index = fs.readFileSync(path.join(repo, '.git/index'))
+  fs.writeFileSync(lock, '')
+  const service = component('electron/services/GitService.ts', {
+    './LogService': { logService: { warn() {} } },
+    '../util/dugite-exec': { ...runner, gitOpActivity: () => ({ inFlight: 0, ranDuring: () => true }) },
+  }, { Buffer }).exports.gitService
+  expect(await service.clearStaleIndexLock(repo)).toBe(true)
+  expect(fs.existsSync(lock)).toBe(false)
+  expect(fs.readFileSync(path.join(repo, '.git/index'))).toEqual(index)
+  expect(fs.readFileSync(path.join(repo, 'file.txt'), 'utf8')).toBe('staged')
+})
+
+test('automatic recovery preserves a lock refreshed during its wait', async () => {
+  const repo = repository(), lock = path.join(repo, '.git/index.lock')
+  fs.writeFileSync(lock, 'old')
+  fs.utimesSync(lock, new Date(0), new Date(0))
+  const timer = setTimeout(() => fs.writeFileSync(lock, 'new writer'), 150)
+  try { expect(await gitService.clearStaleIndexLock(repo)).toBe(false) }
+  finally { clearTimeout(timer) }
+  expect(fs.readFileSync(lock, 'utf8')).toBe('new writer')
+})
+
 test('lock path resolves linked worktrees and a failed Git probe is not lock absence', async () => {
   const repo = repository(), worktree = tmpDir('lg-lock-worktree-')
   git(repo, '-c', 'core.hooksPath=', 'worktree', 'add', '-qb', 'other', worktree)
@@ -252,6 +315,11 @@ test('lock path resolves linked worktrees and a failed Git probe is not lock abs
   expect((await gitService.getIndexLockInfo(worktree)).path).toBe(lock)
   await expect(gitService.getIndexLockInfo(tmpDir('lg-nonrepo-'))).rejects.toThrow()
   expect(fs.readFileSync(lock, 'utf8')).toBe('worktree writer')
+  const parentIndex = fs.readFileSync(path.join(repo, '.git/index'))
+  fs.utimesSync(lock, new Date(0), new Date(0))
+  expect(await gitService.clearStaleIndexLock(worktree)).toBe(true)
+  expect(fs.existsSync(lock)).toBe(false)
+  expect(fs.readFileSync(path.join(repo, '.git/index'))).toEqual(parentIndex)
 })
 
 test('index lock guidance gives guarded PowerShell recovery and makes no false ownership promise', () => {

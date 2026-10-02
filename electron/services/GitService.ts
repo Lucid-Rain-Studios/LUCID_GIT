@@ -534,8 +534,8 @@ class GitService {
     const MAX_SKIPS = 20
     const skipped: string[] = []
     let remaining = paths
-    // Wait once for transient lock contention. Persistent locks are preserved
-    // because neither age nor app-process timing proves their ownership.
+    // Recover once using the restored stale-lock heuristics, retaining active
+    // app tasks and fresh locks not associated with prior app work.
     let indexLockCleared = false
     try {
       while (remaining.length > 0) {
@@ -1397,6 +1397,12 @@ class GitService {
     const info = await this.getIndexLockInfo(repoPath)
     if (!info) return true
     if (ops.inFlight > 0) return false
+    const observed = await fs.promises.stat(info.path).catch(error => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw error
+    })
+    if (!observed) return true
+    if (observed.mtimeMs !== info.mtimeMs) return false
     const deadline = performance.now() + 2_000
     // Resolve the Git path once. Poll only its metadata, yielding between
     // checks; no Git processes, repository scans or unbounded retries.
@@ -1415,7 +1421,8 @@ class GitService {
     if (!current) return true
     // Do not remove a lock replaced/refreshed during the bounded wait, or one
     // while another app command has started. No process scans or extra Git calls.
-    if (current.mtimeMs !== info.mtimeMs || gitOpActivity(repoPath).inFlight > 0) return false
+    if (current.ino !== observed.ino || current.dev !== observed.dev || current.size !== observed.size
+      || current.mtimeMs !== info.mtimeMs || gitOpActivity(repoPath).inFlight > 0) return false
     const orphanedDuringAppWork = ops.ranDuring(info.mtimeMs)
     if (!orphanedDuringAppWork && (Date.now() - current.mtimeMs) / 1000 < STALE_INDEX_LOCK_S) return false
     await fs.promises.rm(info.path, { force: true })

@@ -174,7 +174,7 @@ const DEFS: ErrorDef[] = [
     code: 'INDEX_LOCK',
     test: /Unable to create '.*index\.lock'.*File exists|index\.lock.*File exists/is,
     title: 'Git index is locked',
-    description: "Git's index.lock is blocking an index write. It may belong to a running Git command or remain from an interrupted write. The lock contains no owner information, so Lucid Git preserves it. Retrying cannot clear a leftover lock; verify all Git writers have stopped before removing it manually.",
+    description: "Git's index.lock is blocking an index write. The lock contains no owner information. Wait for running Git commands to finish, then retry. Lucid Git automatically clears eligible stale locks and retries once, but preserves fresh locks and locks while its own Git tasks remain active. External ownership cannot be proven; stop other Git writers before retrying or recovering manually.",
     causes: [
       'A game editor with a source-control plugin (Unreal, Unity) is writing to the repo right now',
       'Another git client or terminal has a command in flight',

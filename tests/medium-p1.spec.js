@@ -54,13 +54,15 @@ test('LG-002 token is present only for the exact HTTPS GitHub origin', () => {
   expect(args.join(' ')).not.toContain('http.extraheader=')
 })
 
-test('LG-003 an old external index lock survives automatic and manual recovery', async () => {
+test('LG-003 accepted tradeoff: old locks clear automatically; manual removal stays guarded', async () => {
   const dir = repo(), lock = path.join(dir, '.git/index.lock')
   fs.writeFileSync(lock, 'external writer')
   fs.utimesSync(lock, new Date(0), new Date(0))
-  expect(await gitService.clearStaleIndexLock(dir)).toBe(false)
+  expect(await gitService.clearStaleIndexLock(dir)).toBe(true)
+  expect(fs.existsSync(lock)).toBe(false)
+  fs.writeFileSync(lock, 'fresh writer')
   await expect(gitService.removeIndexLock(dir)).rejects.toThrow('Cannot prove')
-  expect(fs.readFileSync(lock, 'utf8')).toBe('external writer')
+  expect(fs.readFileSync(lock, 'utf8')).toBe('fresh writer')
   fs.unlinkSync(lock)
   expect(await gitService.clearStaleIndexLock(dir)).toBe(true)
 })

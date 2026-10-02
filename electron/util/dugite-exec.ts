@@ -193,8 +193,8 @@ export function killGitProcesses(pids: Iterable<number>): number {
  * Kill every git process Lucid Git currently has running. Called on quit: an
  * abandoned `git`/`git-lfs` pair has no one left to read its output, and
  * leaving it behind is what accumulates across app restarts. An index write
- * interrupted this way may leave `.git/index.lock`; uncertain locks require
- * deliberate recovery after verifying no writer is still running.
+ * interrupted this way may leave `.git/index.lock`; automatic recovery uses
+ * age/app-activity heuristics once app tasks have drained.
  */
 export function killAllGitProcesses(): number {
   const pids = [...liveGitProcesses.keys()]
