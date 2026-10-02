@@ -43,7 +43,7 @@ function deviceId(): string {
   return id
 }
 
-// REST keeps the presence client small. Missing heartbeats expire after 90 seconds;
+// REST keeps the presence client small. Three missed minute heartbeats expire;
 // no Git operations, source files, Unreal process details or privileged keys are sent.
 export class FirebasePresenceService {
   private credentials = new Map<string, Credential>()
@@ -260,7 +260,7 @@ export class FirebasePresenceService {
           if (!isRecord(device) || typeof device.lastSeen !== 'number' || !Number.isSafeInteger(device.lastSeen) || device.lastSeen < 0 || device.lastSeen > presence.serverNow + 1_000 ||
             !['active', 'away', 'offline'].includes(String(device.status))) continue
           const age = Math.max(0, presence.serverNow - device.lastSeen)
-          const status = age >= 90_000 ? 'offline' : device.status as 'active' | 'away' | 'offline'
+          const status = age >= 180_000 ? 'offline' : device.status as 'active' | 'away' | 'offline'
           const normalized = new Date(receivedAt - age).toISOString()
           const rank = { active: 0, away: 1, offline: 2 }
           if (rank[status] < rank[entry.status!] || (rank[status] === rank[entry.status!] && normalized > entry.lastSeen)) {

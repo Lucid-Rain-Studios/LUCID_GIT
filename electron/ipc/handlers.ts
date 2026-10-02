@@ -1160,7 +1160,7 @@ export function registerHandlers(): void {
         const { accounts, currentAccountId } = authService.listAccounts()
         return accounts.find(a => a.userId === currentAccountId) ?? null
       },
-      () => powerMonitor.getSystemIdleState(300),
+      () => powerMonitor.getSystemIdleState(60),
       (repoPath, login, entry) => {
         const config = firebasePresenceService.load(repoPath)
         if (config?.enabled) {
@@ -1169,11 +1169,13 @@ export function registerHandlers(): void {
       },
     )
     const tickPresence = () => { try { session.tick() } catch { /* Retry on the next heartbeat. */ } }
-    const heartbeat = setInterval(tickPresence, 30_000)
-    powerMonitor.on('lock-screen', () => { session.setLocked(true); tickPresence() })
-    powerMonitor.on('unlock-screen', () => { session.setLocked(false); tickPresence() })
-    powerMonitor.on('suspend', () => { session.setLocked(true); tickPresence() })
-    powerMonitor.on('resume', () => { session.setLocked(false); tickPresence() })
+    const heartbeat = setInterval(tickPresence, 60_000)
+    // State changes are sampled on the next heartbeat; closing still sends
+    // Offline immediately instead of waiting for the publishing interval.
+    powerMonitor.on('lock-screen', () => { session.setLocked(true) })
+    powerMonitor.on('unlock-screen', () => { session.setLocked(false) })
+    powerMonitor.on('suspend', () => { session.setLocked(true) })
+    powerMonitor.on('resume', () => { session.setLocked(false) })
     let exiting = false
     app.on('before-quit', event => {
       if (exiting) return

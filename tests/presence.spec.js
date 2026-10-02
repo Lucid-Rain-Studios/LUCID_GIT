@@ -23,12 +23,54 @@ const status = component('src/lib/presence.ts').exports.presenceStatus
  })
 
  test('expired, invalid, future and legacy entries are Offline', () => {
-  const now = Date.now(), entry = { lastSeen: new Date(now - 89999).toISOString(), status: 'active' }
+  const now = Date.now(), entry = { lastSeen: new Date(now - 179999).toISOString(), status: 'active' }
   expect(status(entry, now)).toBe('active')
   expect(status({ ...entry, status: 'away' }, now)).toBe('away')
   expect(status(entry, now + 1)).toBe('offline')
   for (const lastSeen of ['invalid', new Date(now + 1).toISOString()]) expect(status({ ...entry, lastSeen }, now)).toBe('offline')
   expect(status({ ...entry, status: undefined }, now)).toBe('offline')
+ })
+
+ test('main presence samples 60-second inactivity once a minute and sends Offline immediately on quit', async () => {
+  const handlers = new Map(), powerEvents = new Map(), appEvents = new Map()
+  const timers = [], cleared = [], idleThresholds = [], writes = []
+  let idleSeconds = 0, quits = 0, prevented = false
+  const account = { userId: 'alice', login: 'alice', name: 'Alice' }
+  component('electron/ipc/handlers.ts', {
+    path, './channels': { CHANNELS },
+    electron: {
+      ipcMain: { handle: (name, fn) => handlers.set(name, fn) },
+      powerMonitor: {
+        on: (name, fn) => powerEvents.set(name, fn),
+        getSystemIdleState: threshold => { idleThresholds.push(threshold); return idleSeconds >= threshold ? 'idle' : 'active' },
+      },
+      app: { on: (name, fn) => appEvents.set(name, fn), quit: () => { quits++ } },
+    },
+    '../services/PresenceSession': { PresenceSession },
+    '../services/AuthService': { authService: { listAccounts: () => ({ accounts: [account], currentAccountId: 'alice' }) } },
+    '../services/FirebasePresenceService': { firebasePresenceService: {
+      load: () => ({ enabled: true }),
+      publish: async (_repo, entry) => { writes.push(entry.status) }, drain: async () => {},
+    } },
+    '../services/LogService': { logService: { error() {} } },
+  }, {
+    setInterval: (callback, delay) => { timers.push({ callback, delay }); return timers.length },
+    clearInterval: id => cleared.push(id), setTimeout: () => 0,
+  }).exports.registerHandlers()
+  await handlers.get(CHANNELS.PRESENCE_UPDATE)({ sender: { isDestroyed: () => true } }, 'repo')
+  expect(timers.map(timer => timer.delay)).toEqual([60000])
+  expect(writes).toEqual(['active'])
+  idleSeconds = 59; timers[0].callback(); expect(writes.at(-1)).toBe('active')
+  idleSeconds = 60; timers[0].callback(); expect(writes.at(-1)).toBe('away')
+  const count = writes.length
+  powerEvents.get('lock-screen')(); powerEvents.get('unlock-screen')()
+  expect(writes).toHaveLength(count)
+  idleSeconds = 0; timers[0].callback(); expect(writes.at(-1)).toBe('active')
+  expect(idleThresholds.every(threshold => threshold === 60)).toBe(true)
+  appEvents.get('before-quit')({ preventDefault: () => { prevented = true } })
+  expect(writes.at(-1)).toBe('offline')
+  expect(cleared).toEqual([1]); expect(prevented).toBe(true)
+  await flush(); expect(quits).toBe(1)
  })
 
  test('presence IPC requires admin before reading data, including cache miss', async () => {
@@ -52,15 +94,27 @@ const status = component('src/lib/presence.ts').exports.presenceStatus
  })
 
 function panel(read, auth = { isAdmin: () => true, currentAccountId: 'a' }) {
-  const callbacks = []
+  const callbacks = [], intervals = []
   const api = component('src/components/presence/PresencePanel.tsx', {
     '@/ipc': { ipc: { presenceRead: read } },
     '@/stores/authStore': { useAuthStore: store(auth) },
     '@/lib/presence': { presenceStatus: status },
-  }, { setInterval: fn => { callbacks.push(fn); return callbacks.length }, clearInterval() {} })
-  return { api, callbacks }
+  }, { setInterval: (fn, delay) => { callbacks.push(fn); intervals.push(delay); return callbacks.length }, clearInterval() {} })
+  return { api, callbacks, intervals }
 }
 const text = tree => JSON.stringify(tree)
+ test('Team polls once a minute and explains idle, close and lost-heartbeat timing', async () => {
+  let reads = 0
+  const { api, callbacks, intervals } = panel(async () => { reads++; return { source: 'firebase', entries: {} } })
+  api.render('PresencePanel', { repoPath: 'repo' }); api.effects[0](); await flush()
+  expect(reads).toBe(1); expect(intervals).toEqual([60000])
+  const tree = text(api.render('PresencePanel', { repoPath: 'repo' }))
+  expect(tree).toContain('refreshes every 60 seconds')
+  expect(tree).toContain('60 seconds when sampled')
+  expect(tree).toContain('Closing the app sends Offline immediately')
+  expect(tree).toContain('three minutes without an update')
+  callbacks[0](); await flush(); expect(reads).toBe(2)
+ })
  test('UI-036 distinguishes unavailable, empty and stale local sessions', async () => {
   let result = 'error'
   const { api } = panel(async () => {

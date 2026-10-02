@@ -119,14 +119,29 @@ test('concurrent devices register once and disabled membership cannot be overwri
 
 test('same-user devices aggregate Active > Away > Offline and expire using Firebase time', async () => {
  const db = database(), admin = client(db, 'admin', 'desktop-a')
- const serverNow = Date.now() + 86400000
+ const serverNow = Math.floor(Date.now() / 1000) * 1000 + 86400000
  db.setNow(serverNow)
- db.sessions['uid-admin'] = { a: { status: 'away', lastSeen: serverNow }, b: { status: 'active', lastSeen: serverNow - 1000 }, old: { status: 'active', lastSeen: serverNow - 100000 } }
- db.sessions['uid-member'] = { a: { status: 'active', lastSeen: serverNow - 100000 }, invalid: { status: 'active', lastSeen: 'bad' } }
+ db.sessions['uid-admin'] = { a: { status: 'away', lastSeen: serverNow }, b: { status: 'active', lastSeen: serverNow - 1000 }, old: { status: 'active', lastSeen: serverNow - 180000 } }
+ db.sessions['uid-member'] = { a: { status: 'active', lastSeen: serverNow - 180000 }, invalid: { status: 'active', lastSeen: 'bad' } }
  const result = await admin.service.read(config)
  expect(result.entries['uid-admin'].status).toBe('active')
  expect(Math.abs(Date.parse(result.entries['uid-admin'].lastSeen) - Date.now())).toBeLessThan(2500)
  expect(result.entries['uid-member'].status).toBe('offline')
+})
+
+test('minute heartbeats remain active between samples and expire after three missed updates', async () => {
+ const db = database(), serverNow = Math.floor(Date.now() / 1000) * 1000
+ db.setNow(serverNow)
+ db.sessions['uid-admin'] = { desktop: { status: 'active', lastSeen: serverNow - 179999 } }
+ db.sessions['uid-member'] = { desktop: { status: 'away', lastSeen: serverNow - 60000 } }
+ const first = await client(db, 'admin', 'reader-a').service.read(config)
+ expect(first.entries['uid-admin'].status).toBe('active')
+ expect(first.entries['uid-member'].status).toBe('away')
+ db.sessions['uid-admin'].desktop.lastSeen = serverNow - 180000
+ db.sessions['uid-member'].desktop = { status: 'offline', lastSeen: serverNow }
+ const next = await client(db, 'admin', 'reader-b').service.read(config)
+ expect(next.entries['uid-admin'].status).toBe('offline')
+ expect(next.entries['uid-member'].status).toBe('offline')
 })
 
 test('authentication/read requests deduplicate; writes serialize and failed access does not fall back', async () => {

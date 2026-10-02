@@ -39,7 +39,7 @@ export function PresencePanel({ repoPath, onConfigure }: { repoPath: string; onC
       }
     }
     void load()
-    const interval = setInterval(() => { setNow(Date.now()); void load() }, 15_000)
+    const interval = setInterval(() => { setNow(Date.now()); void load() }, 60_000)
     return () => { cancelled = true; clearInterval(interval) }
   }, [repoPath, isAdmin, accountId, refresh])
 
@@ -54,11 +54,12 @@ export function PresencePanel({ repoPath, onConfigure }: { repoPath: string; onC
       </div>
       <p style={{ color: '#8b94b0', fontSize: 12 }}>
         Only admins can view this activity. Active and Away apply while Lucid Git is running.
-        Away means the computer is locked or idle for five minutes. Offline means the app has
-        closed or its last update is at least 90 seconds old.
+        Activity updates every 60 seconds. Away means the computer is locked or idle for at least
+        60 seconds when sampled. Closing the app sends Offline immediately; a lost connection
+        or crash is treated as Offline after three minutes without an update.
       </p>
       <div role="status" style={{ padding: 12, border: '1px solid #252d42', borderRadius: 6, marginBottom: 16 }}>
-        {source === 'unavailable' ? 'Activity could not be loaded. Check connection settings or retry.' : source === 'firebase' ? 'Connected to Firebase. Shared activity refreshes every 15 seconds.' :
+        {source === 'unavailable' ? 'Activity could not be loaded. Check connection settings or retry.' : source === 'firebase' ? 'Connected to Firebase. Shared activity refreshes every 60 seconds.' :
           'Shared team presence is not connected. These are local app sessions on this computer; activity from teammates on other computers is unavailable.'}
       </div>
       {error ? (
