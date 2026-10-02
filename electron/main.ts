@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, shell, ipcMain } from 'electron'
+import { app, BrowserWindow, Menu, shell, ipcMain, dialog } from 'electron'
 import path from 'path'
 import { autoUpdater } from 'electron-updater'
 import { registerHandlers, describeInFlightIpc } from './ipc/handlers'
@@ -26,6 +26,39 @@ autoUpdater.autoInstallOnAppQuit = true
 autoUpdater.logger           = null   // suppress verbose logging in prod
 
 let mainWin: BrowserWindow | null = null
+// Session-only: remind again on the next launch, including after an update.
+const promptedUpdateVersions = new Set<string>()
+
+async function promptForUpdate(version: string): Promise<void> {
+  const win = mainWin
+  if (!win || win.isDestroyed() || promptedUpdateVersions.has(version)) return
+  promptedUpdateVersions.add(version)
+  try {
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'info',
+      title: 'Lucid Git update available',
+      message: `Lucid Git ${version} is available`,
+      detail: `You are running version ${app.getVersion()}. Download the latest update now?`,
+      buttons: ['Download update', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    })
+    if (response !== 0 || win.isDestroyed()) return
+    await autoUpdater.downloadUpdate()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    logService.error('updater.download', message)
+    if (!win.isDestroyed()) {
+      await dialog.showMessageBox(win, {
+        type: 'error',
+        title: 'Update download failed',
+        message: 'The update could not be downloaded.',
+        detail: `${message}\nYou can retry using the update banner.`,
+      })
+    }
+  }
+}
 
 function sendToRenderer(channel: string, ...args: unknown[]) {
   if (mainWin && !mainWin.isDestroyed()) {
@@ -45,6 +78,7 @@ autoUpdater.on('update-available', (info) => {
     body:   `Version ${info.version} is ready to download.`,
     urgent: true,
   })
+  void promptForUpdate(info.version)
 })
 
 autoUpdater.on('download-progress', (progress) => {
