@@ -536,6 +536,7 @@ export interface ForecastConflict {
 }
 
 export interface ForecastStatus {
+  error?: string | null
   repoPath: string
   enabled: boolean
   lastPolledAt: number | null
@@ -626,6 +627,8 @@ export interface BranchDiffSummary {
 // ── GitHub Pull Requests ──────────────────────────────────────────────────────
 
 export interface PullRequest {
+  headSha: string
+  baseSha: string
   number: number
   title: string
   htmlUrl: string
@@ -664,6 +667,7 @@ export interface LucidGitAPI {
   listTerminals:  () => Promise<TerminalProfile[]>
 
   // Auth
+  cancelDeviceFlow: (code?: string) => Promise<void>
   startDeviceFlow: () => Promise<DeviceFlowStart>
   pollDeviceFlow: (deviceCode: string) => Promise<{ token: string; userId: string } | null>
   listAccounts: () => Promise<{ accounts: Account[]; currentAccountId: string | null }>
@@ -684,7 +688,7 @@ export interface LucidGitAPI {
   commit: (repoPath: string, message: string, noVerify?: boolean) => Promise<void>
   push: (repoPath: string) => Promise<void>
   pull: (repoPath: string) => Promise<void>
-  fetch: (repoPath: string) => Promise<void>
+  fetch: (repoPath: string, background?: boolean) => Promise<void>
   log: (repoPath: string, args?: { limit?: number; all?: boolean; filePath?: string; refs?: string[] }) => Promise<CommitEntry[]>
   changelog: (repoPath: string, query: ChangelogQuery) => Promise<ChangelogEntry[]>
   commitFiles: (repoPath: string, hash: string) => Promise<CommitFileChange[]>
@@ -781,6 +785,7 @@ export interface LucidGitAPI {
   updateDownload: () => Promise<void>
   updateInstall: () => Promise<void>
   onUpdateReady: (cb: () => void) => () => void
+  onUpdateError: (cb: (message: string) => void) => () => void
 
   // Auto-fix helpers
   rebaseAbort: (repoPath: string) => Promise<void>
@@ -819,11 +824,12 @@ export interface LucidGitAPI {
 
   // App Settings
   settingsGet: () => Promise<AppSettings>
-  settingsSave: (settings: AppSettings) => Promise<void>
+  settingsSave: (settings: Partial<AppSettings>) => Promise<void>
 
   // Team Config
   teamConfigLoad: (repoPath: string) => Promise<TeamConfig | null>
   teamConfigSave: (repoPath: string, config: TeamConfig) => Promise<void>
+  teamConfigApply: (repoPath: string, config: TeamConfig) => Promise<void>
 
   // Git Tools
   gitRestoreFile: (repoPath: string, filePath: string, fromHash: string) => Promise<void>
@@ -872,7 +878,7 @@ export interface LucidGitAPI {
   forecastStatus: (repoPath: string) => Promise<ForecastStatus | null>
   forecastPause: () => Promise<void>
   forecastResume: () => Promise<void>
-  onForecastConflict: (cb: (conflicts: ForecastConflict[]) => void) => () => void
+  onForecastConflict: (cb: (status: ForecastStatus) => void) => () => void
 
   // Dependency-Aware Blame — Phase 18
   depBuildGraph: (repoPath: string) => Promise<DepGraphStatus>
@@ -884,8 +890,8 @@ export interface LucidGitAPI {
   // GitHub API
   githubCreatePR: (args: { owner: string; repo: string; head: string; base: string; title: string; body: string; draft: boolean }) => Promise<{ number: number; htmlUrl: string; title: string }>
   githubListPRs:  (args: { owner: string; repo: string }) => Promise<PullRequest[]>
-  githubPrFiles:  (args: { owner: string; repo: string; prNumber: number }) => Promise<string[]>
-  githubMergePR:  (args: { owner: string; repo: string; prNumber: number; repoPath: string }) => Promise<void>
+  githubPrFiles:  (args: { owner: string; repo: string; prNumber: number; expectedSha?: string }) => Promise<string[]>
+  githubMergePR:  (args: { owner: string; repo: string; prNumber: number; repoPath: string; expectedSha: string }) => Promise<void>
   githubClosePR:  (args: { owner: string; repo: string; prNumber: number }) => Promise<void>
   githubListRepos: () => Promise<GitHubRepo[]>
 
@@ -919,7 +925,7 @@ export interface LucidGitAPI {
 
   // Events: main → renderer — each returns an unsubscribe function
   onOperationProgress: (cb: (step: OperationStep) => void) => () => void
-  onLockChanged: (cb: (event: { repoPath: string; locks: Lock[] }) => void) => () => void
+  onLockChanged: (cb: (event: { repoPath: string; locks: Lock[]; error?: string }) => void) => () => void
   onNotification: (cb: (notification: AppNotification) => void) => () => void
   onUpdateAvailable: (cb: (info: UpdateInfo) => void) => () => void
   onStatusChanged: (cb: () => void) => () => void

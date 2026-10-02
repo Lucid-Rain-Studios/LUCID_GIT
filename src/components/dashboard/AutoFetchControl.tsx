@@ -1,7 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { ipc, AppSettings } from '@/ipc'
-import { useRepoStore } from '@/stores/repoStore'
-import { getLastFetch, markFetchPerformed, onFetchPerformed, formatFetchAgo } from '@/lib/fetchState'
+import { getLastFetch, onFetchPerformed, formatFetchAgo } from '@/lib/fetchState'
 import type { SyncBusyState } from '@/lib/syncButtonLogic'
 
 // Interval options mirror Settings → Sync → "Auto-fetch interval".
@@ -28,15 +27,10 @@ function formatRemaining(ms: number): string {
 // the FETCH IPC handler runs the PR-merge check afterwards, so an auto-fetch can
 // also surface the "PR accepted" dialog on its own.
 export function AutoFetchControl({ repoPath, busy }: { repoPath: string; busy: SyncBusyState }) {
-  const bumpSyncTick = useRepoStore(s => s.bumpSyncTick)
 
   const [settings, setSettings]       = useState<AppSettings | null>(null)
   const [now, setNow]                 = useState(() => Date.now())
   const [lastFetchAt, setLastFetchAt] = useState<number | null>(() => getLastFetch(repoPath))
-  const [refreshing, setRefreshing]   = useState(false)
-
-  const refreshingRef  = useRef(false)
-  const lastAttemptRef = useRef(0)
 
   const interval = settings?.autoFetchIntervalMinutes ?? 0
 
@@ -51,33 +45,14 @@ export function AutoFetchControl({ repoPath, busy }: { repoPath: string; busy: S
     if (path === repoPath) setLastFetchAt(at)
   }), [repoPath])
 
-  // 1-second tick: drives the countdown display and the auto-fetch trigger.
-  useEffect(() => {
-    if (!repoPath) return
-    const id = setInterval(() => {
-      setNow(Date.now())
-      if (interval <= 0 || busy !== 'idle' || refreshingRef.current) return
-      const base = Math.max(getLastFetch(repoPath) ?? 0, lastAttemptRef.current)
-      if (Date.now() - base < interval * 60_000) return
-      // Time to auto-fetch. Throttle attempts to once per interval even if the
-      // fetch fails, so a failing remote doesn't trigger a once-a-second retry storm.
-      lastAttemptRef.current = Date.now()
-      refreshingRef.current = true
-      setRefreshing(true)
-      ipc.fetch(repoPath)
-        .then(() => { markFetchPerformed(repoPath); bumpSyncTick() })
-        .catch(() => {})
-        .finally(() => { refreshingRef.current = false; setRefreshing(false) })
-    }, 1000)
-    return () => clearInterval(id)
-  }, [repoPath, interval, busy, bumpSyncTick])
+  // Display tick only; AppShell owns the scheduler.
+  useEffect(() => { const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id) }, [])
 
   const changeInterval = (value: number) => {
     if (!settings) return
     const next = { ...settings, autoFetchIntervalMinutes: value }
     setSettings(next)
-    lastAttemptRef.current = 0  // re-evaluate against the new interval immediately
-    ipc.settingsSave(next).catch(() => {})
+    ipc.settingsSave({ autoFetchIntervalMinutes: value }).then(() => window.dispatchEvent(new Event('lucid-git:settings-changed'))).catch(() => {})
   }
 
   // Countdown text.
@@ -86,10 +61,10 @@ export function AutoFetchControl({ repoPath, busy }: { repoPath: string; busy: S
     countdown = 'Auto-fetch…'
   } else if (interval <= 0) {
     countdown = 'Auto-fetch off'
-  } else if (refreshing) {
+  } else if (busy === 'fetch') {
     countdown = 'Auto-refreshing…'
   } else {
-    const base = Math.max(lastFetchAt ?? 0, lastAttemptRef.current)
+    const base = lastFetchAt ?? 0
     const remaining = base + interval * 60_000 - now
     countdown = `Auto-refresh in ${formatRemaining(remaining)}`
   }

@@ -1,3 +1,5 @@
+import { readJson, writeJson, isRecord } from '../util/json-store'
+import { boundedFetch } from '../util/network'
 import keytar from 'keytar'
 import { app } from 'electron'
 import fs from 'fs'
@@ -32,17 +34,15 @@ function storePath(): string {
 }
 
 function readData(): AuthData {
-  try {
-    return JSON.parse(fs.readFileSync(storePath(), 'utf8')) as AuthData
-  } catch {
-    return { accounts: [], currentAccountId: null, tokenMetaByUserId: {} }
-  }
+  return readJson(storePath(), (value): value is AuthData => isRecord(value) && Array.isArray(value.accounts) &&
+    value.accounts.every(account => isRecord(account) && typeof account.userId === 'string' && typeof account.login === 'string') &&
+    (value.currentAccountId === null || typeof value.currentAccountId === 'string'), { accounts: [], currentAccountId: null, tokenMetaByUserId: {} })
 }
 
 function writeData(data: AuthData): void {
   const p = storePath()
   fs.mkdirSync(path.dirname(p), { recursive: true })
-  fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf8')
+  writeJson(p, data)
 }
 
 // ── AuthService ───────────────────────────────────────────────────────────────
@@ -85,7 +85,7 @@ async function fetchGitHubProfile(accessToken: string): Promise<Response> {
     let res: Response
 
     try {
-      res = await fetch('https://api.github.com/user', {
+      res = await boundedFetch('https://api.github.com/user', {
         headers: {
           Authorization:          `Bearer ${accessToken}`,
           Accept:                 'application/vnd.github+json',
@@ -147,8 +147,23 @@ class AuthService {
   // the user through another authorization flow.
   private pendingDeviceTokens = new Map<string, PendingDeviceToken>()
 
+  private deviceGeneration = 0
+  private cancelledDevices = new Set<string>()
+  private polls = new Map<string, Promise<{ token: string; userId: string } | null>>()
+  private pollTiming = new Map<string, { interval: number; nextAt: number }>()
+
+  cancelDeviceFlow(deviceCode?: string): void {
+    this.deviceGeneration++
+    if (deviceCode) {
+      this.cancelledDevices.add(deviceCode)
+      this.pendingDeviceTokens.delete(deviceCode)
+      this.pollTiming.delete(deviceCode)
+    }
+  }
+
   async startDeviceFlow(): Promise<DeviceFlowStart> {
-    const res = await fetch('https://github.com/login/device/code', {
+    const generation = ++this.deviceGeneration
+    const res = await boundedFetch('https://github.com/login/device/code', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -169,6 +184,8 @@ class AuthService {
       interval: number
     }
 
+    if (generation !== this.deviceGeneration) throw new Error('Sign-in cancelled')
+    this.pollTiming.set(d.device_code, { interval: d.interval * 1000, nextAt: 0 })
     return {
       deviceCode:      d.device_code,
       userCode:        d.user_code,
@@ -180,9 +197,25 @@ class AuthService {
 
   // Returns null while pending; throws on expired/denied; returns account on success.
   async pollDeviceFlow(deviceCode: string): Promise<{ token: string; userId: string } | null> {
+    if (this.cancelledDevices.has(deviceCode)) return null
+    const existing = this.polls.get(deviceCode)
+    if (existing) return existing
+    const timing = this.pollTiming.get(deviceCode)
+    if (timing && Date.now() < timing.nextAt) return null
+    const pending = this.pollDeviceFlowSingle(deviceCode).finally(() => this.polls.delete(deviceCode))
+    this.polls.set(deviceCode, pending)
+    return pending
+  }
+
+  private async pollDeviceFlowSingle(deviceCode: string): Promise<{ token: string; userId: string } | null> {
+    const generation = this.deviceGeneration
+    const active = () => generation === this.deviceGeneration && !this.cancelledDevices.has(deviceCode)
+    const timing = this.pollTiming.get(deviceCode) ?? { interval: 5000, nextAt: 0 }
+    timing.nextAt = Date.now() + timing.interval
+    this.pollTiming.set(deviceCode, timing)
     let d = this.pendingDeviceTokens.get(deviceCode)
     if (!d) {
-      const res = await fetch('https://github.com/login/oauth/access_token', {
+      const res = await boundedFetch('https://github.com/login/oauth/access_token', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -206,12 +239,18 @@ class AuthService {
 
       if (tokenResponse.error) {
         // These two mean "keep waiting"
-        if (tokenResponse.error === 'authorization_pending' || tokenResponse.error === 'slow_down') return null
+        if (tokenResponse.error === 'slow_down') {
+          timing.interval += 5000
+          timing.nextAt = Date.now() + timing.interval
+          return null
+        }
+        if (tokenResponse.error === 'authorization_pending') return null
         throw new Error(tokenResponse.error_description ?? tokenResponse.error)
       }
 
       if (!tokenResponse.access_token) return null
       d = { ...tokenResponse, access_token: tokenResponse.access_token }
+      if (!active()) return null
       this.pendingDeviceTokens.set(deviceCode, d)
     }
 
@@ -250,13 +289,31 @@ class AuthService {
     }
 
     const userId = String(u.id)
+    const previousWrite = this.credentialWrites
+    let finish!: () => void
+    this.credentialWrites = new Promise<void>(resolve => { finish = resolve })
+    await previousWrite
+    try {
 
     // ── Persist token + metadata ──────────────────────────────────────────────
+    if (!active()) return null
+    const previousToken = await keytar.getPassword(KEYTAR_SVC, tokenKey(userId))
+    const previousRefresh = await keytar.getPassword(KEYTAR_SVC, refreshKey(userId))
+    if (!active()) return null
     await keytar.setPassword(KEYTAR_SVC, tokenKey(userId), d.access_token)
     if (d.refresh_token) {
       await keytar.setPassword(KEYTAR_SVC, refreshKey(userId), d.refresh_token)
     }
 
+    if (!active()) {
+      if (previousToken) await keytar.setPassword(KEYTAR_SVC, tokenKey(userId), previousToken)
+      else await keytar.deletePassword(KEYTAR_SVC, tokenKey(userId))
+      if (d.refresh_token) {
+        if (previousRefresh) await keytar.setPassword(KEYTAR_SVC, refreshKey(userId), previousRefresh)
+        else await keytar.deletePassword(KEYTAR_SVC, refreshKey(userId))
+      }
+      return null
+    }
     const data = readData()
     data.tokenMetaByUserId ??= {}
     data.tokenMetaByUserId[userId] = {
@@ -279,7 +336,10 @@ class AuthService {
 
     logService.info('auth.deviceFlow', `Authenticated successfully as ${u.login} (userId: ${userId})`)
     return { token: d.access_token, userId }
+    } finally { finish() }
   }
+
+  private credentialWrites: Promise<void> = Promise.resolve()
 
   listAccounts(): { accounts: Account[]; currentAccountId: string | null } {
     const data = readData()
@@ -375,7 +435,7 @@ class AuthService {
   private async validateTokenScopes(accessToken: string): Promise<TokenValidity> {
     let userRes: Response
     try {
-      userRes = await fetch('https://api.github.com/user', {
+      userRes = await boundedFetch('https://api.github.com/user', {
         headers: {
           Authorization:          `Bearer ${accessToken}`,
           Accept:                 'application/vnd.github+json',
@@ -401,7 +461,7 @@ class AuthService {
   }
 
   private async refreshAccessToken(refreshToken: string): Promise<{ accessToken: string; refreshToken?: string; expiresIn?: number } | null> {
-    const res = await fetch('https://github.com/login/oauth/access_token', {
+    const res = await boundedFetch('https://github.com/login/oauth/access_token', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',

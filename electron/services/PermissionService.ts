@@ -1,3 +1,5 @@
+import { readJson, writeJson, isRecord } from '../util/json-store'
+import { boundedFetch } from '../util/network'
 import { app } from 'electron'
 import fs from 'fs'
 import path from 'path'
@@ -16,14 +18,14 @@ function storePath(): string {
 }
 
 function readStore(): PermissionStore {
-  try { return JSON.parse(fs.readFileSync(storePath(), 'utf8')) as PermissionStore }
-  catch { return { cache: {} } }
+  return readJson(storePath(), (value): value is PermissionStore => isRecord(value) && isRecord(value.cache) &&
+    Object.values(value.cache).every(entry => isRecord(entry) && ['admin', 'write', 'read'].includes(String(entry.permission)) && typeof entry.fetchedAt === 'number'), { cache: {} })
 }
 
 function writeStore(store: PermissionStore): void {
   const p = storePath()
   fs.mkdirSync(path.dirname(p), { recursive: true })
-  fs.writeFileSync(p, JSON.stringify(store, null, 2), 'utf8')
+  writeJson(p, store)
 }
 
 function parseRemoteUrl(remoteUrl: string): { owner: string; repo: string; apiBase: string } | null {
@@ -53,23 +55,26 @@ function parseRemoteUrl(remoteUrl: string): { owner: string; repo: string; apiBa
 }
 
 class PermissionService {
+  private inFlight = new Map<string, Promise<RepoPermission>>()
+  private cacheKey(repoPath: string, accountId = authService.listAccounts().currentAccountId): string { return JSON.stringify([accountId, repoPath]) }
+
   getCachedPermission(repoPath: string): RepoPermission | null {
     const store = readStore()
-    const entry = store.cache[repoPath]
+    const entry = store.cache[this.cacheKey(repoPath)]
     if (!entry) return null
     if (Date.now() - entry.fetchedAt > TTL_MS) return null
     return entry.permission
   }
 
-  private setCache(repoPath: string, permission: RepoPermission): void {
+  private setCache(repoPath: string, permission: RepoPermission, accountId: string): void {
     const store = readStore()
-    store.cache[repoPath] = { permission, fetchedAt: Date.now() }
+    store.cache[this.cacheKey(repoPath, accountId)] = { permission, fetchedAt: Date.now() }
     writeStore(store)
   }
 
   invalidateCache(repoPath: string): void {
     const store = readStore()
-    delete store.cache[repoPath]
+    delete store.cache[this.cacheKey(repoPath)]
     writeStore(store)
   }
 
@@ -80,6 +85,15 @@ class PermissionService {
   // Returns permission. On any failure, fails-open to 'write' (never 'admin').
   // Returns 'write' rather than 'read' so basic git ops remain unblocked.
   async fetchPermission(repoPath: string): Promise<RepoPermission> {
+    const key = this.cacheKey(repoPath)
+    const existing = this.inFlight.get(key)
+    if (existing) return existing
+    const pending = this.fetchPermissionSingle(repoPath).finally(() => this.inFlight.delete(key))
+    this.inFlight.set(key, pending)
+    return pending
+  }
+
+  private async fetchPermissionSingle(repoPath: string): Promise<RepoPermission> {
     const { accounts, currentAccountId } = authService.listAccounts()
     if (!currentAccountId || accounts.length === 0) return 'write'
 
@@ -102,13 +116,13 @@ class PermissionService {
     }
 
     try {
-      const res = await fetch(`${parsed.apiBase}/repos/${parsed.owner}/${parsed.repo}`, { headers })
+      const res = await boundedFetch(`${parsed.apiBase}/repos/${parsed.owner}/${parsed.repo}`, { headers })
 
       if (!res.ok) {
         // Don't cache on auth failures — the user may log in with a different account
         if (res.status === 401 || res.status === 403) return 'write'
-        const stale = readStore().cache[repoPath]
-        if (stale) return stale.permission
+        const stale = readStore().cache[this.cacheKey(repoPath, currentAccountId)]
+        if (stale && stale.permission !== 'admin') return stale.permission
         return 'write'
       }
 
@@ -119,13 +133,13 @@ class PermissionService {
 
       // Fast path: explicit admin flag in the repo response (direct collaborators)
       if (data.permissions?.admin === true) {
-        this.setCache(repoPath, 'admin')
+        this.setCache(repoPath, 'admin', currentAccountId)
         return 'admin'
       }
 
       // Fallback: current user is the repo owner (personal repos / org owners)
       if (currentLogin && data.owner?.login?.toLowerCase() === currentLogin.toLowerCase()) {
-        this.setCache(repoPath, 'admin')
+        this.setCache(repoPath, 'admin', currentAccountId)
         return 'admin'
       }
 
@@ -133,14 +147,14 @@ class PermissionService {
       // whose admin access flows through org membership rather than direct collaboration
       if (currentLogin) {
         try {
-          const collabRes = await fetch(
+          const collabRes = await boundedFetch(
             `${parsed.apiBase}/repos/${parsed.owner}/${parsed.repo}/collaborators/${currentLogin}/permission`,
             { headers },
           )
           if (collabRes.ok) {
             const collabData = await collabRes.json() as { permission?: string }
             if (collabData.permission === 'admin') {
-              this.setCache(repoPath, 'admin')
+              this.setCache(repoPath, 'admin', currentAccountId)
               return 'admin'
             }
           }
@@ -148,12 +162,12 @@ class PermissionService {
       }
 
       const permission: RepoPermission = data.permissions?.push === true ? 'write' : 'read'
-      this.setCache(repoPath, permission)
+      this.setCache(repoPath, permission, currentAccountId)
       return permission
     } catch {
       // Network error — use stale cache or fail-open
-      const stale = readStore().cache[repoPath]
-      if (stale) return stale.permission
+      const stale = readStore().cache[this.cacheKey(repoPath, currentAccountId)]
+      if (stale && stale.permission !== 'admin') return stale.permission
       return 'write'
     }
   }

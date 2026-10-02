@@ -1,3 +1,5 @@
+import { isModalOpen } from '@/lib/useDialogOverlayDismiss'
+import { useAutoFetch } from '@/lib/useAutoFetch'
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import lucidGitIcon from '@/lib/icons/lucid_git.svg'
 import { ipc, OperationStep, AppNotification } from '@/ipc'
@@ -162,7 +164,10 @@ export function AppShell() {
   const [cmdOpen, setCmdOpen] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
 
-  const { repoPath, error, openRepo, refreshStatus, silentRefresh, recentRepos, removeRecentRepo, clearRepo } = useRepoStore()
+  const [settingsSection, setSettingsSection] = useState('general')
+  const { repoPath, error, openRepo, refreshStatus, silentRefresh, recentRepos, removeRecentRepo } = useRepoStore()
+  const prTick = useRepoStore(s => s.prTick)
+  useAutoFetch(repoPath)
   const { updateStep } = useOperationStore()
 
   // Auto-open the cherry-pick conflict dialog if a previous session left
@@ -181,9 +186,10 @@ export function AppShell() {
   const { notifications, push: pushNotification, resolveRequest, clearResolveRequest } = useNotificationStore()
   const showStatusToast = useStatusToastStore(s => s.show)
 
-  const { conflicts: forecastConflicts, enabled: forecastEnabled, lastPolledAt, setConflicts: setForecastConflicts, setEnabled: setForecastEnabled, setLastPolledAt } = useForecastStore()
+  const { conflicts: forecastConflicts, enabled: forecastEnabled, lastPolledAt, error: forecastError, setConflicts: setForecastConflicts, setEnabled: setForecastEnabled } = useForecastStore()
 
   const currentUserName = accounts.find(a => a.userId === currentAccountId)?.login ?? null
+  useEffect(() => { if (repoPath) void loadLocks(repoPath) }, [repoPath, prTick, currentAccountId, loadLocks])
   const isSignedIn = Boolean(currentAccountId)
   const didAttemptSessionRestore = useRef(false)
 
@@ -226,6 +232,7 @@ export function AppShell() {
       return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable
     }
     const handler = (e: KeyboardEvent) => {
+      if (isModalOpen()) return
       const mod = e.metaKey || e.ctrlKey
       if (!mod) return
       // Command palette — allowed even while typing.
@@ -273,8 +280,11 @@ export function AppShell() {
   }, [updateStep])
 
   useEffect(() => {
-    const unsub = ipc.onLockChanged(({ repoPath: sourceRepo, locks }) => {
-      if (useRepoStore.getState().repoPath === sourceRepo) setLocks(locks)
+    const unsub = ipc.onLockChanged(({ repoPath: sourceRepo, locks, error }) => {
+      if (useRepoStore.getState().repoPath === sourceRepo) {
+        if (error) useLockStore.setState({ error: 'Lock data is stale: ' + error })
+        else setLocks(locks)
+      }
     })
     return unsub
   }, [setLocks])
@@ -367,7 +377,7 @@ export function AppShell() {
   // last project one click away and no indication why.
   useEffect(() => {
     if (didAttemptSessionRestore.current) return
-    if (!authChecked || !isSignedIn) return
+    if (!authChecked) return
 
     // Already have a repository — nothing to restore, and no later change
     // should trigger one.
@@ -381,15 +391,10 @@ export function AppShell() {
     openRepo(recentRepos[0]).catch(() => {})
   }, [authChecked, isSignedIn, repoPath, recentRepos, openRepo])
 
-  useEffect(() => {
-    if (authChecked && !isSignedIn) {
-      clearRepo()
-    }
-  }, [authChecked, isSignedIn, clearRepo])
+
 
   useEffect(() => {
     if (repoPath) {
-      loadLocks(repoPath)
       ipc.startLockPolling(repoPath)
       ipc.prMonitorStart(repoPath).catch(() => {})
       usePRUnlockStore.getState().refresh(repoPath).catch(() => {})
@@ -427,40 +432,31 @@ export function AppShell() {
 
   // ── Forecast — subscribe to conflict events ────────────────────────────────
   useEffect(() => {
-    const unsub = ipc.onForecastConflict((conflicts) => {
-      setForecastConflicts(conflicts)
-      setLastPolledAt(Date.now())
+    const unsub = ipc.onForecastConflict(status => {
+      if (useRepoStore.getState().repoPath !== status.repoPath) return
+      useForecastStore.setState({ conflicts: status.conflicts, enabled: status.enabled, lastPolledAt: status.lastPolledAt, error: status.error ?? null })
     })
     return unsub
   }, [])
 
   useEffect(() => {
+    useForecastStore.getState().clear()
     if (!repoPath) return
-    // Restore forecast status from backend on repo change
+    let cancelled = false
     ipc.forecastStatus(repoPath).then(st => {
-      if (st) {
-        setForecastEnabled(true)
-        setForecastConflicts(st.conflicts)
-        if (st.lastPolledAt) setLastPolledAt(st.lastPolledAt)
-      }
+      if (cancelled || useRepoStore.getState().repoPath !== repoPath) return
+      if (st) useForecastStore.setState({ conflicts: st.conflicts, enabled: st.enabled, lastPolledAt: st.lastPolledAt, error: st.error ?? null })
     }).catch(() => {})
+    return () => { cancelled = true }
   }, [repoPath])
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handleOpenRepo = async () => {
-    if (!isSignedIn) {
-      setShowLoginDialog(true)
-      return
-    }
     const dir = await ipc.openDirectory()
     if (dir) openRepo(dir)
   }
 
   const handleCloneRepo = () => {
-    if (!isSignedIn) {
-      setShowLoginDialog(true)
-      return
-    }
     setShowCloneDialog(true)
   }
 
@@ -514,10 +510,11 @@ export function AppShell() {
         )}
 
         <main style={{ display: 'flex', flex: 1, overflow: 'hidden', flexDirection: 'column', position: 'relative' }}>
+          {repoPath && error && <div role="alert" className="p-2 text-xs text-lg-warning">Repository data may be incomplete or stale: {error} <button onClick={() => refreshStatus()}>Retry refresh</button></div>}
           {/* Settings is always accessible — even without a repo */}
           {leftTab === 'settings' ? (
             <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
-              <SettingsPage repoPath={repoPath} />
+              <SettingsPage repoPath={repoPath} initialSection={settingsSection} />
             </PanelErrorBoundary>
           ) : !repoPath ? (
             /* ── Welcome ── */
@@ -561,7 +558,7 @@ export function AppShell() {
                 )}
                 {!isSignedIn ? (
                   <div style={{ display: 'flex', justifyContent: 'center', marginTop: 28 }}>
-                    <WelcomeBtn onClick={() => setShowLoginDialog(true)} label="Sign In to Continue" accent />
+                    <WelcomeBtn onClick={handleOpenRepo} label="Open Repository" accent /><WelcomeBtn onClick={handleCloneRepo} label="Clone Repository" /><WelcomeBtn onClick={() => setShowLoginDialog(true)} label="Sign In for GitHub" />
                   </div>
                 ) : (
                   <>
@@ -589,7 +586,7 @@ export function AppShell() {
                   Press ⌘K to open command palette
                 </div>
 
-                {isSignedIn && recentRepos.length > 0 && (
+                {recentRepos.length > 0 && (
                   <div style={{ marginTop: 32, width: 340, textAlign: 'left' }}>
                     <div style={{
                       fontFamily: 'var(--lg-font-ui)', fontSize: 10, fontWeight: 700,
@@ -678,7 +675,7 @@ export function AppShell() {
                 repoPath={repoPath}
                 conflicts={forecastConflicts}
                 enabled={forecastEnabled}
-                lastPolledAt={lastPolledAt}
+                lastPolledAt={lastPolledAt} error={forecastError}
                 onStart={async () => {
                   const st = await ipc.forecastStart(repoPath)
                   setForecastEnabled(true)
@@ -766,7 +763,7 @@ export function AppShell() {
       <GlobalDialogs />
       <ErrorPanel
         onReauth={() => setShowLoginDialog(true)}
-        onNavigateTab={(tab) => setLeftTab(tab as TabId)}
+        onNavigateTab={(tab) => { if (tab.startsWith('settings:')) { setSettingsSection(tab.slice(9)); setLeftTab('settings') } else setLeftTab(tab as TabId) }}
         onOpenMergeResolver={async () => {
           if (!repoPath) return
           // Find whatever branch the in-progress merge is against and open
@@ -780,7 +777,7 @@ export function AppShell() {
       <CommandPalette
         open={cmdOpen}
         onClose={() => setCmdOpen(false)}
-        onNavigateTab={(tab) => setLeftTab(tab as TabId)}
+        onNavigateTab={(tab) => { if (tab.startsWith('settings:')) { setSettingsSection(tab.slice(9)); setLeftTab('settings') } else setLeftTab(tab as TabId) }}
         onOpenRepo={handleOpenRepo}
         onClone={handleCloneRepo}
         onAddAccount={() => setShowLoginDialog(true)}

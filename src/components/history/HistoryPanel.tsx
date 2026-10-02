@@ -483,7 +483,7 @@ export function CommitDetail({ commit, files, filesLoading, repoPath, remoteUrl 
           fontFamily: 'var(--lg-font-ui)', fontSize: 11, fontWeight: 600,
           color: '#4e5870', letterSpacing: '0.06em', textTransform: 'uppercase',
         }}>
-          Files changed
+          Files changed (first parent; root compares to empty tree)
           {!filesLoading && files.length > 0 && (
             <span style={{
               marginLeft: 8, fontFamily: 'var(--lg-font-mono)', fontSize: 11,
@@ -920,6 +920,11 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
 
   const [activeTab,    setActiveTab]    = useState<'commits' | 'stashes'>('commits')
   const [nodes,        setNodes]        = useState<GraphNode[]>([])
+  const historyRequest = useRef(0)
+  const filesRequest = useRef(0)
+  const activeRepo = useRef(repoPath)
+  activeRepo.current = repoPath
+  const [historyError, setHistoryError] = useState<string | null>(null)
   const [totalLoaded,  setTotalLoaded]  = useState(0)
   const [loading,      setLoading]      = useState(false)
   const [limitRef]                      = useState({ current: INITIAL_LIMIT })
@@ -1009,7 +1014,7 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
         }
       } catch {}
     }))
-    setBranchTips(new Map(tips))
+    if (activeRepo.current === repoPath) setBranchTips(new Map(tips))
   }, [repoPath])
 
 
@@ -1055,7 +1060,9 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
 
   // ── Data loading ─────────────────────────────────────────────────────────────
   const loadHistory = useCallback(async (limit: number, branchFilter?: Set<string>) => {
+    const request = ++historyRequest.current
     setLoading(true)
+    setHistoryError(null)
     try {
       const active = branchFilter ?? selectedBranches
       // Always include default branch + selected branches
@@ -1066,30 +1073,39 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
         'Loading history…',
         () => ipc.log(repoPath, { limit, all: !refs, refs }),
       )
+      if (historyRequest.current !== request || activeRepo.current !== repoPath) return
       setNodes(computeGraph(commits))
       setTotalLoaded(commits.length)
+    } catch (error) {
+      if (historyRequest.current === request && activeRepo.current === repoPath) setHistoryError(String(error))
     } finally {
-      setLoading(false)
+      if (historyRequest.current === request && activeRepo.current === repoPath) setLoading(false)
     }
   }, [repoPath, opRun, selectedBranches, defaultBranch])
 
   useEffect(() => {
+    historyRequest.current++
+    filesRequest.current++
+    setNodes([])
     limitRef.current = INITIAL_LIMIT
     setSelectedHashes(new Set())
     setPrimaryCommit(null)
     setLastClickedIdx(null)
     setFiles([])
-    ipc.getRemoteUrl(repoPath).then(setRemoteUrl).catch(() => {})
+    let cancelled = false
+    ipc.getRemoteUrl(repoPath).then(url => { if (!cancelled) setRemoteUrl(url) }).catch(error => { if (!cancelled) setHistoryError(String(error)) })
     Promise.all([
       ipc.branchList(repoPath),
       ipc.gitDefaultBranch(repoPath),
     ]).then(([bList, def]) => {
+      if (cancelled) return
       const locals = bList.filter(b => !b.isRemote)
       setBranches(bList)
       setDefaultBranch(def)
       fetchBranchTips(locals)
-    }).catch(() => {})
+    }).catch(error => { if (!cancelled) setHistoryError(String(error)) })
     loadHistory(INITIAL_LIMIT, new Set())
+    return () => { cancelled = true; historyRequest.current++; filesRequest.current++ }
   }, [repoPath])
 
   // ── Refresh history when a git op changes HEAD (fetch, pull, push, checkout, etc.) ──
@@ -1146,15 +1162,17 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
 
   // Load files for whichever commit is the primary (detail panel)
   const loadPrimary = useCallback(async (commit: CommitEntry) => {
+    const request = ++filesRequest.current
     setPrimaryCommit(commit)
     setFiles([])
     setFilesLoading(true)
     try {
-      setFiles(await ipc.commitFiles(repoPath, commit.hash))
-    } catch {
-      setFiles([])
+      const files = await ipc.commitFiles(repoPath, commit.hash)
+      if (filesRequest.current === request && activeRepo.current === repoPath) setFiles(files)
+    } catch (error) {
+      if (filesRequest.current === request && activeRepo.current === repoPath) setHistoryError(String(error))
     } finally {
-      setFilesLoading(false)
+      if (filesRequest.current === request && activeRepo.current === repoPath) setFilesLoading(false)
     }
   }, [repoPath])
 
@@ -1277,6 +1295,7 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
   return (
     <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
+      {historyError && <div role="alert" className="p-2 text-xs text-lg-warning">History may be stale: {historyError} <button onClick={() => loadHistory(limitRef.current)}>Retry</button></div>}
       {/* Shared SVG filter defs for the graph */}
       <GraphDefs />
 
@@ -1357,6 +1376,8 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
 
             <button
               onClick={() => loadHistory(limitRef.current)}
+              title="Refresh history"
+              aria-label="Refresh history"
               disabled={loading}
               style={{
                 fontFamily: 'var(--lg-font-ui)', fontSize: 12,

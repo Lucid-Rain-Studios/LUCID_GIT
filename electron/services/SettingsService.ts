@@ -1,4 +1,4 @@
-import * as fs from 'fs'
+import { readJson, writeJsonAsync, isRecord } from '../util/json-store'
 import * as path from 'path'
 import { app } from 'electron'
 import type { AppSettings, DesktopNotificationEvents, FeatureVisibilitySettings } from '../types'
@@ -48,6 +48,21 @@ const DEFAULTS: AppSettings = {
 
 type SettingsListener = (settings: AppSettings) => void
 
+function validSettings(value: unknown): value is Partial<AppSettings> {
+  return isRecord(value) && Object.entries(value).every(([key, item]) => {
+    const expected = DEFAULTS[key as keyof AppSettings]
+    if (expected === undefined) return false
+    if (isRecord(expected)) {
+      return isRecord(item) && Object.entries(item).every(([field, setting]) => field in expected &&
+        (key === 'featureVisibility' ? ['auto', 'show', 'hide'].includes(String(setting)) : typeof setting === typeof (expected as Record<string, unknown>)[field]))
+    }
+    if (typeof item !== typeof expected || (typeof item === 'number' && (!Number.isFinite(item) || item < 0))) return false
+    if (key === 'theme') return ['dark', 'darker', 'midnight', 'dracula', 'nord', 'catppuccin', 'tokyo-night', 'ocean', 'forest', 'rose-pine', 'monokai'].includes(String(item))
+    if (key === 'uiDensity') return ['compact', 'normal', 'relaxed'].includes(String(item))
+    return true
+  })
+}
+
 class SettingsService {
   private listeners = new Set<SettingsListener>()
 
@@ -56,33 +71,25 @@ class SettingsService {
   }
 
   getAll(): AppSettings {
-    try {
-      const raw = fs.readFileSync(this.filePath(), 'utf8')
-      const stored = JSON.parse(raw) as Partial<AppSettings>
-      return {
-        ...DEFAULTS,
-        ...stored,
-        // Merge nested DesktopNotificationEvents so newly-added toggles get
-        // their default value when reading an older settings file.
-        desktopNotificationEvents: {
-          ...DESKTOP_NOTIFICATION_DEFAULTS,
-          ...(stored.desktopNotificationEvents ?? {}),
-        },
-        featureVisibility: {
-          ...FEATURE_VISIBILITY_DEFAULTS,
-          ...(stored.featureVisibility ?? {}),
-        },
-      }
-    } catch {
-      return {
-        ...DEFAULTS,
-        desktopNotificationEvents: { ...DESKTOP_NOTIFICATION_DEFAULTS },
-        featureVisibility: { ...FEATURE_VISIBILITY_DEFAULTS },
-      }
+    const stored = readJson(this.filePath(), validSettings, {})
+    return { ...DEFAULTS, ...stored,
+      desktopNotificationEvents: { ...DESKTOP_NOTIFICATION_DEFAULTS, ...stored.desktopNotificationEvents },
+      featureVisibility: { ...FEATURE_VISIBILITY_DEFAULTS, ...stored.featureVisibility },
     }
   }
 
-  save(settings: AppSettings): void {
+  private writes: Promise<void> = Promise.resolve()
+
+  save(patch: Partial<AppSettings>): Promise<void> {
+    if (!validSettings(patch)) return Promise.reject(new Error('Invalid settings values'))
+    const pending = this.writes.then(() => this.savePatch(patch))
+    this.writes = pending.catch(() => {})
+    return pending
+  }
+
+  private async savePatch(patch: Partial<AppSettings>): Promise<void> {
+    const current = this.getAll()
+    const settings = { ...current, ...patch }
     const normalized: AppSettings = {
       ...DEFAULTS,
       ...settings,
@@ -90,14 +97,16 @@ class SettingsService {
       preferredTerminal: settings.preferredTerminal ?? 'auto',
       desktopNotificationEvents: {
         ...DESKTOP_NOTIFICATION_DEFAULTS,
-        ...(settings.desktopNotificationEvents ?? {}),
+        ...current.desktopNotificationEvents,
+        ...(patch.desktopNotificationEvents ?? {}),
       },
       featureVisibility: {
         ...FEATURE_VISIBILITY_DEFAULTS,
-        ...(settings.featureVisibility ?? {}),
+        ...current.featureVisibility,
+        ...(patch.featureVisibility ?? {}),
       },
     }
-    fs.writeFileSync(this.filePath(), JSON.stringify(normalized, null, 2), 'utf8')
+    await writeJsonAsync(this.filePath(), normalized)
     for (const listener of this.listeners) listener(normalized)
   }
 

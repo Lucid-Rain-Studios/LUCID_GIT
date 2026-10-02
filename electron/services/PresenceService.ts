@@ -1,3 +1,4 @@
+import { readJson, writeJson, isRecord } from '../util/json-store'
 import * as fs from 'fs'
 import * as path from 'path'
 import type { PresenceEntry, PresenceFile } from '../types'
@@ -7,22 +8,8 @@ class PresenceService {
     return path.join(repoPath, '.lucid-git', 'presence.json')
   }
 
-  private normalize(value: unknown): PresenceFile {
-    if (!value || typeof value !== 'object') return { version: 1, entries: {} }
-    const entries = (value as Partial<PresenceFile>).entries
-    return {
-      version: 1,
-      entries: entries && typeof entries === 'object' ? entries : {},
-    }
-  }
-
   read(repoPath: string): PresenceFile {
-    try {
-      const raw = fs.readFileSync(this.filePath(repoPath), 'utf8')
-      return this.normalize(JSON.parse(raw))
-    } catch {
-      return { version: 1, entries: {} }
-    }
+    return readJson(this.filePath(repoPath), (value): value is PresenceFile => isRecord(value) && value.version === 1 && isRecord(value.entries), { version: 1, entries: {} })
   }
 
   update(repoPath: string, login: string, entry: PresenceEntry): void {
@@ -31,7 +18,7 @@ class PresenceService {
 
     const current = this.read(repoPath)
     current.entries[login] = entry
-    fs.writeFileSync(this.filePath(repoPath), JSON.stringify(current, null, 2), 'utf8')
+    writeJson(this.filePath(repoPath), current)
 
     // Ensure .lucid-git/presence.json is in .gitignore (local ignore)
     this.ensureIgnored(repoPath)
@@ -62,7 +49,7 @@ class PresenceService {
         }
       }
       if (changed) {
-        fs.writeFileSync(this.filePath(repoPath), JSON.stringify(current, null, 2), 'utf8')
+        writeJson(this.filePath(repoPath), current)
       }
     } catch { /* ignore */ }
   }

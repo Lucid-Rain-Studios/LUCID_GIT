@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { useRepoStore } from '@/stores/repoStore'
 import { FileStatus, CommitEntry, ipc } from '@/ipc'
 import { FilePathText } from '@/components/ui/FilePathText'
 
@@ -367,6 +368,7 @@ function GenericIcon({ ext }: { ext: string }) {
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export function BinaryDiff({ file, repoPath }: BinaryDiffProps) {
+  const revision = useRepoStore(s => s.fileStatus)
   const [history, setHistory]         = useState<CommitEntry[] | null>(null)
   const [histLoading, setHistLoading] = useState(true)
   const [thumbnail, setThumbnail]     = useState<string | null>(null)
@@ -393,7 +395,7 @@ export function BinaryDiff({ file, repoPath }: BinaryDiffProps) {
       .then(p => { if (!cancelled) setThumbnail(p) })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [repoPath, file.path, thumbRef, isUEAsset])
+  }, [repoPath, file.path, thumbRef, isUEAsset, revision])
 
   const asset    = classifyAsset(file.path)
   const ext      = file.path.split('.').pop()?.toLowerCase() ?? ''

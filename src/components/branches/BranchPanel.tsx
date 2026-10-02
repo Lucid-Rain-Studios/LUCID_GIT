@@ -1,3 +1,4 @@
+import { useDialogOverlayDismiss } from '@/lib/useDialogOverlayDismiss'
 import React, { useState, useRef, useEffect } from 'react'
 import { BranchInfo, BranchDiffSummary, BranchActivity, Lock, PresenceEntry, PullRequest, ipc } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
@@ -745,8 +746,9 @@ function BranchStashDialog({ from, to, onConfirm, onCancel }: {
   onCancel: () => void
 }) {
   const [stash, setStash] = React.useState(true)
+  const modal = useDialogOverlayDismiss(onCancel, true, 'Uncommitted changes')
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-sm">
+    <div {...modal} className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-sm">
       <div className="bg-lg-bg-elevated border border-lg-border rounded-lg shadow-2xl w-80 p-5" style={{ animation: 'slide-down 0.16s ease both' }}>
         <div className="text-sm font-semibold text-lg-text-primary mb-2">Uncommitted Changes</div>
         <div className="text-xs text-lg-text-secondary mb-4 leading-relaxed">

@@ -1,5 +1,5 @@
+import { readJson, writeJson, isRecord } from '../util/json-store'
 import { app, BrowserWindow } from 'electron'
-import * as fs from 'fs'
 import * as path from 'path'
 import * as crypto from 'crypto'
 import { execSafe } from '../util/dugite-exec'
@@ -21,6 +21,7 @@ interface TrackedPR {
   state:       'open' | 'closed-merged' | 'closed-denied'
   title:       string
   recordedAt:  string
+  followupPending?: boolean
   resolved?:   boolean   // user has acted on / dismissed the merge-unlock prompt
 }
 
@@ -40,17 +41,11 @@ function stateFile(repoPath: string): string {
 }
 
 function loadState(repoPath: string): MonitorState {
-  try {
-    return JSON.parse(fs.readFileSync(stateFile(repoPath), 'utf-8')) as MonitorState
-  } catch {
-    return { trackedPRs: {} }
-  }
+  return readJson(stateFile(repoPath), (value): value is MonitorState => isRecord(value) && isRecord(value.trackedPRs), { trackedPRs: {} })
 }
 
 function saveState(repoPath: string, state: MonitorState): void {
-  try {
-    fs.writeFileSync(stateFile(repoPath), JSON.stringify(state, null, 2), 'utf-8')
-  } catch {}
+  writeJson(stateFile(repoPath), state)
 }
 
 function parseGitHubSlug(url: string): { owner: string; repo: string } | null {
@@ -146,7 +141,7 @@ class PRMonitorService {
         ? `https://github.com/${slug.owner}/${slug.repo}/pull/${prNumber}`
         : ''
 
-      if (tracked.state === 'open') {
+      if (tracked.state === 'open' || tracked.followupPending) {
         pending++
       } else if (tracked.state === 'closed-merged' && !tracked.resolved) {
         // Can't compute the lock split without knowing who the user is; surface
@@ -313,12 +308,21 @@ class PRMonitorService {
     repoPath: string,
     slug: { owner: string; repo: string },
   ): Promise<void> {
+    const existing = this.checks.get(repoPath)
+    if (existing) return existing
+    const pending = this.checkCurrent(repoPath, slug).finally(() => this.checks.delete(repoPath))
+    this.checks.set(repoPath, pending)
+    return pending
+  }
+
+  private checks = new Map<string, Promise<void>>()
+  private async checkCurrent(repoPath: string, slug: { owner: string; repo: string }): Promise<void> {
     const token = await authService.getCurrentToken()
     if (!token) return
 
     const state   = loadState(repoPath)
     const openPRs = Object.entries(state.trackedPRs)
-      .filter(([, pr]) => pr.state === 'open')
+      .filter(([, pr]) => pr.state === 'open' || pr.followupPending)
 
     if (openPRs.length === 0) return
 
@@ -334,6 +338,8 @@ class PRMonitorService {
         if (status.state === 'open') continue  // still open, nothing to do
 
         tracked.state = status.merged ? 'closed-merged' : 'closed-denied'
+        tracked.followupPending = true
+        saveState(repoPath, state)
         dirty = true
 
         const htmlUrl     = `https://github.com/${slug.owner}/${slug.repo}/pull/${prNumber}`
@@ -343,6 +349,7 @@ class PRMonitorService {
         const currentChanges = await this.currentChangedFileSet(repoPath)
         const resolvedLocks  = await this.resolveMergedPRLockState(repoPath, tracked.lockedFiles, tokenLogin, currentChanges)
         const stillLocked    = resolvedLocks.containsLocalChanges
+        const alreadyNotified = notificationService.list(repoPath).some(item => item.meta?.eventKey === 'pr-resolved-' + prNumber)
 
         let n: AppNotification
         if (status.merged) {
@@ -355,6 +362,7 @@ class PRMonitorService {
             `PR #${prNumber} merged`,
             body,
             {
+              eventKey: 'pr-resolved-' + prNumber,
               prNumber,
               owner:       slug.owner,
               repo:        slug.repo,
@@ -365,7 +373,7 @@ class PRMonitorService {
               htmlUrl,
             },
           )
-          desktopNotificationService.notify({
+          if (!alreadyNotified) desktopNotificationService.notify({
             event:  'prResolved',
             title:  `PR #${prNumber} merged`,
             body,
@@ -378,6 +386,7 @@ class PRMonitorService {
             `PR #${prNumber} closed without merging`,
             tracked.title,
             {
+              eventKey: 'pr-resolved-' + prNumber,
               prNumber,
               owner:       slug.owner,
               repo:        slug.repo,
@@ -386,7 +395,7 @@ class PRMonitorService {
               htmlUrl,
             },
           )
-          desktopNotificationService.notify({
+          if (!alreadyNotified) desktopNotificationService.notify({
             event:  'prResolved',
             title:  `PR #${prNumber} closed without merging`,
             body:   tracked.title,
@@ -395,6 +404,8 @@ class PRMonitorService {
         }
 
         this.emitNotification(n)
+        tracked.followupPending = false
+        saveState(repoPath, state)
       } catch {
         // GitHub API error — leave as open, retry next poll
       }
@@ -424,31 +435,14 @@ class PRMonitorService {
       }
 
       return { containsLocalChanges, availableToUnlock }
-    } catch {
-      return { containsLocalChanges: filePaths, availableToUnlock: [] }
+    } catch (error) {
+      throw new Error('Unable to verify merged PR locks. They have been retained: ' + String(error))
     }
   }
 
   private async currentChangedFileSet(repoPath: string): Promise<Set<string>> {
-    try {
-      const { exitCode, stdout } = await execSafe(['status', '--porcelain=v1', '-z'], repoPath)
-      if (exitCode !== 0) return new Set()
-      const changed = new Set<string>()
-      const entries = stdout.split('\0')
-      let i = 0
-
-      while (i < entries.length) {
-        const entry = entries[i]
-        if (!entry || entry.length < 3) { i++; continue }
-        const indexStatus = entry[0]
-        const filePath = entry.slice(3)
-        if (filePath) changed.add(filePath)
-        i += (indexStatus === 'R' || indexStatus === 'C') ? 2 : 1
-      }
-      return changed
-    } catch {
-      return new Set()
-    }
+    const files = await gitService.status(repoPath)
+    return new Set(files.map(file => file.path))
   }
 
   private emitNotification(n: AppNotification): void {

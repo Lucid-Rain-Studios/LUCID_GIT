@@ -178,6 +178,7 @@ test('LG-010 untracked deletion failure rejects and FileRow keeps its lock', asy
   finally { fs.promises.unlink = real }
   let unlocks = 0
   const panel = component('src/components/changes/FileRow.tsx', {
+    '@/stores/repoStore': { useRepoStore: store({ fileStatus: [] }) },
     '@/ipc': { ipc: { discard: async () => { throw Error('restore failed') } } },
     '@/stores/forecastStore': { useForecastStore: store({ conflicts: [] }) },
     '@/stores/assetViewerStore': { useAssetViewerStore: store({}) },
@@ -272,6 +273,7 @@ test('LG-015 a stalled binary command yields and its deadline kills the process'
 })
 
 function repoStore(api) {
+  api.isRepo ??= async () => true
   return component('src/stores/repoStore.ts', {
     zustand: require('zustand'), './operationStore': { useOperationStore: store({ run: (_, fn) => fn() }) },
   }, { window: { lucidGit: api } }).exports

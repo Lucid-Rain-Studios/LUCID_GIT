@@ -1,5 +1,6 @@
 export const CHANNELS = {
   // Auth
+  AUTH_CANCEL_DEVICE_FLOW: 'auth:cancel-device-flow',
   AUTH_START_DEVICE_FLOW:  'auth:start-device-flow',
   AUTH_POLL_DEVICE_FLOW:   'auth:poll-device-flow',
   AUTH_LIST_ACCOUNTS:          'auth:list-accounts',
@@ -143,6 +144,8 @@ export const CHANNELS = {
   // Team config
   TEAM_CONFIG_LOAD: 'team-config:load',
   TEAM_CONFIG_SAVE: 'team-config:save',
+  TEAM_CONFIG_APPLY: 'team-config:apply',
+  EVT_UPDATE_ERROR: 'update:error',
 
   // Git tools
   GIT_LS_FILES:        'git:ls-files',

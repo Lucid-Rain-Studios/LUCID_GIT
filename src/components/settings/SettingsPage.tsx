@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { GeneralSettings } from './GeneralSettings'
 import { AppearanceSettings } from './AppearanceSettings'
 import { NotificationSettings } from './NotificationSettings'
@@ -7,6 +7,7 @@ import { TeamConfigPanel } from './TeamConfigPanel'
 import { useAuthStore } from '@/stores/authStore'
 
 interface SettingsPageProps {
+  initialSection?: string
   repoPath: string | null
 }
 
@@ -20,8 +21,12 @@ const ALL_TABS: { id: SettingsTab; label: string; requiresRepo?: boolean; adminO
   { id: 'team',          label: 'Team config', requiresRepo: true, adminOnly: true },
 ]
 
-export function SettingsPage({ repoPath }: SettingsPageProps) {
+export function SettingsPage({ repoPath, initialSection }: SettingsPageProps) {
   const [tab, setTab] = useState<SettingsTab>('general')
+  useEffect(() => {
+    if (ALL_TABS.some(item => item.id === initialSection)) setTab(initialSection as SettingsTab)
+    else setTab('general')
+  }, [initialSection])
   const isAdmin = useAuthStore(s => s.isAdmin(repoPath ?? ''))
 
   const tabs = ALL_TABS.filter(t => !t.requiresRepo || !!repoPath)

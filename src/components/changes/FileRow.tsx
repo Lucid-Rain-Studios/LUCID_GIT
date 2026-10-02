@@ -10,6 +10,7 @@ import { AppTooltip } from '@/components/ui/AppTooltip'
 import { FilePathText } from '@/components/ui/FilePathText'
 import { AppRightSelectionItem, AppRightSelectionOptions, AppRightSelectionSeparator } from '@/components/ui/AppRightSelectionOptions'
 import { HunkStagingDialog } from './HunkStagingDialog'
+import { useRepoStore } from '@/stores/repoStore'
 
 interface FileRowProps {
   file: FileStatus
@@ -56,6 +57,7 @@ export function FileRow({
   const forecastConflicts = useForecastStore(s => s.conflicts)
   const openViewer = useAssetViewerStore(s => s.open)
   const [thumbnail, setThumbnail] = useState<string | null>(null)
+  const revision = useRepoStore(s => s.fileStatus)
 
   useEffect(() => {
     let cancelled = false
@@ -66,7 +68,7 @@ export function FileRow({
       .then(p => { if (!cancelled) setThumbnail(p) })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [repoPath, file.path, isPreviewable, file.staged])
+  }, [repoPath, file.path, isPreviewable, file.staged, revision])
   const fileConflicts = forecastConflicts.filter(c => c.filePath === file.path || c.filePath.endsWith('/' + file.path))
   const { lockFile, unlockFile, watchFile } = useLockStore()
   const isAdmin = useAuthStore(s => s.isAdmin(repoPath))
@@ -94,7 +96,7 @@ export function FileRow({
   // Hunk-level staging makes sense only for tracked text files with content
   // changes. Untracked, deleted, renamed, or binary changes have no hunks to
   // pick from.
-  const canStageHunks = !isUntracked && effectiveStatus !== 'D' && effectiveStatus !== 'R'
+  const canStageHunks = !isLockedByOther && !isUntracked && effectiveStatus !== 'D' && effectiveStatus !== 'R'
 
   useEffect(() => {
     if (!ctx) return

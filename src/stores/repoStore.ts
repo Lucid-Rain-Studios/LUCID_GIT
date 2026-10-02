@@ -62,6 +62,14 @@ export const useRepoStore = create<RepoState>((set, get) => ({
     const request = ++statusRequest
     const branchesRequest = ++branchRequest
     const current = () => repoGeneration === generation && get().repoPath === path && statusRequest === request
+    set({ isLoading: true, error: null })
+    try {
+      if (!await window.lucidGit.isRepo(path)) throw new Error('This folder is not a Git repository.')
+    } catch (error) {
+      if (repoGeneration === generation) set({ isLoading: false, error: String(error) })
+      return
+    }
+    if (repoGeneration !== generation) return
     set({ repoPath: path, fileStatus: [], currentBranch: '', branches: [], isLoading: true, isSilentRefreshing: false, error: null })
     get().addRecentRepo(path)
     const op = useOperationStore.getState()
@@ -75,7 +83,8 @@ export const useRepoStore = create<RepoState>((set, get) => ({
         const statusPromise = window.lucidGit.status(path)
         const branchesPromise = window.lucidGit.branchList(path)
 
-        const branch = await branchPromise.catch(() => 'unknown')
+        let branchError: unknown
+        const branch = await branchPromise.catch(error => { branchError = error; return 'unknown' })
         if (current() && statusRequest === request) set({ currentBranch: branch ?? 'unknown' })
 
         const [statusRes, branchesRes] = await Promise.allSettled([statusPromise, branchesPromise])
@@ -84,7 +93,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
         set({
           fileStatus: statusRes.status === 'fulfilled' ? (statusRes.value ?? []) : [],
           ...(branchRequest === branchesRequest ? { branches: branchesRes.status === 'fulfilled' ? (branchesRes.value ?? []) : [] } : {}),
-          error: null,
+          error: [...(branchError ? [String(branchError)] : []), ...[statusRes, branchesRes].filter(r => r.status === 'rejected').map(r => String((r as PromiseRejectedResult).reason))].join('; ') || null,
         })
       })
     } catch (err) {
@@ -121,9 +130,10 @@ export const useRepoStore = create<RepoState>((set, get) => ({
         if (statusR.status   === 'fulfilled') set({ fileStatus: statusR.value ?? [] })
         if (branchR.status   === 'fulfilled') set({ currentBranch: branchR.value ?? '' })
         if (branchRequest === branchesRequest && branchesR.status === 'fulfilled') set({ branches: branchesR.value ?? [] })
+        set({ error: [statusR, branchR, branchesR].filter(r => r.status === 'rejected').map(r => String((r as PromiseRejectedResult).reason)).join('; ') || null })
       })
-    } catch {
-      // silent
+    } catch (error) {
+      if (current()) set({ error: String(error) })
     } finally {
       if (current()) set({ isLoading: false })
     }
@@ -145,6 +155,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
       if (repoGeneration === generation && get().repoPath === repoPath && statusRequest === request && !get().isLoading) {
         if (statusR.status === 'fulfilled') set({ fileStatus: statusR.value ?? [] })
         if (branchR.status === 'fulfilled') set({ currentBranch: branchR.value ?? '' })
+        set({ error: [statusR, branchR].filter(r => r.status === 'rejected').map(r => String((r as PromiseRejectedResult).reason)).join('; ') || null })
       }
     } catch { /* ignore */ }
     finally { if (generation === repoGeneration && get().repoPath === repoPath) set({ isSilentRefreshing: false }) }
@@ -155,8 +166,11 @@ export const useRepoStore = create<RepoState>((set, get) => ({
     if (!repoPath) return
     const generation = repoGeneration
     const request = ++branchRequest
-    const branches = await window.lucidGit.branchList(repoPath).catch(() => [])
-    if (generation === repoGeneration && repoPath === get().repoPath && request === branchRequest) set({ branches })
+    const branches = await window.lucidGit.branchList(repoPath).catch(error => {
+      if (generation === repoGeneration && request === branchRequest) set({ error: String(error) })
+      return null
+    })
+    if (generation === repoGeneration && repoPath === get().repoPath && request === branchRequest && branches) set({ branches })
   },
 
   checkout: async (branch: string) => {
@@ -184,6 +198,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
         currentBranch: currentBranchR.status === 'fulfilled' ? currentBranchR.value : branch,
         fileStatus:    statusR.status        === 'fulfilled' ? (statusR.value ?? []) : s.fileStatus,
         branches:      branchesRequest === branchRequest && branchesR.status === 'fulfilled' ? (branchesR.value ?? s.branches) : s.branches,
+        error: [statusR, currentBranchR, branchesR].filter(r => r.status === 'rejected').map(r => String((r as PromiseRejectedResult).reason)).join('; ') || null,
         historyTick: s.historyTick + 1,
       }))
     })

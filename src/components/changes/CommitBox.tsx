@@ -16,7 +16,7 @@ interface CommitBoxProps {
 }
 
 export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
-  const { repoPath, fileStatus, refreshStatus, bumpSyncTick } = useRepoStore()
+  const { repoPath, fileStatus, refreshStatus, bumpSyncTick, historyTick, syncTick } = useRepoStore()
   const opRun = useOperationStore(s => s.run)
   const dialog = useDialogStore()
 
@@ -28,7 +28,7 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
 
   const [amend, setAmend]               = useState(false)
   const [lastMessage, setLastMessage]   = useState<string | null>(null)
-  const [headPushed, setHeadPushed]     = useState(false)
+  const [headPushed, setHeadPushed]     = useState<boolean | null>(null)
   const [originalTitle, setOriginalTitle]     = useState(title)
   const [originalMessage, setOriginalMessage] = useState(message)
 
@@ -58,21 +58,22 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
   // Load HEAD info so the amend toggle can pre-fill the message and warn
   // when the commit is already pushed.
   useEffect(() => {
-    if (!repoPath) { setLastMessage(null); setHeadPushed(false); return }
+    if (!repoPath) { setLastMessage(null); setHeadPushed(null); return }
     let cancelled = false
+    setHeadPushed(null)
     Promise.all([
       ipc.lastCommitMessage(repoPath).catch(() => null),
-      ipc.isHeadPushed(repoPath).catch(() => false),
+      ipc.isHeadPushed(repoPath).catch(() => null),
     ]).then(([msg, pushed]) => {
       if (cancelled) return
       setLastMessage(msg)
       setHeadPushed(pushed)
       // Amending a pushed commit would rewrite already-shared history, so the
       // option is only available for local commits — clear any stale toggle.
-      if (pushed) setAmend(false)
+      if (pushed !== false) setAmend(false)
     })
     return () => { cancelled = true }
-  }, [repoPath, fileStatus.length])
+  }, [repoPath, fileStatus, historyTick, syncTick])
 
   // When the user toggles amend, swap the title/body content but preserve
   // what they had typed before, so toggling back restores it.
@@ -227,10 +228,10 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
         <label
           className={cn(
             'flex items-center gap-2 select-none min-w-0',
-            headPushed ? 'cursor-not-allowed' : 'cursor-pointer',
+            headPushed !== false ? 'cursor-not-allowed' : 'cursor-pointer',
           )}
           title={
-            headPushed
+            headPushed === null ? 'Unable to verify pushed status — refresh before amending' : headPushed
               ? 'The last commit is already pushed — amending it would rewrite shared history. Make a new commit instead.'
               : lastMessage
           }
@@ -238,7 +239,7 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
           <AppCheckbox
             checked={amend}
             onChange={() => setAmend(a => !a)}
-            disabled={headPushed}
+            disabled={headPushed !== false}
             color="#4a9eff"
           />
           <span className={cn(

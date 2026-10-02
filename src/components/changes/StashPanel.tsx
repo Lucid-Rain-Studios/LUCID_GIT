@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { ipc, StashEntry, CommitFileChange, DiffContent } from '@/ipc'
+import { useDialogOverlayDismiss } from '@/lib/useDialogOverlayDismiss'
 import { useOperationStore } from '@/stores/operationStore'
 import { useRepoStore } from '@/stores/repoStore'
 import { useDialogStore } from '@/stores/dialogStore'
@@ -291,6 +292,7 @@ function StashDiffOverlay({
   const [selected, setSelected] = useState<string | null>(null)
   const [diff, setDiff]         = useState<DiffContent | null>(null)
   const [diffLoading, setDiffLoading] = useState(false)
+  const modal = useDialogOverlayDismiss(onClose, true, 'Stash changes')
 
   useEffect(() => {
     setFilesLoading(true)
@@ -311,7 +313,7 @@ function StashDiffOverlay({
 
   return (
     <div
-      onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}
+      {...modal}
       style={{
         position: 'fixed', inset: 0, zIndex: 200,
         background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(2px)',

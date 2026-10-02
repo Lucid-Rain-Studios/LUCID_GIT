@@ -13,6 +13,7 @@ const api = {
     ipcRenderer.invoke(CHANNELS.SHELL_OPEN_PATH, fullPath, relativePath),
 
   // ── Auth ──────────────────────────────────────────────────────────────────
+  cancelDeviceFlow: (code?: string) => ipcRenderer.invoke(CHANNELS.AUTH_CANCEL_DEVICE_FLOW, code),
   startDeviceFlow: () =>
     ipcRenderer.invoke(CHANNELS.AUTH_START_DEVICE_FLOW),
   pollDeviceFlow: (deviceCode: string) =>
@@ -49,8 +50,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GIT_PUSH, repoPath),
   pull: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_PULL, repoPath),
-  fetch: (repoPath: string) =>
-    ipcRenderer.invoke(CHANNELS.GIT_FETCH, repoPath),
+  fetch: (repoPath: string, background?: boolean) =>
+    ipcRenderer.invoke(CHANNELS.GIT_FETCH, repoPath, background),
   log: (repoPath: string, args?: { limit?: number; all?: boolean; filePath?: string; refs?: string[] }) =>
     ipcRenderer.invoke(CHANNELS.GIT_LOG, repoPath, args),
   changelog: (repoPath: string, query: { fromDate?: string; toDate?: string; fromCommit?: string; toCommit?: string; ref?: string }) =>
@@ -280,6 +281,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.TEAM_CONFIG_LOAD, repoPath),
   teamConfigSave: (repoPath: string, config: unknown) =>
     ipcRenderer.invoke(CHANNELS.TEAM_CONFIG_SAVE, repoPath, config),
+  teamConfigApply: (repoPath: string, config: unknown) =>
+    ipcRenderer.invoke(CHANNELS.TEAM_CONFIG_APPLY, repoPath, config),
 
   // ── Shell ─────────────────────────────────────────────────────────────────
   openTerminal: (cwd?: string, terminalId?: string) =>
@@ -464,6 +467,11 @@ const api = {
     const handler = () => cb()
     ipcRenderer.on(CHANNELS.EVT_UPDATE_READY, handler)
     return () => ipcRenderer.removeListener(CHANNELS.EVT_UPDATE_READY, handler)
+  },
+  onUpdateError: (cb: (message: string) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, message: string) => cb(message)
+    ipcRenderer.on(CHANNELS.EVT_UPDATE_ERROR, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.EVT_UPDATE_ERROR, handler)
   },
   onStatusChanged: (cb: () => void) => {
     const handler = () => cb()

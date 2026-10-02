@@ -1,11 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useDialogStore, ConfirmOpts, PromptOpts, AlertOpts } from '@/stores/dialogStore'
+import { useDialogOverlayDismiss } from '@/lib/useDialogOverlayDismiss'
 
 // ── Backdrop + panel shell ─────────────────────────────────────────────────────
 
-function Backdrop({ children }: { children: React.ReactNode }) {
+function Backdrop({ children, onDismiss, title }: { children: React.ReactNode; onDismiss: () => void; title: string }) {
+  const modal = useDialogOverlayDismiss(onDismiss, true, title)
   return (
-    <div style={{
+    <div {...modal} style={{
       position: 'fixed', inset: 0, zIndex: 600,
       background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -39,6 +41,7 @@ function CancelBtn({ label = 'Cancel', onClick }: { label?: string; onClick: () 
   const [hover, setHover] = useState(false)
   return (
     <button
+      data-dialog-cancel
       onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
@@ -108,13 +111,13 @@ function ConfirmModal({ opts, onConfirm, onCancel }: {
   }, [])
 
   return (
-    <Backdrop>
+    <Backdrop onDismiss={onCancel} title={opts.title}>
       <Panel>
         <DialogTitle title={opts.title} danger={opts.danger} />
         <DialogMessage message={opts.message} detail={opts.detail} />
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '14px 18px 16px' }}>
           <CancelBtn label={opts.cancelLabel} onClick={onCancel} />
-          <ConfirmBtn label={opts.confirmLabel ?? 'Confirm'} danger={opts.danger} onClick={onConfirm} autoFocus />
+          <ConfirmBtn label={opts.confirmLabel ?? 'Confirm'} danger={opts.danger} onClick={onConfirm} autoFocus={!opts.danger} />
         </div>
       </Panel>
     </Backdrop>
@@ -143,7 +146,7 @@ function PromptModal({ opts, onConfirm, onCancel }: {
   }, [])
 
   return (
-    <Backdrop>
+    <Backdrop onDismiss={onCancel} title={opts.title}>
       <Panel>
         <DialogTitle title={opts.title} />
         <DialogMessage message={opts.message} />
@@ -187,7 +190,7 @@ function AlertModal({ opts, onClose }: { opts: AlertOpts; onClose: () => void })
   }, [])
 
   return (
-    <Backdrop>
+    <Backdrop onDismiss={onClose} title={opts.title}>
       <Panel>
         <DialogTitle title={opts.title} />
         <DialogMessage message={opts.message} detail={opts.detail} />

@@ -14,10 +14,10 @@ test('LG-042 push unlocks on the resolved default branch and still finishes othe
     electron: { ipcMain: { handle: (name, fn) => handlers.set(name, fn) } },
     './channels': { CHANNELS },
     '../util/repo-gate': { withRepoSlot: (repo, mode, fn) => { slots.push([repo, mode]); return fn() } },
-    '../services/GitService': { gitService: { push: async () => ({ branch, filesAhead: ['asset.uasset'] }), defaultBranch: async () => 'develop', resetTo: async (...args) => resets.push(args) } },
+    '../services/GitService': { gitService: { status: async () => [], push: async () => ({ branch, filesAhead: ['asset.uasset'] }), defaultBranch: async () => 'develop', resetTo: async (...args) => resets.push(args) } },
     '../services/UndoService': { undoService: { recordCheckpoint: async () => {}, markAvailable() {} } },
     '../services/AuthService': { authService: { listAccounts: () => ({ accounts: [{ userId: 1, login: 'test' }], currentAccountId: 1 }) } },
-    '../services/LockService': { lockService: { listLocks: async () => [{ id: 'lock', path: 'asset.uasset', owner: { login: 'test' } }], unlockFiles: async (...args) => unlocks.push(args) } },
+    '../services/LockService': { lockService: { listLocks: async () => [{ id: 'lock', path: 'asset.uasset', owner: { login: 'test' } }], unlockFiles: async (...args) => { unlocks.push(args); return { unlocked: [], failed: [] } } } },
   })
   api.exports.registerHandlers()
   const event = { sender: { isDestroyed: () => false, send: (...args) => progress.push(args) } }

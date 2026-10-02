@@ -26,9 +26,17 @@ function component(file, mocks = {}, globals = {}) {
     fileName: file,
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React, esModuleInterop: true },
   }).outputText
-  vm.runInNewContext(source, {
+  const exposed = (globals.__privateExports ?? []).map(name => {
+    if (!/^[A-Za-z]+$/.test(name)) throw Error('Invalid test export')
+    return `\nmodule.exports.${name} = ${name};`
+  }).join('')
+  vm.runInNewContext(source + exposed, {
     module, exports: module.exports,
-    require: name => name === 'react' ? React : mocks[name] || (name === '@/lib/utils' ? { cn: (...args) => args.filter(Boolean).join(' ') } : new Proxy({}, { get: (_, key) => key })),
+    require: name => name === 'react' ? React : mocks[name] || (
+      ['../util/network', '../util/git-paths', '../util/json-store', '@/lib/staging'].includes(name)
+        ? component(name === '@/lib/staging' ? 'src/lib/staging.ts' : 'electron/util/' + name.split('/').pop() + '.ts', {}, globals).exports
+        : name.startsWith('node:') || ['fs', 'path', 'crypto'].includes(name) ? require(name)
+        : name === '@/lib/utils' ? { cn: (...args) => args.filter(Boolean).join(' ') } : new Proxy({}, { get: (_, key) => key })),
     console, setTimeout, clearTimeout, setInterval, clearInterval,
     document: { addEventListener() {}, removeEventListener() {} },
     navigator: { clipboard: { writeText() {} } },

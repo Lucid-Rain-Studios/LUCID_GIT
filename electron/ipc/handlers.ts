@@ -1,5 +1,5 @@
 import path from 'path'
-import { ipcMain, dialog, shell, BrowserWindow, type IpcMainInvokeEvent } from 'electron'
+import { app, ipcMain, dialog, shell, BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import { permissionService } from '../services/PermissionService'
 import { watcherService } from '../services/WatcherService'
 import { dependencyService } from '../services/DependencyService'
@@ -9,7 +9,8 @@ import { assetDiffService } from '../services/AssetDiffService'
 import { presenceService } from '../services/PresenceService'
 import type { PresenceEntry } from '../types'
 import { CHANNELS } from './channels'
-import { withGitTimeout, preemptRepoReads } from '../util/dugite-exec'
+import { exec, execSafe, execWithStdin, withGitTimeout, preemptRepoReads } from '../util/dugite-exec'
+import { parseNumstat } from '../util/git-paths'
 import { withRepoSlot } from '../util/repo-gate'
 import { gitService } from '../services/GitService'
 import { authService } from '../services/AuthService'
@@ -321,6 +322,7 @@ export function registerHandlers(): void {
   })
 
   handle(CHANNELS.GIT_STAGE, async (event, repoPath: string, paths: string[]) => {
+    await lockService.assertStageAllowed(repoPath, paths)
     return gitService.stage(repoPath, paths, (step) => {
       if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
     })
@@ -341,6 +343,13 @@ export function registerHandlers(): void {
     const { branch, filesAhead } = await gitService.push(repoPath, (step) => {
       if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
     })
+    const reportUnlockFailure = (detail: string) => {
+      if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, { id: 'push-unlock', label: 'Push succeeded; locks retained', status: 'error', detail })
+      try {
+        const notice = notificationService.push(repoPath, 'locks-retained', 'Push succeeded; review retained locks', detail)
+        if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_NOTIFICATION, notice)
+      } catch (error) { logService.error('push.unlock-notice', String(error)) }
+    }
 
     if (filesAhead.length > 0) {
       try {
@@ -350,11 +359,12 @@ export function registerHandlers(): void {
           const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login
           if (currentLogin) {
             const locks = await lockService.listLocks(repoPath)
+            const dirty = new Set((await gitService.status(repoPath)).map(file => file.path))
             const pushedFiles = new Set(filesAhead)
-            await lockService.unlockFiles(
+            const result = await lockService.unlockFiles(
               repoPath,
               locks
-                .filter(lock => lock.owner.login === currentLogin && pushedFiles.has(lock.path))
+                .filter(lock => lock.owner.login === currentLogin && pushedFiles.has(lock.path) && !dirty.has(lock.path))
                 .map(lock => ({ filePath: lock.path, lockId: lock.id })),
               currentLogin,
               currentLogin,
@@ -362,10 +372,11 @@ export function registerHandlers(): void {
                 if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
               },
             )
+            if (result.failed.length) reportUnlockFailure(result.failed.map(item => item.filePath + ': ' + item.error).join('\n'))
           }
         }
-      } catch {
-        // Best-effort lock cleanup — do not fail successful push
+      } catch (error) {
+        reportUnlockFailure(String(error))
       }
     }
 
@@ -384,9 +395,9 @@ export function registerHandlers(): void {
     return result
   })
 
-  handle(CHANNELS.GIT_FETCH, async (event, repoPath: string) => {
+  handle(CHANNELS.GIT_FETCH, async (event, repoPath: string, background = false) => {
     const result = await gitService.fetch(repoPath, (step) => {
-      if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
+      if (!background && !event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
     })
     prMonitorService.checkNow(repoPath).catch(() => {})
     prMonitorService.checkMainMerges(repoPath).catch(() => {})
@@ -525,10 +536,16 @@ export function registerHandlers(): void {
   })
 
   handle(CHANNELS.GIT_APPLY_PATCH, async (_event, repoPath: string, patch: string, reverse?: boolean) => {
+    if (!reverse) {
+      const parsed = await execWithStdin(['apply', '--numstat', '-z'], repoPath, patch)
+      await lockService.assertStageAllowed(repoPath, parseNumstat(parsed.stdout).map(file => file.path))
+    }
     return gitService.applyPatch(repoPath, patch, { reverse })
   })
 
   // ── Auth — Phase 3 ────────────────────────────────────────────────────────
+  handle(CHANNELS.AUTH_CANCEL_DEVICE_FLOW, async (_event, code?: string) => authService.cancelDeviceFlow(code))
+
   handle(CHANNELS.AUTH_START_DEVICE_FLOW, async () => {
     return authService.startDeviceFlow()
   })
@@ -563,16 +580,7 @@ export function registerHandlers(): void {
   })
 
   handle(CHANNELS.GIT_MERGE_PREVIEW, async (_event, repoPath: string, targetBranch: string, baseBranch?: string) => {
-    const conflicts = await gitService.mergePreview(repoPath, targetBranch, baseBranch)
-    const ourBranch = baseBranch ?? await gitService.currentBranch(repoPath)
-    for (const c of conflicts) {
-      heatmapService.recordConflictEvent({
-        repoPath, filePath: c.path,
-        ourBranch, theirBranch: targetBranch,
-        conflictType: c.conflictType,
-      })
-    }
-    return conflicts
+    return gitService.mergePreview(repoPath, targetBranch, baseBranch)
   })
 
   handle(CHANNELS.GIT_POTENTIAL_MERGE_CONFLICTS, async (_event, repoPath: string, mode: 'lightweight' | 'deep') => {
@@ -580,7 +588,24 @@ export function registerHandlers(): void {
   })
 
   handle(CHANNELS.GIT_MERGE, async (_event, repoPath: string, targetBranch: string) => {
-    await withUndo(repoPath, 'merge', 'Merge', () => runGitOp('Merge', () => gitService.merge(repoPath, targetBranch)))
+    try {
+      await withUndo(repoPath, 'merge', 'Merge', () => runGitOp('Merge', () => gitService.merge(repoPath, targetBranch)))
+    } catch (error) {
+      // Predictions never write history. Record only verified unmerged files
+      // after Git reports a conflict from an actual merge attempt.
+      if (/CONFLICT\s*\(|Automatic merge failed/i.test(String(error))) {
+        try {
+          const state = await gitService.mergeInProgress(repoPath)
+          if (state?.kind === 'merge') {
+            const ourBranch = await gitService.currentBranch(repoPath)
+            for (const filePath of state.unresolvedFiles) heatmapService.recordConflictEvent({
+              repoPath, filePath, ourBranch, theirBranch: targetBranch, conflictType: 'unmerged',
+            })
+          }
+        } catch (recordError) { logService.warn('heatmap.conflict', String(recordError)) }
+      }
+      throw error
+    }
     const ourBranch = await gitService.currentBranch(repoPath)
     heatmapService.markConflictsResolved(repoPath, ourBranch, targetBranch)
   })
@@ -921,13 +946,30 @@ export function registerHandlers(): void {
     settingsService.getAll()
   )
 
-  handle(CHANNELS.SETTINGS_SAVE, async (_event, settings: AppSettings) => {
-    settingsService.save(settings)
-    const defaultBranch = (settings.defaultBranchName ?? 'main').trim() || 'main'
-    await gitService.setGlobalDefaultBranch(defaultBranch)
+  let settingsWrites: Promise<unknown> = Promise.resolve()
+  handle(CHANNELS.SETTINGS_SAVE, (_event, patch: Partial<AppSettings>) => {
+    const pending = settingsWrites.then(async () => {
+      if (patch.defaultBranchName === undefined || patch.defaultBranchName === settingsService.getAll().defaultBranchName) return settingsService.save(patch)
+      const branch = patch.defaultBranchName.trim()
+      if (!branch || (await execSafe(['check-ref-format', '--branch', branch], app.getPath('home'))).exitCode !== 0) throw new Error('Invalid default branch name')
+      const previous = await execSafe(['config', '--global', '--get', 'init.defaultBranch'], app.getPath('home'))
+      if (previous.exitCode !== 0 && previous.exitCode !== 1) throw new Error(previous.stderr || 'Could not read the global Git default branch')
+      await exec(['config', '--global', 'init.defaultBranch', branch], app.getPath('home'))
+      try { await settingsService.save({ ...patch, defaultBranchName: branch }) }
+      catch (error) {
+        try {
+          if (previous.exitCode === 0) await exec(['config', '--global', 'init.defaultBranch', previous.stdout.trim()], app.getPath('home'))
+          else await exec(['config', '--global', '--unset', 'init.defaultBranch'], app.getPath('home'))
+        } catch (rollbackError) {
+          throw new Error(`Settings save failed: ${String(error)}. Restoring the global Git default branch also failed: ${String(rollbackError)}`)
+        }
+        throw error
+      }
+    })
+    settingsWrites = pending.catch(() => {})
+    return pending
   })
 
-  // ── Team Config — Phase 15 ────────────────────────────────────────────────
   handle(CHANNELS.TEAM_CONFIG_LOAD, (_event, repoPath: string) =>
     teamConfigService.load(repoPath)
   )
@@ -935,6 +977,11 @@ export function registerHandlers(): void {
   handle(CHANNELS.TEAM_CONFIG_SAVE, async (_event, repoPath: string, config: TeamConfig) => {
     await requireAdmin(repoPath)
     return teamConfigService.save(repoPath, config)
+  })
+
+  handle(CHANNELS.TEAM_CONFIG_APPLY, async (_event, repoPath: string, config: TeamConfig) => {
+    await requireAdmin(repoPath)
+    return withRepoSlot(repoPath, 'write', () => teamConfigService.apply(repoPath, config))
   })
 
   // ── Git Tools ─────────────────────────────────────────────────────────────
@@ -1024,9 +1071,9 @@ export function registerHandlers(): void {
   )
 
   // ── File-system watcher ───────────────────────────────────────────────────
-  handle(CHANNELS.GIT_WATCH_STATUS, (event, repoPath: string) => {
+  handle(CHANNELS.GIT_WATCH_STATUS, async (event, repoPath: string) => {
     const sender = event.sender
-    watcherService.watch(repoPath, () => {
+    await watcherService.watch(repoPath, () => {
       if (sender.isDestroyed()) return
       const win = BrowserWindow.fromWebContents(sender)
       if (win && !win.isDestroyed()) {

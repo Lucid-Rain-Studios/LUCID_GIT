@@ -222,8 +222,7 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
     setPreferredTerminal(id)
     onOpenTerminal(id)
     try {
-      const settings = await ipc.settingsGet()
-      await ipc.settingsSave({ ...settings, preferredTerminal: id })
+      await ipc.settingsSave({ preferredTerminal: id })
       window.dispatchEvent(new Event(SETTINGS_CHANGED_EVENT))
     } catch { /* the terminal still opened — a failed save just isn't sticky */ }
   }, [onOpenTerminal])

@@ -75,7 +75,7 @@ export function ErrorPanel({ onReauth, onNavigateTab, onOpenMergeResolver }: Err
 
         case 'open-settings':
           handleDismiss()
-          onNavigateTab('settings')
+          onNavigateTab(['changes', 'lfs', 'locks', 'cleanup'].includes(action.section) ? action.section : 'settings:' + action.section)
           break
 
         case 'set-upstream':

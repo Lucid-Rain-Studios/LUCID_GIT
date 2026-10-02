@@ -231,7 +231,7 @@ const DEFS: ErrorDef[] = [
   },
   {
     code: 'PUSH_REJECTED',
-    test: /rejected.*non-fast-forward|fetch first|Updates were rejected|push.*rejected|remote rejected/i,
+    test: /non-fast-forward|\[rejected\].*fetch first|tip of your current branch is behind/i,
     title: 'Push rejected',
     description: 'The remote has commits your local branch does not have. Pull first.',
     causes: ['Someone else pushed to this branch since your last pull', 'Force push is needed but not advised'],
@@ -286,11 +286,11 @@ const DEFS: ErrorDef[] = [
     test: /exceeded.*storage|LFS.*storage.*exceeded|bandwidth.*exceeded|LFS.*quota|storage quota/i,
     title: 'LFS quota exceeded',
     description: 'Your GitHub LFS storage or bandwidth quota has been exceeded.',
-    causes: ['Free tier limit reached (1 GB storage / 1 GB bandwidth)', 'Large assets pushed without a paid LFS plan'],
+    causes: ['Repository owner storage or bandwidth allowance is exhausted', 'Billing or spending limits prevent additional LFS use'],
     severity: 'fatal',
     canAutoFix: false,
     fixes: [
-      { label: 'Prune unreferenced LFS objects', action: { type: 'clean-pack-files' } },
+      { label: 'Ask the repository owner to check GitHub LFS billing and quota. Local cleanup does not change remote quota.' },
       { label: 'Upgrade LFS storage on GitHub', command: '# github.com → Settings → Billing → Git LFS Data' },
     ],
     docsUrl: 'https://docs.github.com/en/billing/managing-billing-for-git-large-file-storage',

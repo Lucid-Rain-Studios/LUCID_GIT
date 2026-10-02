@@ -1,3 +1,5 @@
+import { gitService } from './GitService'
+import { withRepoSlot, repoSlotState } from '../util/repo-gate'
 import { BrowserWindow } from 'electron'
 import { execSafe } from '../util/dugite-exec'
 import { CHANNELS } from '../ipc/channels'
@@ -16,6 +18,7 @@ export interface ForecastStatus {
   repoPath: string
   enabled: boolean
   lastPolledAt: number | null
+  error?: string | null
   intervalMinutes: number
   conflicts: ForecastConflict[]
 }
@@ -28,6 +31,7 @@ class ForecastService {
   // >0, scheduled polls become no-ops so we don't compete with user-driven
   // pushes/pulls/merges/etc.
   private pauseCount = 0
+  private polling = new Set<string>()
 
   pause(): void { this.pauseCount += 1 }
 
@@ -38,7 +42,7 @@ class ForecastService {
   isPaused(): boolean { return this.pauseCount > 0 }
 
   start(repoPath: string, intervalMinutes = 5): ForecastStatus {
-    if (this.timers.has(repoPath)) this.stop(repoPath)
+    for (const previous of this.timers.keys()) this.stop(previous)
 
     const st: ForecastStatus = {
       repoPath,
@@ -74,19 +78,33 @@ class ForecastService {
   }
 
   private async poll(repoPath: string): Promise<void> {
-    if (this.pauseCount > 0) return
-    // 1. Fetch remote updates
-    await execSafe(['fetch', '--all', '--quiet'], repoPath)
+    if (this.pauseCount > 0 || this.polling.has(repoPath)) return
+    const slot = repoSlotState(repoPath)
+    if (slot.activeWrite || slot.activeReads || slot.waiting) return
+    const status = this.status.get(repoPath)
+    if (!status) return
+    this.polling.add(repoPath)
+    try {
+      await withRepoSlot(repoPath, 'write', () => this.pollCurrent(repoPath, status))
+    } catch (error) {
+      if (this.status.get(repoPath) === status) {
+        status.error = String(error)
+        this.emitStatus(status)
+      }
+    } finally { this.polling.delete(repoPath) }
+  }
+
+  private emitStatus(status: ForecastStatus): void {
+    for (const win of BrowserWindow.getAllWindows()) if (!win.webContents.isDestroyed()) win.webContents.send(CHANNELS.EVT_FORECAST_CONFLICT, { ...status })
+  }
+
+  private async pollCurrent(repoPath: string, expected: ForecastStatus): Promise<void> {
+    // Shared authentication and gate; a failed fetch never updates freshness.
+    await gitService.fetch(repoPath)
+    if (this.status.get(repoPath) !== expected) return
 
     // 2. Get locally modified files (staged + unstaged)
-    const statusRes = await execSafe(['status', '--porcelain=v1', '-z'], repoPath)
-    const modifiedFiles = new Set<string>()
-    if (statusRes.exitCode === 0) {
-      for (const entry of statusRes.stdout.split('\0').filter(Boolean)) {
-        const relPath = entry.slice(3).trim()
-        if (relPath) modifiedFiles.add(relPath.replace(/\\/g, '/'))
-      }
-    }
+    const modifiedFiles = new Set((await gitService.status(repoPath)).map(file => file.path))
 
     // 3. Get current branch
     const branchRes = await execSafe(['rev-parse', '--abbrev-ref', 'HEAD'], repoPath)
@@ -94,7 +112,7 @@ class ForecastService {
 
     // 4. List remote tracking branches
     const refRes = await execSafe(['for-each-ref', '--format=%(refname:short)', 'refs/remotes'], repoPath)
-    if (refRes.exitCode !== 0) return
+    if (refRes.exitCode !== 0) throw new Error('Unable to list branches for forecast')
 
     const remoteBranches = refRes.stdout.trim().split('\n')
       .filter(Boolean)
@@ -105,13 +123,14 @@ class ForecastService {
 
     for (const remoteBranch of remoteBranches.slice(0, 10)) {
       const diffRes = await execSafe(
-        ['diff', '--name-only', `HEAD...${remoteBranch}`],
+        ['diff', '--name-only', '-z', `HEAD...${remoteBranch}`],
         repoPath
       )
-      if (diffRes.exitCode !== 0 || !diffRes.stdout.trim()) continue
+      if (diffRes.exitCode !== 0) throw new Error('Unable to compare forecast branch ' + remoteBranch)
+      if (!diffRes.stdout) continue
 
       const remoteChanged = new Set(
-        diffRes.stdout.trim().split('\n').filter(Boolean).map(f => f.replace(/\\/g, '/'))
+        diffRes.stdout.split('\0').filter(Boolean)
       )
 
       // Intersect with locally modified
@@ -145,20 +164,18 @@ class ForecastService {
       }
     }
 
+    if (this.status.get(repoPath) !== expected) return
     // 6. Update status and emit events
     const previousConflicts = this.conflicts.get(repoPath) ?? []
     this.conflicts.set(repoPath, newConflicts)
     const st = this.status.get(repoPath)
     if (st) {
+      st.error = null
       st.lastPolledAt = Date.now()
       st.conflicts = newConflicts
     }
 
-    BrowserWindow.getAllWindows().forEach(win => {
-        if (!win.webContents.isDestroyed()) {
-          win.webContents.send(CHANNELS.EVT_FORECAST_CONFLICT, newConflicts)
-        }
-    })
+    if (st) this.emitStatus(st)
     if (newConflicts.length > 0) {
       // Only toast on NEWLY-detected conflicts so the user isn't pinged every
       // poll cycle for the same overlap. Compare by file+remoteBranch tuple.

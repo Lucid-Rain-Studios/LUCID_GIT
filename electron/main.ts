@@ -8,6 +8,7 @@ import { logService } from './services/LogService'
 import { desktopNotificationService } from './services/DesktopNotificationService'
 import { settingsService } from './services/SettingsService'
 import { killAllGitProcesses, describeLiveGitProcesses } from './util/dugite-exec'
+import { showRecovery } from './services/RecoveryService'
 
 const isDev = !app.isPackaged
 const openDevToolsOnStart = process.env.LUCID_OPEN_DEVTOOLS === '1'
@@ -49,6 +50,7 @@ async function promptForUpdate(version: string): Promise<void> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     logService.error('updater.download', message)
+    reportUpdateError(message)
     if (!win.isDestroyed()) {
       await dialog.showMessageBox(win, {
         type: 'error',
@@ -97,11 +99,16 @@ autoUpdater.on('update-downloaded', () => {
 })
 
 autoUpdater.on('error', (err) => {
-  // Treat update-check failures (private repo, 404, network errors) as benign:
-  // log at info level so the user-facing flow stays silent.
+  // Publish a terminal error for both checks and downloads, including native downloads.
   logService.info('updater', `Auto-updater check skipped: ${err.message}`)
+  reportUpdateError(err.message)
   if (isDev) console.info('[updater]', err.message)
 })
+
+function reportUpdateError(message: string): void {
+  sendToRenderer(CHANNELS.EVT_UPDATE_ERROR, message)
+  sendToRenderer(CHANNELS.EVT_OPERATION_PROGRESS, { id: 'update-download', label: 'Update failed', status: 'error', detail: message })
+}
 
 process.on('uncaughtException', (error) => {
   logService.error('main.uncaughtException', `${error.message}
@@ -192,10 +199,10 @@ function createWindow(): BrowserWindow {
   attachWindowDiagnostics(win)
 
   if (isDev) {
-    win.loadURL('http://localhost:5173')
+    void Promise.resolve(win.loadURL('http://localhost:5173')).catch(error => recoverWindow(win, String(error)))
     if (openDevToolsOnStart) win.webContents.openDevTools()
   } else {
-    win.loadFile(path.join(__dirname, '../dist-renderer/index.html'))
+    void Promise.resolve(win.loadFile(path.join(__dirname, '../dist-renderer/index.html'))).catch(error => recoverWindow(win, String(error)))
   }
 
   win.once('ready-to-show', () => {
@@ -219,21 +226,24 @@ function createWindow(): BrowserWindow {
 }
 
 function attachWindowDiagnostics(win: BrowserWindow): void {
-  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     const message = `Renderer failed to load ${validatedURL || '(unknown URL)'}: ${errorDescription} (${errorCode})`
     logService.error('renderer.load', message)
+    if (isMainFrame !== false && errorCode !== -3) recoverWindow(win, message)
     if (isDev) console.error('[renderer.load]', message)
   })
 
   win.webContents.on('render-process-gone', (_event, details) => {
     const message = `Renderer process gone: ${details.reason} (exitCode ${details.exitCode})`
     logService.error('renderer.process', message)
+    recoverWindow(win, message)
     if (isDev) console.error('[renderer.process]', message)
   })
 
   win.webContents.on('preload-error', (_event, preloadPath, error) => {
     const message = `Preload failed: ${preloadPath}\n${error.message}\nStack:\n${error.stack ?? ''}`
     logService.error('renderer.preload', message)
+    recoverWindow(win, message)
     if (isDev) console.error('[renderer.preload]', message)
   })
 
@@ -244,6 +254,14 @@ function attachWindowDiagnostics(win: BrowserWindow): void {
     const formatted = `${message}\nSource: ${source}`
     logService.error('renderer.console', formatted)
     if (isDev) console.log(`[renderer:${level}] ${message} (${source})`)
+  })
+}
+
+function recoverWindow(win: BrowserWindow, message: string): void {
+  showRecovery(message, () => {
+    if (win.isDestroyed()) { createWindow(); return }
+    const load = isDev ? win.loadURL('http://localhost:5173') : win.loadFile(path.join(__dirname, '../dist-renderer/index.html'))
+    void Promise.resolve(load).then(() => win.show()).catch(error => recoverWindow(win, String(error)))
   })
 }
 
@@ -293,7 +311,7 @@ function registerUpdaterHandlers() {
     try {
       const result = await autoUpdater.checkForUpdates()
       return {
-        available: !!result?.updateInfo?.version,
+        available: !!result?.updateInfo?.version && autoUpdater.currentVersion.compare(result.updateInfo.version) < 0,
         version: result?.updateInfo?.version ?? null,
         source: 'release' as const,
       }
@@ -304,7 +322,8 @@ function registerUpdaterHandlers() {
   })
 
   handle(CHANNELS.UPDATE_DOWNLOAD, async () => {
-    await autoUpdater.downloadUpdate()
+    try { await autoUpdater.downloadUpdate() }
+    catch (error) { reportUpdateError(error instanceof Error ? error.message : String(error)); throw error }
   })
 
   handle(CHANNELS.UPDATE_INSTALL, () => {
@@ -335,6 +354,10 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+}).catch(error => {
+  const message = error instanceof Error ? `${error.message}\n${error.stack ?? ''}` : String(error)
+  console.error('Lucid Git bootstrap failed:', message)
+  showRecovery(message, () => { app.relaunch(); app.exit(0) })
 })
 
 app.on('before-quit', () => {

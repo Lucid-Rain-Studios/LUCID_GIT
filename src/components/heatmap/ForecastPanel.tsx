@@ -6,6 +6,7 @@ import { ActionBtn } from '@/components/ui/ActionBtn'
 interface Props {
   repoPath: string
   conflicts: ForecastConflict[]
+  error?: string | null
   enabled: boolean
   lastPolledAt: number | null
   onStart: () => void
@@ -26,7 +27,7 @@ function timeAgo(ts: number | null): string {
   return `${Math.floor(d / 3600)}h ago`
 }
 
-export function ForecastPanel({ conflicts, enabled, lastPolledAt, onStart, onStop }: Props) {
+export function ForecastPanel({ conflicts, enabled, lastPolledAt, error, onStart, onStop }: Props) {
   const [expandedFile, setExpandedFile] = useState<string | null>(null)
 
   const grouped = new Map<string, ForecastConflict[]>()
@@ -61,9 +62,10 @@ export function ForecastPanel({ conflicts, enabled, lastPolledAt, onStart, onSto
         )}
       </div>
 
+      {error && <div role="alert" className="p-3 text-xs text-lg-warning">Forecast data is stale: {error} <button onClick={onStart}>Retry</button></div>}
       {/* Content */}
       <div style={{ flex: 1, overflowY: 'auto' }}>
-        {!enabled && conflicts.length === 0 && (
+        {!enabled && !error && lastPolledAt !== null && conflicts.length === 0 && (
           <div style={{ padding: 24, textAlign: 'center' }}>
             <div style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 14, color: '#4e5870', marginBottom: 8 }}>
               Forecast is off

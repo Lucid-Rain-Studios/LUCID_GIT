@@ -3,6 +3,7 @@ import type { ForecastConflict } from '@/ipc'
 
 interface ForecastState {
   conflicts: ForecastConflict[]
+  error: string | null
   enabled: boolean
   lastPolledAt: number | null
   setConflicts: (c: ForecastConflict[]) => void
@@ -13,10 +14,11 @@ interface ForecastState {
 
 export const useForecastStore = create<ForecastState>((set) => ({
   conflicts: [],
+  error: null,
   enabled: false,
   lastPolledAt: null,
   setConflicts: (conflicts) => set({ conflicts }),
   setEnabled: (enabled) => set({ enabled }),
   setLastPolledAt: (t) => set({ lastPolledAt: t }),
-  clear: () => set({ conflicts: [], enabled: false, lastPolledAt: null }),
+  clear: () => set({ conflicts: [], enabled: false, lastPolledAt: null, error: null }),
 }))

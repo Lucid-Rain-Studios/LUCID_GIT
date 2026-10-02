@@ -4,6 +4,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { exec, execSafe, execWithProgress, execWithStdin, gitAuthArgs, withGitTimeout, ProgressCallback } from '../util/dugite-exec'
+import { nulPaths, parseNameStatus, parseNumstat } from '../util/git-paths'
 import { authService } from './AuthService'
 import { logService } from './LogService'
 import { parseGitLog, GIT_LOG_FORMAT } from '../util/git-log-parse'
@@ -456,7 +457,7 @@ class GitService {
     // With no commit yet there is no tree to compare against, and every entry
     // in the index is by definition an addition.
     const args = headExists
-      ? ['diff', '--cached', '--name-only', '--diff-filter=A', '--no-renames', '-z']
+      ? ['diff', '--cached', '--name-only', '-z', '--diff-filter=A', '--no-renames']
       : ['ls-files', '-z']
     const res = await execSafe(args, repoPath)
     if (res.exitCode !== 0) return []
@@ -590,6 +591,7 @@ class GitService {
 
   /** Amend the last commit, keeping its parent. Pass noVerify=true to skip hooks. */
   async commitAmend(repoPath: string, message: string, noVerify = false): Promise<void> {
+    if (await this.isHeadPushed(repoPath)) throw new Error('HEAD is already pushed. Create a new commit instead of amending shared history.')
     const args = ['commit', '--amend', '-m', message]
     if (noVerify) args.push('--no-verify')
     await exec(args, repoPath)
@@ -615,13 +617,21 @@ class GitService {
    * shared history.
    */
   async isHeadPushed(repoPath: string): Promise<boolean> {
+    const head = await execSafe(['rev-parse', '--verify', 'HEAD'], repoPath)
+    const branch = await this.currentBranch(repoPath)
+    if (head.exitCode !== 0 || !branch || branch === 'HEAD' || branch === 'unknown') throw new Error('Unable to verify whether HEAD was pushed. Switch to a valid branch and retry.')
     const upstreamRes = await execSafe(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], repoPath)
-    if (upstreamRes.exitCode !== 0) return false
+    if (upstreamRes.exitCode !== 0) {
+      // A branch without upstream is local; other lookup failures are unknown.
+      const config = await execSafe(['config', '--get', 'branch.' + branch + '.merge'], repoPath)
+      if (config.exitCode === 1) return false
+      throw new Error('Unable to verify whether HEAD was pushed. Refresh and retry.')
+    }
     const upstream = upstreamRes.stdout.trim()
     if (!upstream) return false
     // ahead count: number of HEAD commits not in upstream. 0 means HEAD is pushed.
     const aheadRes = await execSafe(['rev-list', '--count', `${upstream}..HEAD`], repoPath)
-    if (aheadRes.exitCode !== 0) return false
+    if (aheadRes.exitCode !== 0) throw new Error('Unable to verify whether HEAD was pushed. Refresh and retry.')
     return aheadRes.stdout.trim() === '0'
   }
 
@@ -642,9 +652,9 @@ class GitService {
 
     let filesAhead: string[] = []
     if (upstreamRes.exitCode === 0 && upstreamRes.stdout.trim()) {
-      const diffRes = await execSafe(['diff', '--name-only', `${upstreamRes.stdout.trim()}..HEAD`], repoPath)
+      const diffRes = await execSafe(['diff', '--name-only', '-z', `${upstreamRes.stdout.trim()}..HEAD`], repoPath)
       if (diffRes.exitCode === 0) {
-        filesAhead = diffRes.stdout.split('\n').map(line => line.trim().replace(/\\/g, '/')).filter(Boolean)
+        filesAhead = nulPaths(diffRes.stdout)
       }
     }
 
@@ -802,12 +812,9 @@ class GitService {
     if (upstreamRes.exitCode !== 0) return []
     const upstream = upstreamRes.stdout.trim()
     if (!upstream) return []
-    const diffRes = await execSafe(['diff', '--name-only', `${upstream}..HEAD`], repoPath)
+    const diffRes = await execSafe(['diff', '--name-only', '-z', `${upstream}..HEAD`], repoPath)
     if (diffRes.exitCode !== 0) return []
-    return diffRes.stdout
-      .split('\n')
-      .map(line => line.trim().replace(/\\/g, '/'))
-      .filter(Boolean)
+    return nulPaths(diffRes.stdout)
   }
 
   /**
@@ -981,12 +988,9 @@ class GitService {
     const base = baseRes.stdout.trim()
     if (!base) return []
 
-    const diffRes = await execSafe(['diff', '--name-only', base, targetRef], repoPath)
+    const diffRes = await execSafe(['diff', '--name-only', '-z', base, targetRef], repoPath)
     if (diffRes.exitCode !== 0) return []
-    return diffRes.stdout
-      .split('\n')
-      .map(line => line.trim().replace(/\\/g, '/'))
-      .filter(Boolean)
+    return nulPaths(diffRes.stdout)
   }
 
   private async workingChangePaths(repoPath: string): Promise<string[]> {
@@ -1107,7 +1111,7 @@ class GitService {
       repoPath
     )
     if (res.exitCode !== 0) return []
-    return res.stdout.split('\n').map(l => l.trim()).filter(Boolean)
+    return res.stdout.trim().split('\n').filter(Boolean)
   }
 
   /** An existing name that differs from `name` only by letter case, if any. */
@@ -1265,8 +1269,8 @@ class GitService {
 
     // Pre-count files that will change in the merge, so the synthetic stage
     // event already shows "0/N" before git's own "Updating files" lines kick in.
-    const diffRes = await execSafe(['diff', '--name-only', 'HEAD', defaultBranch.ref], repoPath)
-    const diffCount = diffRes.exitCode === 0 ? diffRes.stdout.trim().split('\n').filter(Boolean).length : undefined
+    const diffRes = await execSafe(['diff', '--name-only', '-z', 'HEAD', defaultBranch.ref], repoPath)
+    const diffCount = diffRes.exitCode === 0 ? nulPaths(diffRes.stdout).length : undefined
     onProgress?.({
       id: 'stage',
       label: `Merging ${defaultBranch.ref}`,
@@ -1415,8 +1419,11 @@ class GitService {
     if (args.refs?.length) cmdArgs.push(...args.refs)
     if (args.filePath) cmdArgs.push('--follow', '--', args.filePath)
 
-    const { exitCode, stdout } = await execSafe(cmdArgs, repoPath)
-    if (exitCode !== 0) return []
+    const { exitCode, stdout, stderr } = await execSafe(cmdArgs, repoPath)
+    if (exitCode !== 0) {
+      if (!args.refs?.length && /does not have any commits yet/i.test(stderr)) return []
+      throw new Error(stderr || 'Could not load Git history. Retry after checking the repository.')
+    }
     return parseGitLog(stdout)
   }
 
@@ -1587,9 +1594,9 @@ class GitService {
 
   /** Paths of all Git-LFS-tracked files (the lockable set), forward-slashed. */
   async lfsTrackedFiles(repoPath: string): Promise<string[]> {
-    const res = await execSafe(['lfs', 'ls-files', '--name-only'], repoPath)
+    const res = await execSafe(['lfs', 'ls-files', '--name-only', '-z'], repoPath)
     if (res.exitCode !== 0 || !res.stdout.trim()) return []
-    return res.stdout.split('\n').map(l => l.trim().replace(/\\/g, '/')).filter(Boolean)
+    return nulPaths(res.stdout)
   }
 
   /**
@@ -1605,7 +1612,7 @@ class GitService {
     const [commitsRes, branches, filesRes] = await Promise.all([
       execSafe(['log', '--all', '-i', `--grep=${q}`, `--format=%H${SEP}%an${SEP}%s`, '-n', '8'], repoPath),
       this.branchList(repoPath).catch(() => []),
-      execSafe(['ls-files'], repoPath),
+      execSafe(['ls-files', '-z'], repoPath),
     ])
 
     const commits = commitsRes.exitCode === 0 && commitsRes.stdout.trim()
@@ -1630,7 +1637,7 @@ class GitService {
     )).slice(0, 8)
 
     const files = filesRes.exitCode === 0 && filesRes.stdout.trim()
-      ? filesRes.stdout.split('\n').map(l => l.trim().replace(/\\/g, '/')).filter(p => p && p.toLowerCase().includes(ql)).slice(0, 12)
+      ? nulPaths(filesRes.stdout).filter(p => p.toLowerCase().includes(ql)).slice(0, 12)
       : []
 
     return { commits, branches: branchNames, files }
@@ -1662,9 +1669,12 @@ class GitService {
     const [aheadR, behindR, numstatR, namestatR] = await Promise.all([
       execSafe(['log', '--format=%H\t%s\t%an\t%ai', `${baseRef}..${compareRef}`], repoPath),
       execSafe(['log', '--format=%H\t%s\t%an\t%ai', `${compareRef}..${baseRef}`], repoPath),
-      execSafe(['diff', '--numstat', `${baseRef}...${compareRef}`], repoPath),
-      execSafe(['diff', '--name-status', `${baseRef}...${compareRef}`], repoPath),
+      execSafe(['diff', '--numstat', '-z', `${baseRef}...${compareRef}`], repoPath),
+      execSafe(['diff', '--name-status', '-z', `${baseRef}...${compareRef}`], repoPath),
     ])
+    for (const result of [aheadR, behindR, numstatR, namestatR]) {
+      if (result.exitCode !== 0) throw new Error(result.stderr || 'Could not verify the branch comparison. Refresh and retry.')
+    }
 
     const parseLog = (out: string) =>
       out.trim().split('\n').filter(Boolean).map(line => {
@@ -1672,25 +1682,13 @@ class GitService {
         return { hash: hash?.trim() ?? '', message: subject?.trim() ?? '', author: author?.trim() ?? '', date: date?.trim() ?? '' }
       })
 
-    const statusMap = new Map<string, string>()
-    namestatR.stdout.trim().split('\n').filter(Boolean).forEach(line => {
-      const parts = line.split('\t')
-      // R100\told\tnew  or  M\tpath
-      const status = parts[0]?.charAt(0) ?? 'M'
-      const path   = parts.length >= 3 ? parts[2] : parts[1]
-      if (path) statusMap.set(path.trim(), status)
-    })
-
+    const statusMap = new Map(parseNameStatus(namestatR.stdout).map(file => [file.path, file.status]))
     let totalAdditions = 0
     let totalDeletions = 0
-    const files = numstatR.stdout.trim().split('\n').filter(Boolean).map(line => {
-      const [addStr, delStr, ...pathParts] = line.split('\t')
-      const path      = pathParts.join('\t').trim()
-      const additions = parseInt(addStr ?? '0', 10) || 0
-      const deletions = parseInt(delStr ?? '0', 10) || 0
-      totalAdditions += additions
-      totalDeletions += deletions
-      return { path, status: (statusMap.get(path) ?? 'M') as BranchDiffFile['status'], additions, deletions }
+    const files = parseNumstat(numstatR.stdout).map(file => {
+      totalAdditions += file.additions
+      totalDeletions += file.deletions
+      return { ...file, status: (statusMap.get(file.path) ?? 'M') as BranchDiffFile['status'] }
     })
 
     return {
@@ -1737,20 +1735,11 @@ class GitService {
     repoPath: string,
     hash: string,
   ): Promise<Array<{ status: string; path: string; oldPath?: string }>> {
-    const { exitCode, stdout } = await execSafe(
-      ['diff-tree', '--no-commit-id', '-r', '--name-status', '-M', hash],
-      repoPath,
+    // Root commits compare against the empty tree; merges compare with their first parent.
+    const { stdout } = await exec(
+      ['diff-tree', '--root', '--first-parent', '-m', '--no-commit-id', '-r', '--name-status', '-z', '-M', hash], repoPath,
     )
-    if (exitCode !== 0 || !stdout.trim()) return []
-    return stdout.trim().split('\n')
-      .filter(Boolean)
-      .map(line => {
-        const parts = line.split('\t')
-        const status  = parts[0].trim().charAt(0)  // M, A, D, R, C, T
-        const path    = parts[parts.length - 1].trim()
-        const oldPath = parts.length === 3 ? parts[1].trim() : undefined
-        return { status, path, oldPath }
-      })
+    return parseNameStatus(stdout)
   }
 
   /** Discard changes to the given paths. Untracked files are deleted from disk. */
@@ -2007,8 +1996,37 @@ ${lastError}` : '')
   async stashSave(repoPath: string, message?: string, paths?: string[]): Promise<void> {
     const args = ['stash', 'push', '--include-untracked']
     if (message?.trim()) args.push('-m', message.trim())
-    if (paths && paths.length > 0) args.push('--', ...paths)
-    await exec(args, repoPath)
+    if (paths?.length) {
+      args.push('--pathspec-from-file=-', '--pathspec-file-nul')
+      const input = paths.map(p => ':(literal)' + p).join('\0') + '\0'
+      const previous = await execSafe(['rev-parse', '--verify', 'refs/stash'], repoPath)
+      const selected = new Set(paths)
+      const untracked = (await this.status(repoPath)).filter(file => selected.has(file.path) && file.indexStatus === '?').map(file => file.path)
+      try {
+        await execWithStdin(args, repoPath, input)
+      } catch (error) {
+        // Bundled Windows Git accepts stdin but expands paths again during its
+        // cleanup. It has already saved ONE complete stash before that fails.
+        // Finish only this known failure, after proving a new checkpoint exists.
+        if (!/cannot spawn git: Filename too long/i.test(String(error))) throw error
+        const saved = (await exec(['rev-parse', '--verify', 'refs/stash'], repoPath)).stdout.trim()
+        if (saved === previous.stdout.trim()) throw error
+        const tracked = paths.filter(p => !untracked.includes(p))
+        if (tracked.length) await execWithStdin(
+          [...await this.authenticatedArgs(repoPath, []), 'restore', '--source=HEAD', '--staged', '--worktree', '--pathspec-from-file=-', '--pathspec-file-nul'],
+          repoPath, tracked.map(p => ':(literal)' + p).join('\0') + '\0',
+        )
+        for (const file of untracked) {
+          const savedBlob = (await exec(['rev-parse', `${saved}^3:${file}`], repoPath)).stdout.trim()
+          const workingBlob = (await exec(['hash-object', '--', file], repoPath)).stdout.trim()
+          if (savedBlob !== workingBlob) throw new Error(`Stash saved as ${saved}; ${file} changed during cleanup and was kept. Review the stash before retrying.`)
+          // file came from Git status under this repository; reject traversal.
+          const absolute = path.resolve(repoPath, file)
+          if (!absolute.startsWith(path.resolve(repoPath) + path.sep)) throw new Error('Invalid stash cleanup path')
+          await fs.promises.unlink(absolute)
+        }
+      }
+    } else await exec(args, repoPath)
   }
 
   async stashPop(repoPath: string, ref: string): Promise<void> {
@@ -2028,20 +2046,8 @@ ${lastError}` : '')
     repoPath: string,
     ref: string,
   ): Promise<Array<{ status: string; path: string; oldPath?: string }>> {
-    const res = await execSafe(
-      ['stash', 'show', '--name-status', ref],
-      repoPath
-    )
-    if (res.exitCode !== 0 || !res.stdout.trim()) return []
-    return res.stdout.trim().split('\n')
-      .filter(Boolean)
-      .map(line => {
-        const parts = line.split('\t')
-        const status  = parts[0].trim().charAt(0)
-        const path    = parts[parts.length - 1].trim()
-        const oldPath = parts.length === 3 ? parts[1].trim() : undefined
-        return { status, path, oldPath }
-      })
+    const { stdout } = await exec(['stash', 'show', '--include-untracked', '--name-status', '-z', ref], repoPath)
+    return parseNameStatus(stdout)
   }
 
   /**
@@ -2286,8 +2292,8 @@ ${lastError}` : '')
   }
 
   async continueMerge(repoPath: string, targetBranch: string): Promise<void> {
-    const unresolved = await execSafe(['diff', '--name-only', '--diff-filter=U'], repoPath)
-    const unresolvedFiles = unresolved.stdout.trim().split('\n').filter(Boolean)
+    const unresolved = await execSafe(['diff', '--name-only', '-z', '--diff-filter=U'], repoPath)
+    const unresolvedFiles = nulPaths(unresolved.stdout)
     if (unresolvedFiles.length > 0) {
       throw new Error(`Resolve all merge conflicts before finalizing:\n${unresolvedFiles.join('\n')}`)
     }
@@ -2361,8 +2367,8 @@ ${lastError}` : '')
       // No merge in progress. There may still be conflicts — see below.
     }
 
-    const unresolvedRes = await execSafe(['diff', '--name-only', '--diff-filter=U'], repoPath)
-    const unresolvedFiles = unresolvedRes.stdout.split('\n').map(s => s.trim()).filter(Boolean)
+    const unresolvedRes = await execSafe(['diff', '--name-only', '-z', '--diff-filter=U'], repoPath)
+    const unresolvedFiles = nulPaths(unresolvedRes.stdout)
 
     // A conflict does not imply a merge. `git stash apply` merges the stashed
     // changes into the working tree and can conflict exactly as a merge does —
@@ -2416,12 +2422,12 @@ ${lastError}` : '')
     if (!base) return []
 
     const [oursRes, theirsRes] = await Promise.all([
-      execSafe(['diff', '--name-only', base, 'HEAD'], repoPath),
-      execSafe(['diff', '--name-only', base, 'MERGE_HEAD'], repoPath),
+      execSafe(['diff', '--name-only', '-z', base, 'HEAD'], repoPath),
+      execSafe(['diff', '--name-only', '-z', base, 'MERGE_HEAD'], repoPath),
     ])
 
-    const oursChanged = new Set(oursRes.stdout.split('\n').map(s => s.trim()).filter(Boolean))
-    const theirsChanged = theirsRes.stdout.split('\n').map(s => s.trim()).filter(Boolean)
+    const oursChanged = new Set(nulPaths(oursRes.stdout))
+    const theirsChanged = nulPaths(theirsRes.stdout)
     const unresolvedSet = new Set(unresolvedFiles)
 
     // Both-sides-modified binaries that aren't already in the unresolved list.
@@ -2510,8 +2516,8 @@ ${lastError}` : '')
     const subjectRes = await execSafe(['log', '-1', '--format=%s', cherryPickHead], repoPath)
     const sourceMessage = subjectRes.exitCode === 0 ? subjectRes.stdout.trim() : ''
 
-    const unresolvedRes = await execSafe(['diff', '--name-only', '--diff-filter=U'], repoPath)
-    const unresolvedFiles = unresolvedRes.stdout.split('\n').map(s => s.trim()).filter(Boolean)
+    const unresolvedRes = await execSafe(['diff', '--name-only', '-z', '--diff-filter=U'], repoPath)
+    const unresolvedFiles = nulPaths(unresolvedRes.stdout)
 
     return { cherryPickHead, sourceMessage, unresolvedFiles }
   }
@@ -2528,8 +2534,8 @@ ${lastError}` : '')
 
   /** Finalize an in-progress cherry-pick after all conflicts have been resolved. */
   async continueCherryPick(repoPath: string): Promise<void> {
-    const unresolved = await execSafe(['diff', '--name-only', '--diff-filter=U'], repoPath)
-    const unresolvedFiles = unresolved.stdout.trim().split('\n').filter(Boolean)
+    const unresolved = await execSafe(['diff', '--name-only', '-z', '--diff-filter=U'], repoPath)
+    const unresolvedFiles = nulPaths(unresolved.stdout)
     if (unresolvedFiles.length > 0) {
       throw new Error(`Resolve all cherry-pick conflicts before finalizing:\n${unresolvedFiles.join('\n')}`)
     }
@@ -3126,9 +3132,9 @@ ${lastError}` : '')
     // slow fallback cannot supply that set and matches on extension instead.
     const untrackedSet = new Set<string>()
     assertWithinBudget(deadline, 'Listing tracked files')
-    const lsFiles = await execSafe(['ls-files'], repoPath)
+    const lsFiles = await execSafe(['ls-files', '-z'], repoPath)
     if (lsFiles.exitCode === 0) {
-      for (const f of lsFiles.stdout.trim().split('\n').filter(Boolean)) {
+      for (const f of nulPaths(lsFiles.stdout)) {
         const ext = path.extname(f).toLowerCase()
         if (!ext || !BINARY_EXTS.has(ext)) continue
         const covered = lfsPaths ? lfsPaths.has(f) : trackedExts.has(ext)
@@ -3387,7 +3393,7 @@ ${lastError}` : '')
 
     const existing = await execSafe(['config', '--global', '--get-all', 'safe.directory'], home)
     const entries = existing.exitCode === 0
-      ? existing.stdout.split('\n').map(l => l.trim()).filter(Boolean)
+      ? existing.stdout.trim().split('\n').filter(Boolean)
       : []
     const alreadyTrusted = entries.some(e => e === value || e === '*')
 
@@ -3474,9 +3480,9 @@ ${lastError}` : '')
 
   /** List all tracked files in the working tree (includes untracked non-ignored). */
   async lsFiles(repoPath: string): Promise<string[]> {
-    const res = await execSafe(['ls-files', '--cached', '--others', '--exclude-standard'], repoPath)
+    const res = await execSafe(['ls-files', '-z', '--cached', '--others', '--exclude-standard'], repoPath)
     if (res.exitCode !== 0) return []
-    return res.stdout.split('\n').map(l => l.trim()).filter(Boolean)
+    return nulPaths(res.stdout)
   }
 
   /** Return per-line blame data for a file at a specific revision. */

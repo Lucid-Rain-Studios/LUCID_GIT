@@ -26,17 +26,10 @@ const DEFAULT_CONFIG: WebhookConfig = {
   quietHours:   undefined,
 }
 
-const EVENT_LABELS: Record<keyof WebhookConfig['events'], string> = {
+const EVENT_LABELS: Partial<Record<keyof WebhookConfig['events'], string>> = {
   fileLocked:            'File locked',
   fileUnlocked:          'File unlocked',
-  mergeConflictDetected: 'Merge conflict detected',
-  pushToMain:            'Push to main',
-  branchCreated:         'Branch created',
-  forceUnlock:           'Force unlock',
-  largeFileWarning:      'Large file warning',
-  fatalError:            'Fatal error',
-  cleanupCompleted:      'Cleanup completed',
-  branchDeleted:         'Branch deleted',
+
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -179,6 +172,7 @@ export function WebhookPanel({ repoPath }: WebhookPanelProps) {
 
         {/* ── Events ─────────────────────────────────────────────────────────── */}
         <Section title="Events">
+          <p className="text-xs text-lg-text-secondary">Automatic delivery currently supports file lock and unlock events.</p>
           <p className="text-[10px] font-mono text-lg-text-secondary leading-relaxed">
             Choose which events trigger a Discord message.
           </p>

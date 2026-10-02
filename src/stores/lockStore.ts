@@ -15,6 +15,7 @@ function parseGitHubSlug(url: string): string | null {
 
 interface LockState {
   locks: Lock[]
+  prLocks: Lock[]
   isLoading: boolean
   error: string | null
 
@@ -29,6 +30,7 @@ interface LockState {
 
 export const useLockStore = create<LockState>((set, get) => ({
   locks:     [],
+  prLocks: [],
   isLoading: false,
   error:     null,
 
@@ -52,9 +54,10 @@ export const useLockStore = create<LockState>((set, get) => ({
         if (slug) {
           const [owner, repo] = slug.split('/')
           const prs = await ipc.githubListPRs({ owner, repo })
-          const fileLists = await Promise.all(
-            prs.map(async pr => ({ pr, files: await ipc.githubPrFiles({ owner, repo, prNumber: pr.number }) }))
-          )
+          const fileLists = []
+          for (let i = 0; i < prs.length; i += 4) fileLists.push(...await Promise.all(
+            prs.slice(i, i + 4).map(async pr => ({ pr, files: await ipc.githubPrFiles({ owner, repo, prNumber: pr.number, expectedSha: pr.headSha }) }))
+          ))
           const ghostByPath = new Map<string, Lock>()
           for (const { pr, files } of fileLists) {
             for (const p of files) {
@@ -63,7 +66,7 @@ export const useLockStore = create<LockState>((set, get) => ({
               ghostByPath.set(normalized, {
                 id: `ghost-pr-${pr.number}-${normalized}`,
                 path: normalized,
-                owner: { name: 'PR Ghost', login: 'ghost' },
+                owner: { name: 'Predicted PR ownership #' + pr.number, login: 'ghost' },
                 lockedAt: pr.updatedAt,
               })
             }
@@ -74,15 +77,14 @@ export const useLockStore = create<LockState>((set, get) => ({
         // Best-effort overlay; if GitHub is unavailable, show authoritative LFS locks only.
       }
 
-      const ghostPaths = new Set(ghostLocks.map(l => l.path))
+      const realPaths = new Set(locks.map(l => l.path.replace(/\\/g, '/')))
       const mergedLocks = [
-        ...locks.filter(l => !ghostPaths.has(l.path.replace(/\\/g, '/'))),
-        ...ghostLocks,
+        ...locks,
+        ...ghostLocks.filter(l => !realPaths.has(l.path)),
       ]
-      if (active(repoPath, session) && request === loadRequest) set({ locks: mergedLocks, isLoading: false })
-    } catch {
-      // LFS may not be initialised — treat as empty, don't surface error
-      if (active(repoPath, session) && request === loadRequest) set({ locks: [], isLoading: false })
+      if (active(repoPath, session) && request === loadRequest) set({ locks: mergedLocks, prLocks: ghostLocks, isLoading: false })
+    } catch (error) {
+      if (active(repoPath, session) && request === loadRequest) set({ error: 'Lock data is stale: ' + String(error), isLoading: false })
     }
   },
 
@@ -113,13 +115,14 @@ export const useLockStore = create<LockState>((set, get) => ({
     if (resolvedLockId?.startsWith('ghost-pr-')) {
       return
     }
+    const removedLocks = get().locks.filter(l => l.path.replace(/\\/g, '/') === normalizedPath)
     // Optimistic remove — badge disappears before the network call returns
     set(state => ({ locks: state.locks.filter(l => l.path.replace(/\\/g, '/') !== normalizedPath) }))
     try {
       await ipc.unlockFile(repoPath, normalizedPath, force, resolvedLockId)
     } catch (e) {
       // Roll back on failure by reloading authoritative list
-      const locks = await ipc.listLocks(repoPath).catch(() => [])
+      const locks = await ipc.listLocks(repoPath).catch(() => [...get().locks, ...removedLocks])
       if (active(repoPath, session)) set({ locks, error: String(e) })
       throw e
     }
@@ -162,6 +165,6 @@ export const useLockStore = create<LockState>((set, get) => ({
     await ipc.watchLock(repoPath, filePath)
   },
 
-  setLocks:   (locks) => set({ locks }),
-  clearLocks: ()      => { loadRequest++; set({ locks: [], isLoading: false, error: null }) },
+  setLocks: (locks) => set(state => ({ locks: [...locks, ...state.prLocks.filter(lock => !locks.some(real => real.path === lock.path))], error: null })),
+  clearLocks: ()      => { loadRequest++; set({ locks: [], prLocks: [], isLoading: false, error: null }) },
 }))

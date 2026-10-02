@@ -25,6 +25,7 @@ const DENSITIES: { id: AppSettings['uiDensity']; label: string; desc: string }[]
 ]
 
 export function AppearanceSettings() {
+  const pendingPatch = useRef<Partial<AppSettings>>({})
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [saved,    setSaved]    = useState(false)
   const [saving,   setSaving]   = useState(false)
@@ -51,6 +52,7 @@ export function AppearanceSettings() {
   )
 
   const update = (patch: Partial<AppSettings>) => {
+    pendingPatch.current = { ...pendingPatch.current, ...patch }
     setSettings(s => {
       if (!s) return s
       const next = { ...s, ...patch }
@@ -65,12 +67,13 @@ export function AppearanceSettings() {
     setSaving(true)
     setSaved(false)
     setError(null)
-    try { await ipc.settingsSave(settings); setSaved(true) }
+    try { await ipc.settingsSave(pendingPatch.current); pendingPatch.current = {}; setSaved(true) }
     catch (e) { setError(`Could not save appearance settings: ${String(e)}. Retry Save.`) }
     finally { setSaving(false) }
   }
 
   const handleRestoreDefaults = () => {
+    pendingPatch.current = { ...pendingPatch.current, ...DEFAULTS }
     setSettings(s => {
       if (!s) return s
       const next = { ...s, ...DEFAULTS } as AppSettings

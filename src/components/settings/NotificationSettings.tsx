@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { ipc, AppSettings, DesktopNotificationEvents, DesktopNotificationEvent } from '@/ipc'
 import { ActionBtn } from '@/components/ui/ActionBtn'
 import { SettingsError } from './SettingsError'
@@ -95,6 +95,7 @@ function ToggleRow({
 }
 
 export function NotificationSettings() {
+  const pendingEvents = useRef<Partial<DesktopNotificationEvents>>({})
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [saved,    setSaved]    = useState(false)
   const [saving,   setSaving]   = useState(false)
@@ -123,6 +124,7 @@ export function NotificationSettings() {
   }
 
   const updateEvent = (id: DesktopNotificationEvent, value: boolean) => {
+    pendingEvents.current[id] = value
     setSettings(s => s && {
       ...s,
       desktopNotificationEvents: { ...events, [id]: value },
@@ -137,9 +139,9 @@ export function NotificationSettings() {
     setError(null)
     try {
       await ipc.settingsSave({
-        ...settings,
-        desktopNotificationEvents: events,
+        desktopNotificationEvents: pendingEvents.current as DesktopNotificationEvents,
       })
+      pendingEvents.current = {}
       setSaved(true)
     } catch (e) {
       setError(`Could not save notification settings: ${String(e)}. Retry Save.`)

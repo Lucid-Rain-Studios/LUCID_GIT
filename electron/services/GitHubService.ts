@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+import { boundedFetch } from '../util/network'
 import { logService } from './LogService'
 
 export interface PRCreateArgs {
@@ -21,6 +23,8 @@ export interface PullRequest {
   title: string
   htmlUrl: string
   author: string
+  headSha: string
+  baseSha: string
   headBranch: string
   baseBranch: string
   draft: boolean
@@ -32,6 +36,7 @@ export interface PRActionArgs {
   owner: string
   repo: string
   prNumber: number
+  expectedSha?: string
 }
 
 export interface PRStatus {
@@ -91,7 +96,7 @@ async function ghFetch(token: string, path: string, method = 'GET', body?: objec
     const timeout = setTimeout(() => controller.abort(), GH_REQUEST_TIMEOUT_MS)
     let res: Response
     try {
-      res = await fetch(`https://api.github.com${path}`, {
+      res = await boundedFetch(`https://api.github.com${path}`, {
         method,
         headers: {
           Authorization: `token ${token}`,
@@ -163,12 +168,11 @@ class GitHubService {
   // Mark the cached PR list stale (without discarding it — it stays available
   // as the outage fallback) so the next listPRs after a mutation refetches.
   private expirePRCache(owner: string, repo: string): void {
-    const entry = this.lastGoodPRs.get(`${owner}/${repo}`)
-    if (entry) entry.fetchedAt = 0
+    for (const [key, entry] of this.lastGoodPRs) if (key.startsWith(`${owner}/${repo}::`)) entry.fetchedAt = 0
   }
 
   async listPRs(token: string, args: PRListArgs): Promise<PullRequest[]> {
-    const cacheKey = `${args.owner}/${args.repo}`
+    const cacheKey = `${args.owner}/${args.repo}::${createHash('sha256').update(token).digest('hex')}`
 
     const cached = this.lastGoodPRs.get(cacheKey)
     if (cached && Date.now() - cached.fetchedAt < PR_LIST_TTL_MS) return cached.prs
@@ -187,11 +191,17 @@ class GitHubService {
       number: number; title: string; html_url: string; draft: boolean
       created_at: string; updated_at: string
       user: { login: string }
-      head: { ref: string }
-      base: { ref: string }
+      head: { ref: string; sha: string }
+      base: { ref: string; sha: string }
     }>
     try {
-      data = await ghFetch(token, `/repos/${args.owner}/${args.repo}/pulls?state=open&per_page=50&sort=updated&direction=desc`) as typeof data
+      data = []
+      for (let page = 1; page <= 100; page++) {
+        const batch = await ghFetch(token, '/repos/' + args.owner + '/' + args.repo + '/pulls?state=open&per_page=100&sort=updated&direction=desc&page=' + page) as typeof data
+        data.push(...batch)
+        if (batch.length < 100) break
+        if (page === 100) throw new GitHubApiError('PR list exceeds 10,000 entries; completeness could not be verified', 422)
+      }
     } catch (error) {
       // Transient failure (5xx outage, rate limit, network blip): serve the
       // last-known-good list so the UI degrades to stale data rather than an
@@ -208,6 +218,8 @@ class GitHubService {
       title: pr.title,
       htmlUrl: pr.html_url,
       author: pr.user.login,
+      headSha: pr.head.sha,
+      baseSha: pr.base.sha,
       headBranch: pr.head.ref,
       baseBranch: pr.base.ref,
       draft: pr.draft,
@@ -266,9 +278,11 @@ class GitHubService {
     // branch — matching GitHub Desktop's default and the local merge() path
     // (which uses --no-ff). 'squash' would collapse the source branch into a
     // single commit on main, hiding the original commit history.
-    await ghFetch(token, `/repos/${args.owner}/${args.repo}/pulls/${args.prNumber}/merge`, 'PUT', {
-      merge_method: 'merge',
-    })
+    if (!args.expectedSha || !/^[0-9a-f]{40,64}$/i.test(args.expectedSha)) throw new Error('A verified PR head revision is required. Refresh and review the PR again.')
+    const result = await ghFetch(token, `/repos/${args.owner}/${args.repo}/pulls/${args.prNumber}/merge`, 'PUT', {
+      merge_method: 'merge', sha: args.expectedSha,
+    }) as { merged?: boolean; message?: string }
+    if (result.merged !== true) throw new Error(result.message || 'GitHub did not merge this PR')
     this.expirePRCache(args.owner, args.repo)
   }
 
@@ -279,9 +293,29 @@ class GitHubService {
     this.expirePRCache(args.owner, args.repo)
   }
 
+  private fileCache = new Map<string, { files: string[]; at: number }>()
+  private fileRequests = new Map<string, Promise<string[]>>()
+
   async getPRFiles(token: string, args: PRActionArgs): Promise<string[]> {
-    const data = await ghFetch(token, `/repos/${args.owner}/${args.repo}/pulls/${args.prNumber}/files?per_page=100`) as Array<{ filename: string }>
-    return data.map(f => f.filename.replace(/\\/g, '/'))
+    const key = `${args.owner}/${args.repo}/${args.prNumber}/${args.expectedSha ?? ''}::${createHash('sha256').update(token).digest('hex')}`
+    const cached = this.fileCache.get(key)
+    if (cached && Date.now() - cached.at < PR_LIST_TTL_MS) return cached.files
+    let pending = this.fileRequests.get(key)
+    if (!pending) {
+      pending = this.fetchPRFiles(token, args).then(files => { this.fileCache.set(key, { files, at: Date.now() }); return files }).finally(() => this.fileRequests.delete(key))
+      this.fileRequests.set(key, pending)
+    }
+    return pending
+  }
+
+  private async fetchPRFiles(token: string, args: PRActionArgs): Promise<string[]> {
+    const files: string[] = []
+    for (let page = 1; page <= 30; page++) {
+      const batch = await ghFetch(token, '/repos/' + args.owner + '/' + args.repo + '/pulls/' + args.prNumber + '/files?per_page=100&page=' + page) as Array<{ filename: string }>
+      files.push(...batch.map(file => file.filename))
+      if (batch.length < 100) return files
+    }
+    throw new GitHubApiError('PR has at least 3,000 files; GitHub file-list completeness is unknown', 422)
   }
 
   async getPRStatus(token: string, args: PRActionArgs): Promise<PRStatus> {

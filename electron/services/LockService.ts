@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { BrowserWindow } from 'electron'
-import { execSafe, exec, gitAuthArgs } from '../util/dugite-exec'
+import { exec, execWithStdin, gitAuthArgs } from '../util/dugite-exec'
 import { authService } from './AuthService'
 import { CHANNELS } from '../ipc/channels'
 import type { Lock, OperationStep } from '../types'
@@ -41,8 +41,8 @@ class LockService {
   private pollTimers  = new Map<string, ReturnType<typeof setInterval>>()
   private prevLocks   = new Map<string, Lock[]>()
   private watchedFiles: Array<{ repoPath: string; filePath: string }> = []
-  // Track when each file was locked so we can compute duration on unlock
-  private lockTimestamps = new Map<string, number>()  // `${repoPath}::${filePath}` → timestamp
+  // Server IDs distinguish separate lock intervals on the same file.
+  private lockTimestamps = new Map<string, number>()  // `${repoPath}::${lockId}` → timestamp
   // Track recent self-initiated unlocks so the poller can tell external
   // unlocks (force-unlocks by an admin / teammate) apart from your own.
   private recentSelfUnlocks = new Map<string, number>()  // key → unlock timestamp
@@ -81,6 +81,24 @@ class LockService {
 
   // ── Core LFS commands ───────────────────────────────────────────────────────
 
+  private authoritative = new Map<string, { locks: Lock[]; at: number; accountId: string | null }>()
+
+  async assertStageAllowed(repoPath: string, paths: string[]): Promise<void> {
+    if (!paths.length) return
+    // One literal, NUL-delimited attribute check covers the entire selection.
+    const attrs = await execWithStdin(['check-attr', '-z', '--stdin', 'filter'], repoPath, paths.join('\0') + '\0')
+    const fields = attrs.stdout.split('\0')
+    const lfsPaths = new Set<string>()
+    for (let i = 0; i + 2 < fields.length; i += 3) if (fields[i + 2] === 'lfs') lfsPaths.add(fields[i])
+    if (!lfsPaths.size) return
+    const accountId = authService.listAccounts().currentAccountId
+    const cached = this.authoritative.get(repoPath)
+    const locks = cached && cached.accountId === accountId && Date.now() - cached.at < 30_000 ? cached.locks : await this.listLocks(repoPath)
+    const login = this.currentUserLogin()
+    const blocked = locks.filter(lock => lfsPaths.has(lock.path) && lock.owner.login !== login)
+    if (blocked.length) throw new Error('Cannot stage files locked by another owner: ' + blocked.map(lock => lock.path + ' (' + lock.owner.name + ')').join(', '))
+  }
+
   async listLocks(repoPath: string): Promise<Lock[]> {
     return this.withLfsLock(repoPath, () => this.listLocksUnguarded(repoPath))
   }
@@ -88,8 +106,8 @@ class LockService {
   private async listLocksUnguarded(repoPath: string): Promise<Lock[]> {
     const token = await authService.getCurrentToken()
     const remoteUrl = await gitService.getRemoteUrl(repoPath)
-    const { exitCode, stdout } = await execSafe([...gitAuthArgs(token, remoteUrl), 'lfs', 'locks', '--json'], repoPath)
-    if (exitCode !== 0 || !stdout.trim()) return []
+    const accountId = authService.listAccounts().currentAccountId
+    const { stdout } = await exec([...gitAuthArgs(token, remoteUrl), 'lfs', 'locks', '--json'], repoPath)
     try {
       const raw = JSON.parse(stdout) as Array<{
         id: string
@@ -97,7 +115,8 @@ class LockService {
         owner: { name: string }
         locked_at: string
       }>
-      return raw.map(l => {
+      if (!Array.isArray(raw) || raw.some(l => !l || typeof l.id !== 'string' || typeof l.path !== 'string' || typeof l.owner?.name !== 'string')) throw new Error('Invalid Git LFS lock response')
+      const locks = raw.map(l => {
         const normalizedPath = l.path.replace(/\\/g, '/')
         const fullPath = path.join(repoPath, normalizedPath)
         return {
@@ -108,8 +127,10 @@ class LockService {
           isGhost:  !fs.existsSync(fullPath),
         }
       })
-    } catch {
-      return []
+      this.authoritative.set(repoPath, { locks, at: Date.now(), accountId })
+      return locks
+    } catch (error) {
+      throw new Error('Unable to read authoritative locks: ' + String(error))
     }
   }
 
@@ -129,9 +150,9 @@ class LockService {
     const lock  = locks.find(l => l.path === normalized)
     if (!lock) throw new Error(`Lock not found for "${normalized}" after locking`)
     const now = Date.now()
-    this.lockTimestamps.set(`${repoPath}::${normalized}`, now)
+    this.lockTimestamps.set(`${repoPath}::${lock.id}`, now)
     heatmapService.recordLockEvent({
-      repoPath, filePath: normalized, eventType: 'locked',
+      repoPath, filePath: normalized, eventType: 'locked', lockId: lock.id,
       actorLogin: actorLogin || lock.owner.login,
       actorName:  actorName  || lock.owner.name,
       timestamp: now, durationMs: 0,
@@ -262,16 +283,17 @@ class LockService {
         const refreshedLocks = await this.listLocksUnguarded(repoPath)
         const refreshedLockId = refreshedLocks.find(l => l.path === normalized)?.id ?? resolvedLockId
         await exec(makeArgs(refreshedLockId), repoPath)
+        resolvedLockId = refreshedLockId
       } else {
         throw error
       }
     }
     const now = Date.now()
-    const lockedAt = this.lockTimestamps.get(`${repoPath}::${normalized}`) ?? now
-    this.lockTimestamps.delete(`${repoPath}::${normalized}`)
+    const lockedAt = this.lockTimestamps.get(`${repoPath}::${resolvedLockId}`) ?? now
+    this.lockTimestamps.delete(`${repoPath}::${resolvedLockId}`)
     this.recentSelfUnlocks.set(`${repoPath}::${normalized}`, now)
     heatmapService.recordLockEvent({
-      repoPath, filePath: normalized, eventType: force ? 'force-unlocked' : 'unlocked',
+      repoPath, filePath: normalized, eventType: force ? 'force-unlocked' : 'unlocked', lockId: resolvedLockId,
       actorLogin, actorName, timestamp: now, durationMs: now - lockedAt,
     })
   }
@@ -434,22 +456,27 @@ class LockService {
     if (this.isLfsBusy(repoPath)) return
     const token = this.pollTokens.get(repoPath)
     if (!token) return
-    const current  = await this.listLocks(repoPath)
+    let current: Lock[]
+    try { current = await this.listLocks(repoPath) }
+    catch (error) {
+      if (this.pollTokens.get(repoPath) === token) this.broadcastLocks(repoPath, this.prevLocks.get(repoPath) ?? [], String(error))
+      return
+    }
     if (this.pollTokens.get(repoPath) !== token) return
     const previous = this.prevLocks.get(repoPath) ?? []
 
     // New locks since last poll
     for (const lock of current) {
-      if (!previous.find(l => l.path === lock.path)) {
+      if (!previous.find(l => l.id === lock.id)) {
         const title = `${lock.owner.name} locked a file`
         const body  = lock.path
         const n = notificationService.push(repoPath, 'lock', title, body, { ownerLogin: lock.owner.login })
         this.emitNotification(n)
         webhookService.send(repoPath, 'fileLocked', title, body).catch(() => {})
         const now = Date.now()
-        this.lockTimestamps.set(`${repoPath}::${lock.path}`, now)
+        this.lockTimestamps.set(`${repoPath}::${lock.id}`, now)
         heatmapService.recordLockEvent({
-          repoPath, filePath: lock.path, eventType: 'locked',
+          repoPath, filePath: lock.path, eventType: 'locked', lockId: lock.id,
           actorLogin: lock.owner.login, actorName: lock.owner.name,
           timestamp: now, durationMs: 0,
         })
@@ -460,17 +487,17 @@ class LockService {
     const currentUserLogin = this.currentUserLogin()
     const externalUnlocksOfMine: string[] = []
     for (const lock of previous) {
-      if (!current.find(l => l.path === lock.path)) {
+      if (!current.find(l => l.id === lock.id)) {
         const title = 'File unlocked'
         const body  = `${lock.path} released by ${lock.owner.name}`
         const n = notificationService.push(repoPath, 'unlock', title, body)
         this.emitNotification(n)
         webhookService.send(repoPath, 'fileUnlocked', title, body).catch(() => {})
         const now = Date.now()
-        const lockedAt = this.lockTimestamps.get(`${repoPath}::${lock.path}`) ?? now
-        this.lockTimestamps.delete(`${repoPath}::${lock.path}`)
+        const lockedAt = this.lockTimestamps.get(`${repoPath}::${lock.id}`) ?? now
+        this.lockTimestamps.delete(`${repoPath}::${lock.id}`)
         heatmapService.recordLockEvent({
-          repoPath, filePath: lock.path, eventType: 'unlocked',
+          repoPath, filePath: lock.path, eventType: 'unlocked', lockId: lock.id,
           actorLogin: lock.owner.login, actorName: lock.owner.name,
           timestamp: now, durationMs: now - lockedAt,
         })
@@ -543,10 +570,10 @@ class LockService {
     })
   }
 
-  private broadcastLocks(repoPath: string, locks: Lock[]): void {
+  private broadcastLocks(repoPath: string, locks: Lock[], error?: string): void {
     BrowserWindow.getAllWindows().forEach(win => {
       if (!win.webContents.isDestroyed()) {
-        win.webContents.send(CHANNELS.EVT_LOCK_CHANGED, { repoPath, locks })
+        win.webContents.send(CHANNELS.EVT_LOCK_CHANGED, { repoPath, locks, error })
       }
     })
   }

@@ -6,7 +6,7 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "tsc -p tsconfig.main.json && concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "build": "tsc -p tsconfig.main.json && vite build",
+    "build": "tsc --noEmit && tsc -p tsconfig.main.json && vite build",
     "test": "tsc -p tsconfig.main.json && playwright test",
     "package": "npm run build && electron-builder",
     "release": "npm run build && electron-builder --publish always",

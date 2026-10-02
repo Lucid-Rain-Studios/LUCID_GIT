@@ -1,3 +1,4 @@
+import { useDialogOverlayDismiss } from '@/lib/useDialogOverlayDismiss'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ipc, SyncStatus,
@@ -453,21 +454,24 @@ function ResolveDialog({
   // reflect the PR's current state rather than a stale local snapshot.
   useEffect(() => {
     let cancelled = false
+    setRefsFetched(false)
     ipc.fetch(repoPath)
       .then(() => markFetchPerformed(repoPath))
-      .catch(() => { /* previews fall back to whatever refs are local */ })
-      .finally(() => { if (!cancelled) setRefsFetched(true) })
+      .then(() => { if (!cancelled) setRefsFetched(true) })
+      .catch(error => { if (!cancelled) { setConflictError(String(error)); setConflictLoading(false); setBranchDiffError(String(error)); setBranchDiffLoading(false) } })
     return () => { cancelled = true }
-  }, [repoPath])
+  }, [repoPath, pr.headSha, pr.baseSha])
 
   useEffect(() => {
     if (choice !== 'accept' || !refsFetched) return
+    let cancelled = false
     setConflictLoading(true)
     setConflictError(null)
     // Preview conflicts between the PR's own base and head branches — never
     // the branch the user happens to be checked out on.
-    ipc.mergePreview(repoPath, pr.headBranch, pr.baseBranch)
+    ipc.mergePreview(repoPath, pr.headSha, pr.baseSha)
       .then(files => {
+        if (cancelled) return
         setConflicts(files)
         setConflictChoices(prev => {
           const active = new Set(files.map(file => file.path))
@@ -479,36 +483,49 @@ function ResolveDialog({
         })
       })
       .catch((e) => {
+        if (cancelled) return
         setConflicts([])
         setConflictError(String(e))
       })
-      .finally(() => setConflictLoading(false))
-  }, [choice, repoPath, pr.headBranch, pr.baseBranch, refsFetched])
+      .finally(() => { if (!cancelled) setConflictLoading(false) })
+    return () => { cancelled = true }
+  }, [choice, repoPath, pr.headBranch, pr.baseBranch, pr.headSha, pr.baseSha, refsFetched])
 
   useEffect(() => {
     if (choice !== 'accept' || !refsFetched) return
+    let cancelled = false
     setBranchDiffLoading(true)
     setBranchDiffError(null)
-    ipc.branchDiff(repoPath, pr.baseBranch, pr.headBranch)
-      .then(setBranchDiff)
+    ipc.branchDiff(repoPath, pr.baseSha, pr.headSha)
+      .then(value => { if (!cancelled) setBranchDiff(value) })
       .catch((e) => {
+        if (cancelled) return
         setBranchDiff(null)
         setBranchDiffError(String(e))
       })
-      .finally(() => setBranchDiffLoading(false))
-  }, [choice, repoPath, pr.baseBranch, pr.headBranch, refsFetched])
+      .finally(() => { if (!cancelled) setBranchDiffLoading(false) })
+    return () => { cancelled = true }
+  }, [choice, repoPath, pr.baseBranch, pr.headBranch, pr.baseSha, pr.headSha, refsFetched])
 
   const allConflictChoicesMade = conflicts.length > 0 && conflicts.every(file => conflictChoices[file.path])
+  const modal = useDialogOverlayDismiss(onClose, !busy, 'Review pull request')
 
   const resolveConflictedPRLocally = async (owner: string, repo: string) => {
     const originalBranch = currentBranch
 
+    let mergeSha = pr.headSha
+    let switched = false
+    let cleanupError: unknown
+    try {
     await opRun('Fetching latest PR refs...', () => ipc.fetch(repoPath))
     markFetchPerformed(repoPath)
     await opRun(`Switching to ${pr.headBranch}...`, () => ipc.checkout(repoPath, pr.headBranch))
+    switched = true
+    const [reviewedTip] = await ipc.log(repoPath, { limit: 1 })
+    if (!reviewedTip || reviewedTip.hash !== pr.headSha) throw new Error('PR head changed since review. Reopen the preview before resolving.')
 
     try {
-      await opRun(`Updating ${pr.headBranch} from ${pr.baseBranch}...`, () => ipc.merge(repoPath, pr.baseBranch))
+      await opRun(`Updating ${pr.headBranch} from ${pr.baseBranch}...`, () => ipc.merge(repoPath, pr.baseSha))
     } catch (mergeError) {
       const message = mergeError instanceof Error ? mergeError.message : String(mergeError)
       const isConflict = /conflict|automatic merge failed|fix conflicts|cannot merge binary/i.test(message)
@@ -526,15 +543,28 @@ function ResolveDialog({
     }
 
     await opRun(`Pushing ${pr.headBranch}...`, () => ipc.push(repoPath))
-    if (originalBranch && originalBranch !== pr.headBranch) {
-      await opRun(`Switching back to ${originalBranch}...`, () => ipc.checkout(repoPath, originalBranch))
+    const [tip] = await ipc.log(repoPath, { limit: 1 })
+    if (!tip) throw new Error('Unable to verify the PR revision after local resolution')
+    mergeSha = tip.hash
+    } finally {
+      try {
+      if (switched && originalBranch && originalBranch !== pr.headBranch) {
+        const inProgress = await ipc.mergeInProgress(repoPath)
+        if (!inProgress) await opRun('Restoring ' + originalBranch, () => ipc.checkout(repoPath, originalBranch))
+        else showStatusToast('Conflict resolution is still active on ' + pr.headBranch + '. Complete or abort it before switching branches.')
+      }
+      } catch (restoreError) {
+        showStatusToast('Could not restore ' + originalBranch + '. Check the current branch before continuing.')
+        cleanupError = restoreError
+      } finally { try { await refreshStatus() } finally { bumpSyncTick() } }
     }
-    await refreshStatus()
-    bumpSyncTick()
-    await opRun(`Merging PR #${pr.number}...`, () => ipc.githubMergePR({ owner, repo, prNumber: pr.number, repoPath }))
+    if (cleanupError) throw cleanupError
+    await opRun('Merging PR #' + pr.number, () => ipc.githubMergePR({ owner, repo, prNumber: pr.number, repoPath, expectedSha: mergeSha }))
   }
 
   const handleConfirm = async () => {
+    if (busy || (choice === 'accept' && (!refsFetched || conflictLoading || branchDiffLoading ||
+      conflictError || branchDiffError || !pr.headSha || !pr.baseSha || conflicts.some(file => !conflictChoices[file.path])))) return
     const [owner, repo] = ghSlug.split('/')
     setBusy(true)
     try {
@@ -542,7 +572,7 @@ function ResolveDialog({
         if (conflicts.length > 0) {
           await resolveConflictedPRLocally(owner, repo)
         } else {
-          await opRun(`Merging PR #${pr.number}…`, () => ipc.githubMergePR({ owner, repo, prNumber: pr.number, repoPath }))
+          await opRun(`Merging PR #${pr.number}…`, () => ipc.githubMergePR({ owner, repo, prNumber: pr.number, repoPath, expectedSha: pr.headSha }))
         }
         let fetchedMergedPrUpdates = false
         try {
@@ -579,7 +609,7 @@ function ResolveDialog({
   }
 
   return (
-    <div style={{
+    <div {...modal} style={{
       position: 'fixed', inset: 0, zIndex: 600,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)',
@@ -789,7 +819,7 @@ function ResolveDialog({
           >Cancel</button>
           {(() => {
             const waitingForConflictChoices = choice === 'accept' && conflicts.length > 0 && !allConflictChoicesMade
-            const disabled = busy || waitingForConflictChoices
+            const disabled = busy || waitingForConflictChoices || (choice === 'accept' && (!refsFetched || conflictLoading || branchDiffLoading || !!conflictError || !!branchDiffError || !pr.headSha || !pr.baseSha))
             return (
               <button
                 onClick={handleConfirm}

@@ -170,6 +170,7 @@ test('LG-046 forecast view states its bounded coverage even for an empty result'
 test('LG-079 file actions send repository and relative path without platform conversion', () => {
   const calls = []
   const panel = component('src/components/changes/FileRow.tsx', {
+    '@/stores/repoStore': { useRepoStore: store({ fileStatus: [] }) },
     '@/ipc': { ipc: { showInFolder: (...args) => calls.push(args), openPath: (...args) => calls.push(args) } },
     '@/stores/forecastStore': { useForecastStore: store({ conflicts: [] }) },
     '@/stores/assetViewerStore': { useAssetViewerStore: store({}) },

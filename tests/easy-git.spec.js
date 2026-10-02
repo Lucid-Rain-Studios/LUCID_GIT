@@ -126,14 +126,17 @@ test('LG-044 forecasts publish an empty result after an overlap clears', async (
     electron: { BrowserWindow: { getAllWindows: () => [{ webContents: { isDestroyed: () => false, send: (...args) => events.push(args) } }] } },
     '../ipc/channels': { CHANNELS: { EVT_FORECAST_CONFLICT: 'forecast' } },
     './DesktopNotificationService': { desktopNotificationService: { notify: opts => notifications.push(opts) } },
+    './GitService': { gitService: { fetch: async () => {}, status: async () => dirty ? [{ path: 'asset.uasset' }] : [] } },
+    '../util/repo-gate': { repoSlotState: () => ({ readers: 0, writer: false, queued: 0 }), withRepoSlot: async (_, __, fn) => fn() },
     '../util/dugite-exec': { execSafe: async args => ({ exitCode: 0, stdout: {
       status: dirty ? ' M asset.uasset\0' : '', 'rev-parse': 'main\n',
-      'for-each-ref': 'origin/feature\n', diff: 'asset.uasset\n', log: 'abc\0Test\0change',
+      'for-each-ref': 'origin/feature\n', diff: 'asset.uasset\0', log: 'abc\0Test\0change',
     }[args[0]] ?? '' }) },
   }).exports.forecastService
+  forecast.status.set('repo', { repoPath: 'repo', enabled: true, paused: false, lastPolledAt: null, conflicts: [] })
   await forecast.poll('repo')
   dirty = false
   await forecast.poll('repo')
-  expect(events.map(e => e[1].length)).toEqual([1, 0])
+  expect(events.map(e => e[1].conflicts.length)).toEqual([1, 0])
   expect(notifications).toHaveLength(1)
 })

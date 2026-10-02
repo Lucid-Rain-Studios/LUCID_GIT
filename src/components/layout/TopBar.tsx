@@ -1,3 +1,4 @@
+import { useDialogOverlayDismiss } from '@/lib/useDialogOverlayDismiss'
 import React, { useState, useEffect, useCallback } from 'react'
 import lucidGitIcon from '@/lib/icons/lucid_git.svg'
 import { ipc, SyncStatus, UpdateInfo, PresenceEntry } from '@/ipc'
@@ -166,7 +167,8 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
   useEffect(() => {
     const unsubAvail = ipc.onUpdateAvailable((info: UpdateInfo) => { setUpdateInfo(info); setUpdateDismissed(false) })
     const unsubReady = ipc.onUpdateReady(() => { setUpdateReady(true); setDownloading(false) })
-    return () => { unsubAvail(); unsubReady() }
+    const unsubError = ipc.onUpdateError(message => { setDownloading(false); useStatusToastStore.getState().show('Update failed: ' + message + '. Retry the download or check Settings.') })
+    return () => { unsubAvail(); unsubReady(); unsubError() }
   }, [])
 
   const doPush = async () => {
@@ -997,8 +999,9 @@ function BranchConfirmDialog({ from, to, hasChanges, onConfirm, onCancel }: {
 }) {
   const [dontAsk, setDontAsk] = React.useState(false)
   const [stash, setStash]     = React.useState(false)
+  const modal = useDialogOverlayDismiss(onCancel, true, 'Switch branch')
   return (
-    <div style={{
+    <div {...modal} style={{
       position: 'fixed', inset: 0, zIndex: 500,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(2px)',

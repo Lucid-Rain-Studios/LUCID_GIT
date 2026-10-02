@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { ipc, TeamConfig } from '@/ipc'
 import { ActionBtn } from '@/components/ui/ActionBtn'
 import { SettingsError } from './SettingsError'
+import { useDialogStore } from '@/stores/dialogStore'
 
 interface TeamConfigPanelProps {
   repoPath: string
@@ -51,6 +52,16 @@ export function TeamConfigPanel({ repoPath }: TeamConfigPanelProps) {
     finally { setSaving(false) }
   }
 
+  const handleApply = async () => {
+    const policy = { ...config, lfsPatterns: patternsText.split('\n').map(s => s.trim()).filter(Boolean), hookIds: hookIdsText.split('\n').map(s => s.trim()).filter(Boolean) }
+    if (!await useDialogStore.getState().confirm({ title: 'Apply team policy locally?', message: 'This edits .gitattributes and installs managed hooks in this checkout.',
+      detail: `LFS patterns: ${policy.lfsPatterns.join(', ') || 'none'}\nHooks: ${policy.hookIds.join(', ') || 'none'}\nWebhook events: ${Object.keys(policy.webhookEvents).join(', ') || 'none'}`, confirmLabel: 'Apply policy' })) return
+    setSaving(true); setError(null)
+    try { await ipc.teamConfigApply(repoPath, policy); setSaved(false) }
+    catch (e) { setError(`Policy application stopped: ${String(e)}. Review local attributes and hooks before retrying.`) }
+    finally { setSaving(false) }
+  }
+
   if (!loaded) {
     if (error) return <SettingsError error={error} onRetry={load} />
     return (
@@ -72,7 +83,7 @@ export function TeamConfigPanel({ repoPath }: TeamConfigPanelProps) {
           <div className="px-3 py-2.5 space-y-2">
             <p className="text-[10px] font-mono text-lg-text-secondary leading-relaxed">
               Saves to <span className="text-lg-accent font-semibold">.lucid-git/team-config.json</span> in your
-              repository. Commit this file so teammates inherit these defaults automatically.
+              repository. Commit this file so teammates can review and apply the policy locally.
             </p>
           </div>
         </div>
@@ -82,7 +93,7 @@ export function TeamConfigPanel({ repoPath }: TeamConfigPanelProps) {
             <span className="text-[10px] font-mono uppercase tracking-widest text-lg-text-secondary">LFS patterns</span>
           </div>
           <div className="px-3 py-2.5 space-y-2">
-            <p className="text-[10px] font-mono text-lg-text-secondary">One glob pattern per line. These are applied team-wide when a teammate opens the repo.</p>
+            <p className="text-[10px] font-mono text-lg-text-secondary">One glob pattern per line. Apply policy adds these patterns to this checkout’s .gitattributes.</p>
             <textarea
               rows={6}
               value={patternsText}
@@ -98,7 +109,7 @@ export function TeamConfigPanel({ repoPath }: TeamConfigPanelProps) {
             <span className="text-[10px] font-mono uppercase tracking-widest text-lg-text-secondary">Recommended hooks</span>
           </div>
           <div className="px-3 py-2.5 space-y-2">
-            <p className="text-[10px] font-mono text-lg-text-secondary">Built-in hook IDs to recommend. Teammates see an install prompt in the Hooks tab.</p>
+            <p className="text-[10px] font-mono text-lg-text-secondary">Built-in hook IDs to install using Apply policy. Existing user hooks are preserved.</p>
             <textarea
               rows={3}
               value={hookIdsText}
@@ -118,6 +129,7 @@ export function TeamConfigPanel({ repoPath }: TeamConfigPanelProps) {
           >
             {saving ? 'Saving…' : 'Save & commit-ready'}
           </ActionBtn>
+          <ActionBtn onClick={handleApply} disabled={saving} size="sm">Apply policy locally</ActionBtn>
           {saved && <span className="text-[10px] font-mono text-lg-success">✓ Saved — remember to commit .lucid-git/team-config.json</span>}
         </div>
 

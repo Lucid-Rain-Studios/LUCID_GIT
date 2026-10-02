@@ -96,7 +96,15 @@ const KNOWN_HOOKS = [
 ]
 
 function hooksDir(repoPath: string): string {
-  return path.join(repoPath, '.git', 'hooks')
+  let gitDir = path.join(repoPath, '.git')
+  if (fs.statSync(gitDir).isFile()) {
+    const link = fs.readFileSync(gitDir, 'utf8').match(/^gitdir: (.+)\r?$/m)
+    if (!link) throw new Error('Invalid worktree Git directory')
+    gitDir = path.resolve(repoPath, link[1].trim())
+    const common = path.join(gitDir, 'commondir')
+    if (fs.existsSync(common)) gitDir = path.resolve(gitDir, fs.readFileSync(common, 'utf8').trim())
+  }
+  return path.join(gitDir, 'hooks')
 }
 
 function scriptPreview(content: string): string {
@@ -189,16 +197,26 @@ class HookService {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
 
     const hookPath = path.join(dir, def.hookName)
-
-    // Back up existing non-builtin hook so we don't clobber user work
+    const managed = path.join(dir, 'lucid-git')
+    fs.mkdirSync(managed, { recursive: true })
+    const userHook = hookPath + '.lucid-user'
     if (fs.existsSync(hookPath)) {
-      const content = fs.readFileSync(hookPath, 'utf-8')
-      if (!content.includes(BUILTIN_MARKER)) {
-        fs.writeFileSync(`${hookPath}.bak`, content, 'utf-8')
+      const content = fs.readFileSync(hookPath, 'utf8')
+      if (!content.includes('# lucid-git-dispatcher')) {
+        const existingBuiltin = BUILTINS.find(item => content.includes(BUILTIN_MARKER + ' ' + item.id))
+        if (existingBuiltin) fs.writeFileSync(path.join(managed, existingBuiltin.id), content, { mode: 0o755 })
+        else {
+          if (fs.existsSync(userHook)) throw new Error('Preserved user hook already exists. Review hooks before installing.')
+          fs.renameSync(hookPath, userHook)
+        }
       }
     }
-
-    fs.writeFileSync(hookPath, def.script, { encoding: 'utf-8', mode: 0o755 })
+    fs.writeFileSync(path.join(managed, def.id), def.script, { mode: 0o755 })
+    const commands = BUILTINS.filter(item => item.hookName === def.hookName).map(item =>
+      'if [ -f "$HOOK_DIR/lucid-git/' + item.id + '" ]; then sh "$HOOK_DIR/lucid-git/' + item.id + '" "$@" || exit $?; fi').join('\n')
+    const dispatcher = '#!/bin/sh\n# lucid-git-dispatcher\n' + BUILTIN_MARKER + ' dispatcher\nHOOK_DIR=$(dirname "$0")\n' +
+      'if [ -f "$HOOK_DIR/' + def.hookName + '.lucid-user" ]; then "$HOOK_DIR/' + def.hookName + '.lucid-user" "$@" || exit $?; fi\n' + commands + '\n'
+    fs.writeFileSync(hookPath, dispatcher, { mode: 0o755 })
     this._makeExecutable(hookPath)
   }
 
@@ -215,7 +233,7 @@ class HookService {
     return new Promise(resolve => {
       const proc = spawn(shell, [hookPath], {
         cwd: repoPath,
-        env: { ...process.env, GIT_DIR: path.join(repoPath, '.git') },
+        env: { ...process.env },
       })
 
       let output = ''
