@@ -3,6 +3,7 @@ import Database from 'better-sqlite3'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { performance } from 'node:perf_hooks'
 import { exec, execSafe, execWithProgress, execWithStdin, gitAuthArgs, withGitTimeout, ProgressCallback } from '../util/dugite-exec'
 import { nulPaths, parseNameStatus, parseNumstat } from '../util/git-paths'
 import { authService } from './AuthService'
@@ -525,10 +526,8 @@ class GitService {
     const MAX_SKIPS = 20
     const skipped: string[] = []
     let remaining = paths
-    // A crashed git/git-lfs subprocess leaves .git/index.lock behind and every
-    // later index write fails until it is gone. Clear it once, for a lock old
-    // enough that nothing can still be writing it, rather than making the user
-    // stage, fail, and hunt for the file by hand.
+    // Wait once for transient lock contention. Persistent locks are preserved
+    // because neither age nor app-process timing proves their ownership.
     let indexLockCleared = false
     try {
       while (remaining.length > 0) {
@@ -1345,7 +1344,7 @@ class GitService {
     }
 
     if (lockCacheFailure || indexLockFailure) {
-      // Retry only if the lock is already gone. Its age cannot prove ownership.
+      // Retry only once, after the lock disappears. Never delete an opaque lock.
       const removed = await this.clearStaleIndexLock(repoPath)
       return !indexLockFailure || removed
     }
@@ -1381,7 +1380,20 @@ class GitService {
   /** Git index locks carry no owner PID. Age and overlapping app activity
    * cannot prove ownership, so leave an existing lock for deliberate recovery. */
   private async clearStaleIndexLock(repoPath: string): Promise<boolean> {
-    return (await this.getIndexLockInfo(repoPath)) === null
+    const info = await this.getIndexLockInfo(repoPath)
+    if (!info) return true
+    const deadline = performance.now() + 2_000
+    // Resolve the Git path once. Poll only its metadata, yielding between
+    // checks; no Git processes, repository scans or unbounded retries.
+    while (performance.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 100))
+      try { await fs.promises.stat(info.path) }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true
+        throw error
+      }
+    }
+    return false
   }
 
   private async authenticatedArgs(repoPath: string, args: string[]): Promise<string[]> {
@@ -1952,8 +1964,8 @@ ${lastError}` : '')
     }
 
     if (this.isStaleIndexLockError(lastError)) {
-      return `Another program is holding .git/index.lock — usually a second Git client or a git command still running. ` +
-             `Wait for it to finish, then discard again.`
+      return `A Git operation or an interrupted write left index.lock present. Its owner is unknown. ` +
+             `Wait for running Git commands to finish. If the lock remains, verify all writers have stopped before manual recovery.`
     }
 
     return `They are usually held open by another program (the Unreal editor, an IDE, or an antivirus scan). ` +
@@ -2557,20 +2569,21 @@ ${lastError}` : '')
 
   /**
    * Inspect .git/index.lock — git creates this during write operations and
-   * removes it when done. A leftover lock means a previous git/LFS subprocess
-   * crashed or was killed mid-write. Returns null if no lock exists.
+   * removes it when done. Its presence alone cannot distinguish a live writer
+   * from an interrupted write. Returns null only if no lock exists.
    */
   async getIndexLockInfo(repoPath: string): Promise<{ path: string; ageSeconds: number; mtimeMs: number } | null> {
-    const gitDirRes = await execSafe(['rev-parse', '--git-dir'], repoPath)
-    if (gitDirRes.exitCode !== 0) return null
-    const gitDir = path.resolve(repoPath, gitDirRes.stdout.trim())
-    const lockPath = path.join(gitDir, 'index.lock')
+    const result = await execSafe(['rev-parse', '--path-format=absolute', '--git-path', 'index.lock'], repoPath)
+    if (result.exitCode !== 0) throw new Error(result.stderr || 'Unable to locate the Git index lock.')
+    const lockPath = result.stdout.trim()
+    if (!path.isAbsolute(lockPath)) throw new Error('Git did not return an absolute index lock path.')
     try {
       const stat = await fs.promises.stat(lockPath)
       const ageSeconds = Math.max(0, Math.floor((Date.now() - stat.mtimeMs) / 1000))
       return { path: lockPath, ageSeconds, mtimeMs: stat.mtimeMs }
-    } catch {
-      return null
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw error
     }
   }
 

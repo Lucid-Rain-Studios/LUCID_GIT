@@ -4,18 +4,30 @@ import { randomUUID } from 'node:crypto'
 
 const recovered = new Set<string>()
 
+class InvalidJsonSchema extends Error {}
+
+export class JsonStoreReadError extends Error {
+  readonly corrupt: boolean
+
+  constructor(file: string, failures: unknown[]) {
+    super(`Unable to read ${path.basename(file)}. Data was preserved for recovery. ${String(failures[0])}`)
+    this.corrupt = failures.every(error => error instanceof SyntaxError || error instanceof InvalidJsonSchema
+      || (error as NodeJS.ErrnoException)?.code === 'ENOENT')
+  }
+}
+
 export function readJson<T>(file: string, validate: (value: unknown) => value is T, initial: T): T {
-  let original: unknown
+  const failures: unknown[] = []
   for (const candidate of [file, file + '.bak']) {
     try {
       const value: unknown = JSON.parse(fs.readFileSync(candidate, 'utf8'))
-      if (!validate(value)) throw new Error('Invalid stored data schema')
+      if (!validate(value)) throw new InvalidJsonSchema('Invalid stored data schema')
       if (candidate !== file) { recovered.add(file); console.warn('Recovered JSON store from backup:', file) }
       return value
-    } catch (error) { original ??= error }
+    } catch (error) { failures.push(error) }
   }
-  if ((original as NodeJS.ErrnoException)?.code === 'ENOENT' && !fs.existsSync(file + '.bak')) return initial
-  throw new Error(`Unable to read ${path.basename(file)}. Data was preserved for recovery. ${String(original)}`)
+  if (failures.every(error => (error as NodeJS.ErrnoException)?.code === 'ENOENT')) return initial
+  throw new JsonStoreReadError(file, failures)
 }
 
 /** Small metadata writes are atomic; never replace a good backup with corrupt data. */

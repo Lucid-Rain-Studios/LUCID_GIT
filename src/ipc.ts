@@ -1,6 +1,6 @@
 // Typed wrappers around window.lucidGit.*
-import type { IndexDiagnosis, IndexRepairResult } from '../electron/indexRecoveryTypes'
-export type { IndexDiagnosis, IndexRepairResult } from '../electron/indexRecoveryTypes'
+import type { IndexDiagnosis, IndexRepairResult, IndexRecoveryBlockers, IndexLockRecoveryResult, RecoveryGitTask } from '../electron/indexRecoveryTypes'
+export type { IndexDiagnosis, IndexRepairResult, IndexRecoveryBlockers, IndexLockRecoveryResult, RecoveryGitTask } from '../electron/indexRecoveryTypes'
 // This file is the single source of truth for the renderer-side IPC contract.
 
 // ── Domain types ─────────────────────────────────────────────────────────────
@@ -706,6 +706,9 @@ export interface LucidGitAPI {
   diagnoseIndex: (repoPath: string) => Promise<IndexDiagnosis>
   repairIndex: (repoPath: string, token: string) => Promise<IndexRepairResult>
   undoIndexRepair: (repoPath: string, id: string) => Promise<void>
+  checkIndexBlockers: (repoPath: string) => Promise<IndexRecoveryBlockers>
+  stopIndexTasks: (repoPath: string, tasks: Array<Pick<RecoveryGitTask, 'pid' | 'startedAt'>>, confirmed: boolean) => Promise<number>
+  recoverIndexLock: (repoPath: string, token: string, confirmed: boolean) => Promise<IndexLockRecoveryResult>
   currentBranch: (repoPath: string) => Promise<string>
   stage: (repoPath: string, paths: string[]) => Promise<void>
   unstage: (repoPath: string, paths: string[]) => Promise<void>

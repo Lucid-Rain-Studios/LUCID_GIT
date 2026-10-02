@@ -1,9 +1,9 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
-import { execSafe, execWithStdin, withGitTimeout, preemptRepoReads } from '../util/dugite-exec'
+import { execSafe, execWithStdin, withGitTimeout, preemptRepoReads, repoGitTasks, stopRepoGitTasks, gitOpActivity } from '../util/dugite-exec'
 import { withRepoSlot } from '../util/repo-gate'
-import type { IndexDiagnosis, IndexRepairResult } from '../indexRecoveryTypes'
+import type { IndexDiagnosis, IndexRepairResult, IndexRecoveryBlockers, IndexLockRecoveryResult, RecoveryIndexLock, RecoveryGitTask } from '../indexRecoveryTypes'
 
 const LIMIT = 128 * 1024 * 1024
 const hash = (data: Buffer | string) => createHash('sha256').update(data).digest('hex')
@@ -65,7 +65,7 @@ async function required(repo: string, args: string[], index?: string): Promise<s
   return result.stdout.trim()
 }
 
-async function context(repo: string): Promise<Context> {
+async function recoveryPaths(repo: string): Promise<Pick<Context, 'root' | 'gitDir' | 'index'>> {
   for (const key of ['GIT_INDEX_FILE', 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES']) {
     if (process.env[key]) throw new Error(`${key} overrides the repository environment. Restart Lucid Git without this override before using recovery.`)
   }
@@ -74,6 +74,11 @@ async function context(repo: string): Promise<Context> {
   if (root.toLowerCase() !== (await fs.realpath(repo)).toLowerCase()) throw new Error('Select the repository root before running recovery.')
   const gitDir = await fs.realpath(await required(repo, ['rev-parse', '--absolute-git-dir']))
   const index = path.join(gitDir, 'index')
+  return { root, gitDir, index }
+}
+
+async function context(repo: string): Promise<Context> {
+  const { root, gitDir, index } = await recoveryPaths(repo)
   const format = await required(repo, ['rev-parse', '--show-object-format'])
   if (format !== 'sha1' && format !== 'sha256') throw new Error('Unsupported repository object format.')
   const branchRead = await git(repo, ['symbolic-ref', '-q', 'HEAD'])
@@ -92,7 +97,7 @@ async function context(repo: string): Promise<Context> {
 }
 
 async function blockers(c: Context, ignoreLock = false): Promise<void> {
-  if (!ignoreLock && await exists(c.index + '.lock')) throw new Error('Another Git writer may own index.lock. Recovery never deletes an existing lock. Close other Git clients, then Diagnose again.')
+  if (!ignoreLock && await exists(c.index + '.lock')) throw new Error('Index.lock exists; its owner is unknown. Automatic index repair preserves the lock. Use Check tasks and lock below, stop Lucid Git tasks if needed, and close other Git clients before deliberate lock recovery.')
   for (const name of operations) if (await exists(path.join(c.gitDir, name))) {
     throw new Error(`An operation is in progress (${name}). Finish or abort that operation before index recovery.`)
   }
@@ -138,7 +143,7 @@ async function validateObjects(c: Context, index: string): Promise<void> {
     throw new Error('The replacement refers to missing or invalid staged objects. Object/database recovery is required; the original index was not changed.')
   }
 }
-async function storage(c: Context): Promise<string> {
+async function storage(c: Pick<Context, 'gitDir'>): Promise<string> {
   const base = path.join(c.gitDir, 'lucid-index-recovery')
   await fs.mkdir(base, { recursive: true, mode: 0o700 })
   const stat = await fs.lstat(base)
@@ -166,7 +171,94 @@ async function update(file: string, data: string): Promise<void> {
 }
 
 export class IndexRecoveryService {
+  /** This check deliberately bypasses the gate: a stuck write is what the
+   * user needs to inspect and stop. All Git probes are metadata-only reads. */
+  async checkBlockers(repo: string): Promise<IndexRecoveryBlockers> {
+    const c = await recoveryPaths(repo)
+    let lock: RecoveryIndexLock | null = null, lockError: string | undefined
+    try { lock = (await this.lockSnapshot(c.index + '.lock'))?.info ?? null }
+    catch (error) { lockError = String(error) }
+    return { repoPath: repo, tasks: repoGitTasks(repo), pendingGitCommands: gitOpActivity(repo).inFlight, lock, lockError }
+  }
+
+  async stopTasks(repo: string, reviewed: Array<Pick<RecoveryGitTask, 'pid' | 'startedAt'>>, confirmed: boolean): Promise<number> {
+    if (confirmed !== true) throw new Error('Confirm stopping the listed Lucid Git tasks first.')
+    return stopRepoGitTasks(repo, reviewed)
+  }
+
+  private async lockSnapshot(file: string): Promise<{ info: RecoveryIndexLock; bytes: Buffer } | null> {
+    try {
+      const before = await fs.lstat(file)
+      if (!before.isFile() || before.isSymbolicLink()) throw new Error('The index lock is not a regular file. Manual filesystem recovery is required.')
+      if (before.size > LIMIT) throw new Error('The index lock exceeds the 128 MiB recovery limit. Nothing was removed.')
+      const handle = await fs.open(file, 'r')
+      let bytes: Buffer
+      try {
+        const opened = await handle.stat()
+        if (opened.dev !== before.dev || opened.ino !== before.ino) throw new Error('The index lock changed. Check tasks and lock again.')
+        // Read at most the reviewed size plus one byte, even if a live writer
+        // grows the file while it is open. A changed size fails below.
+        const buffer = Buffer.alloc(before.size + 1)
+        let offset = 0
+        while (offset < buffer.length) {
+          const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, null)
+          if (!bytesRead) break
+          offset += bytesRead
+        }
+        bytes = buffer.subarray(0, offset)
+      } finally { await handle.close() }
+      const after = await fs.lstat(file)
+      if (after.dev !== before.dev || after.ino !== before.ino || after.size !== before.size
+        || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs || bytes.length !== before.size) {
+        throw new Error('The index lock changed. Check tasks and lock again.')
+      }
+      const token = hash(JSON.stringify([file, before.dev, before.ino, before.size, before.mtimeMs, before.ctimeMs, hash(bytes)]))
+      return { info: { path: file, ageSeconds: Math.max(0, Math.floor((Date.now() - before.mtimeMs) / 1000)), size: before.size, token }, bytes }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw error
+    }
+  }
+
+  /** Operator recovery, never automatic: Git locks expose no owner PID. */
+  async recoverLock(repo: string, expectedToken: string, externalWritersStopped: boolean): Promise<IndexLockRecoveryResult> {
+    if (externalWritersStopped !== true || !expectedToken) throw new Error('Confirm all external Git writers are stopped before recovering the lock.')
+    return withRepoSlot(repo, 'write', async () => {
+      const c = await recoveryPaths(repo)
+      const assertQuiet = () => {
+        if (repoGitTasks(repo).length || gitOpActivity(repo).inFlight) throw new Error('Lucid Git tasks are still running or finishing. Stop them and check again before lock recovery.')
+      }
+      assertQuiet()
+      const file = c.index + '.lock', snapshot = await this.lockSnapshot(file)
+      if (!snapshot) return { backupPath: null, summary: 'The lock is already gone. No removal was needed.', blockers: await this.checkBlockers(repo) }
+      if (snapshot.info.token !== expectedToken) throw new Error('The index lock changed after review. Nothing was removed. Check tasks and lock again.')
+      const folder = path.join(await storage(c), randomUUID())
+      await fs.mkdir(folder, { mode: 0o700 })
+      const backup = path.join(folder, 'original-index.lock')
+      await durable(backup, snapshot.bytes)
+      // Verify the persisted backup before checking the exact reviewed lock
+      // again. Age never establishes ownership; the operator attests quiescence.
+      if (hash(await fs.readFile(backup)) !== hash(snapshot.bytes)) throw new Error('Lock backup verification failed. Nothing was removed.')
+      const now = await this.lockSnapshot(file)
+      assertQuiet()
+      if (!now || now.info.token !== expectedToken) throw new Error(`The index lock changed during backup. Nothing was removed. Backup retained at ${folder}`)
+      await fs.unlink(file)
+      // Once removal succeeds, return the retained backup even if a later
+      // diagnostic probe fails; never leave the user guessing what changed.
+      const checked = await this.checkBlockers(repo).catch((error): IndexRecoveryBlockers => ({
+        repoPath: repo, tasks: repoGitTasks(repo), pendingGitCommands: gitOpActivity(repo).inFlight, lock: null,
+        lockError: `The reviewed lock was removed, but the follow-up check failed: ${String(error)}`,
+      }))
+      return { backupPath: folder, summary: 'The reviewed lock was backed up and removed. Check the index before retrying your Git operation.',
+        blockers: checked }
+    }, preemptRepoReads)
+  }
+
   async diagnose(repo: string): Promise<IndexDiagnosis> {
+    // A diagnosis must not hide cancellation behind a stuck exclusive task.
+    if (repoGitTasks(repo).length || gitOpActivity(repo).inFlight) return { repoPath: repo, issue: 'blocked',
+      summary: 'Lucid Git tasks are still in progress', detail: 'Use Check tasks and lock below to review and stop tasks, then diagnose again.',
+      gitVersion: '', canRepair: false, token: '', canUndo: false }
     return withRepoSlot(repo, 'read', () => this.inspect(repo))
   }
   private async inspect(repo: string): Promise<IndexDiagnosis> {

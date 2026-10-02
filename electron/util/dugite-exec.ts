@@ -6,6 +6,7 @@ import { execFile, type ChildProcess } from 'node:child_process'
 import { OperationStep } from '../types'
 import { logService } from '../services/LogService'
 import { isReadOnlyCommand } from './git-command'
+import type { RecoveryGitTask } from '../indexRecoveryTypes'
 
 export type ProgressCallback = (step: OperationStep) => void
 
@@ -64,14 +65,54 @@ function registerGitProcess(child: ChildProcess, args: string[], repoPath = ''):
  * leaves it running, so the leak we are fixing would half-survive. Windows has
  * no process groups to signal, hence taskkill's /T.
  */
-function killProcessTree(pid: number, child: ChildProcess): void {
+function killProcessTree(pid: number, child: ChildProcess): Promise<void> {
   if (process.platform === 'win32') {
-    // Detached and fully ignored — we never wait on the result, and a failure
-    // here (process already gone, access denied) is not worth surfacing.
-    execFile('taskkill', ['/pid', String(pid), '/T', '/F'], () => { /* best effort */ })
-    return
+    return new Promise((resolve, reject) => {
+      execFile('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, timeout: 10_000 }, error => {
+        if (error && child.exitCode === null && child.signalCode === null) reject(new Error(`Could not stop Git task ${pid}. Check Task Manager and try again.`, { cause: error }))
+        else resolve()
+      })
+    })
   }
-  try { child.kill('SIGKILL') } catch { /* already gone */ }
+  try {
+    if (!child.kill('SIGKILL') && child.exitCode === null && child.signalCode === null) return Promise.reject(new Error(`Could not stop Git task ${pid}.`))
+    return Promise.resolve()
+  } catch (error) { return Promise.reject(error) }
+}
+
+/** Only processes this app owns; command labels never expose auth arguments. */
+export function repoGitTasks(repoPath: string): RecoveryGitTask[] {
+  const key = path.resolve(repoPath).toLowerCase()
+  return [...liveGitProcesses.entries()]
+    .filter(([, entry]) => entry.repoKey === key && entry.child.exitCode == null && entry.child.signalCode == null)
+    .map(([pid, entry]) => ({ pid, startedAt: entry.startedAt, command: `git ${detectGitSubcommand(entry.args)}`,
+      ageSeconds: Math.max(0, Math.floor((Date.now() - entry.startedAt) / 1000)), readOnly: entry.readOnly }))
+    .sort((a, b) => a.startedAt - b.startedAt)
+}
+
+/** Cancellation bypasses the repository gate so it can stop its stuck holder.
+ * Match both PID and start time; never stop tasks that arrived after review. */
+export async function stopRepoGitTasks(repoPath: string, reviewed: Array<{ pid: number; startedAt: number }>): Promise<number> {
+  if (!Array.isArray(reviewed) || reviewed.length > 100 || reviewed.some(task => !Number.isInteger(task?.pid)
+    || task.pid <= 0 || !Number.isFinite(task.startedAt))) throw new Error('Invalid reviewed Git task list.')
+  const key = path.resolve(repoPath).toLowerCase()
+  const targets = [...new Map(reviewed.map(task => [task.pid, task])).values()].flatMap(task => {
+    const entry = liveGitProcesses.get(task.pid)
+    return entry && entry.repoKey === key && entry.startedAt === task.startedAt
+      && entry.child.exitCode == null && entry.child.signalCode == null ? [{ pid: task.pid, entry }] : []
+  })
+  // Keep entries registered until actual exit. A failed taskkill must not make
+  // a running writer disappear from recovery's safety checks.
+  await Promise.all(targets.map(async ({ pid, entry }) => {
+    await killProcessTree(pid, entry.child)
+    const deadline = performance.now() + 5_000
+    while (entry.child.exitCode == null && entry.child.signalCode == null) {
+      if (performance.now() >= deadline) throw new Error(`Git task ${pid} has not exited. Recovery remains blocked.`)
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+  }))
+  if (targets.length) logService.warn('git.recovery-stop', `Stopped ${targets.length} reviewed Lucid Git task(s) for ${repoPath}. Index locks were left intact.`)
+  return targets.length
 }
 
 /**
@@ -142,7 +183,7 @@ export function killGitProcesses(pids: Iterable<number>): number {
     const entry = liveGitProcesses.get(pid)
     if (!entry) continue
     liveGitProcesses.delete(pid)
-    killProcessTree(pid, entry.child)
+    void killProcessTree(pid, entry.child).catch(() => { /* existing cancellation remains best effort */ })
     killed++
   }
   return killed
@@ -204,10 +245,8 @@ const opsKey = (repoPath: string): string => path.resolve(repoPath).toLowerCase(
  * Snapshot of git-process activity for a repo. Take it BEFORE running any
  * further git command, or `inFlight` describes your own probe.
  *
- * `ranDuring` answers the question age cannot: a `.git/index.lock` whose mtime
- * lands inside one of our own run windows was created by a git or git-lfs
- * subprocess we started, so once nothing of ours is in flight it is orphaned
- * and safe to delete — no matter how recent it is.
+ * `ranDuring` is diagnostic timing only. An external writer can create a lock
+ * during the same window, so this never proves ownership or safe deletion.
  */
 export function gitOpActivity(repoPath: string): GitOpActivity {
   const entry = repoGitOps.get(opsKey(repoPath))
@@ -419,8 +458,10 @@ async function execWithProgressInner(
 
     proc.on('close', (code: number | null) => {
       if (pendingProgress) emitProgress(pendingProgress, true)
-      if (code === 0 || code === null) {
+      if (code === 0) {
         resolve({ stdout, stderr })
+      } else if (code === null) {
+        reject(new Error(`git ${detectGitSubcommand(args)} was interrupted before completing.`))
       } else {
         const errText = (stderr || stdout).slice(0, 1000)
         const subCmd  = detectGitSubcommand(args)
@@ -489,7 +530,7 @@ export async function execBinary(args: string[], repoPath: string, stdin?: Buffe
       size += chunk.length
       if (size > 256 * 1024 * 1024) {
         exceeded = true
-        if (proc.pid !== undefined) killProcessTree(proc.pid, proc)
+        if (proc.pid !== undefined) void killProcessTree(proc.pid, proc).catch(() => {})
       } else chunks.push(chunk)
     })
     proc.stderr?.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-8192) })

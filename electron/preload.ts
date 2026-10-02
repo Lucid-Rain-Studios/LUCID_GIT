@@ -1,10 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { CHANNELS } from './ipc/channels'
+import type { RecoveryGitTask } from './indexRecoveryTypes'
 
 const api = {
   diagnoseIndex: (repoPath: string) => ipcRenderer.invoke(CHANNELS.GIT_INDEX_DIAGNOSE, repoPath),
   repairIndex: (repoPath: string, token: string) => ipcRenderer.invoke(CHANNELS.GIT_INDEX_REPAIR, repoPath, token),
   undoIndexRepair: (repoPath: string, id: string) => ipcRenderer.invoke(CHANNELS.GIT_INDEX_UNDO, repoPath, id),
+  checkIndexBlockers: (repoPath: string) => ipcRenderer.invoke(CHANNELS.GIT_INDEX_BLOCKERS, repoPath),
+  stopIndexTasks: (repoPath: string, tasks: Array<Pick<RecoveryGitTask, 'pid' | 'startedAt'>>, confirmed: boolean) => ipcRenderer.invoke(CHANNELS.GIT_INDEX_STOP_TASKS, repoPath, tasks, confirmed),
+  recoverIndexLock: (repoPath: string, token: string, confirmed: boolean) => ipcRenderer.invoke(CHANNELS.GIT_INDEX_RECOVER_LOCK, repoPath, token, confirmed),
   // ── OS dialogs + shell ────────────────────────────────────────────────────
   openDirectory: (): Promise<string | null> =>
     ipcRenderer.invoke(CHANNELS.DIALOG_OPEN_DIRECTORY),

@@ -10,6 +10,7 @@ import { presenceService } from '../services/PresenceService'
 import { firebasePresenceService, validateFirebaseConfig } from '../services/FirebasePresenceService'
 import { PresenceSession } from '../services/PresenceSession'
 import type { PresenceEntry, FirebasePresenceConfig } from '../types'
+import type { RecoveryGitTask } from '../indexRecoveryTypes'
 import { CHANNELS } from './channels'
 import { exec, execSafe, execWithStdin, withGitTimeout, preemptRepoReads } from '../util/dugite-exec'
 import { parseNumstat } from '../util/git-paths'
@@ -329,6 +330,11 @@ export function registerHandlers(): void {
   handle(CHANNELS.GIT_INDEX_DIAGNOSE, (_event, repoPath: string) => indexRecoveryService.diagnose(repoPath))
   handle(CHANNELS.GIT_INDEX_REPAIR, (_event, repoPath: string, token: string) => indexRecoveryService.repair(repoPath, token))
   handle(CHANNELS.GIT_INDEX_UNDO, (_event, repoPath: string, id: string) => indexRecoveryService.undo(repoPath, id))
+  // Keep process inspection/cancellation outside the gate they need to unblock.
+  // Lock recovery acquires its own exclusive slot after validating confirmation.
+  handle(CHANNELS.GIT_INDEX_BLOCKERS, (_event, repoPath: string) => indexRecoveryService.checkBlockers(repoPath))
+  handle(CHANNELS.GIT_INDEX_STOP_TASKS, (_event, repoPath: string, tasks: Array<Pick<RecoveryGitTask, 'pid' | 'startedAt'>>, confirmed: boolean) => indexRecoveryService.stopTasks(repoPath, tasks, confirmed))
+  handle(CHANNELS.GIT_INDEX_RECOVER_LOCK, (_event, repoPath: string, token: string, confirmed: boolean) => indexRecoveryService.recoverLock(repoPath, token, confirmed))
 
   handleRead(CHANNELS.GIT_CURRENT_BRANCH, async (_event, repoPath: string) => {
     return gitService.currentBranch(repoPath)

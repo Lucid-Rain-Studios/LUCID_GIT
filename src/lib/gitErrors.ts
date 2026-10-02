@@ -174,7 +174,7 @@ const DEFS: ErrorDef[] = [
     code: 'INDEX_LOCK',
     test: /Unable to create '.*index\.lock'.*File exists|index\.lock.*File exists/is,
     title: 'Git index is locked',
-    description: "A .git/index.lock is blocking every write to the index. Lucid Git clears locks its own git subprocesses orphan and waits for its own commands to finish before reporting this, so the lock is most likely held by another program — or by a Lucid Git operation that is still running unusually slowly. Retrying once the repository goes quiet is almost always enough.",
+    description: "Git's index.lock is blocking an index write. It may belong to a running Git command or remain from an interrupted write. The lock contains no owner information, so Lucid Git preserves it. Retrying cannot clear a leftover lock; verify all Git writers have stopped before removing it manually.",
     causes: [
       'A game editor with a source-control plugin (Unreal, Unity) is writing to the repo right now',
       'Another git client or terminal has a command in flight',
@@ -185,8 +185,8 @@ const DEFS: ErrorDef[] = [
     canAutoFix: false,
     fixes: [
       { label: 'Close Unreal Editor / other git clients, then retry — the lock clears itself when the writer finishes' },
-      { label: 'Check who is holding it', command: 'git status' },
-      { label: 'If nothing is running, remove the lock by hand (destructive during a real write)', command: 'git rm -f .git/index.lock' },
+      { label: 'Use Task Manager to check for git.exe and git-lfs.exe; git status cannot identify the lock owner' },
+      { label: 'After verifying all Git writers have stopped, run PowerShell in the repository (removes only the lock; unsafe during an active write)', command: '$indexLockPath = git rev-parse --path-format=absolute --git-path index.lock; if ($LASTEXITCODE -eq 0 -and $indexLockPath) { Remove-Item -LiteralPath $indexLockPath -ErrorAction Stop }' },
     ],
   },
   {

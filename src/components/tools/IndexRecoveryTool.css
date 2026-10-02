@@ -32,6 +32,13 @@
 .ir-details summary { cursor: pointer; width: fit-content; color: var(--lg-text-secondary); }
 .ir-details pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; margin: 10px 0 0; background: var(--lg-bg-primary); border-radius: var(--lg-radius); font: var(--lg-font-size) / 1.65 var(--lg-font-mono); user-select: text; }
 .ir-bottom { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 28px; }
+.ir-unblock { padding: 20px; margin-bottom: 28px; border: 1px solid var(--lg-border); border-radius: var(--lg-radius); background: var(--lg-bg-secondary); }
+.ir-unblock > p { color: var(--lg-text-secondary); }
+.ir-task-list { margin: 12px 0; padding-left: 20px; overflow-wrap: anywhere; }
+.ir-task-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+.ir-lock-confirm { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; cursor: pointer; }
+.ir-lock-confirm input { margin-top: 5px; flex-shrink: 0; }
+.ir-unblock .ir-backup { margin-top: 16px; }
 .ir-actions { min-width: 0; }
 .ir-action-row { display: flex; align-items: flex-start; gap: 18px; padding: 0 0 22px; margin-bottom: 22px; border-bottom: 1px solid var(--lg-border); }
 .ir-action-row > div { flex: 1; min-width: 0; }
