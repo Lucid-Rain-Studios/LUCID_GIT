@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { ipc, AppSettings, UpdateInfo, TerminalProfile } from '@/ipc'
 import { ActionBtn } from '@/components/ui/ActionBtn'
+import { SettingsError } from './SettingsError'
 
 const CONFIRM_BRANCH_KEY = 'lucid-git:confirm-branch-switch'
 
@@ -72,9 +73,16 @@ export function GeneralSettings() {
   const [updateStatus, setUpdateStatus] = useState<string>('')
 
   const [terminals, setTerminals] = useState<TerminalProfile[]>([])
+  const [loaded, setLoaded] = useState(false)
+  const [settingsError, setSettingsError] = useState<string | null>(null)
+  const load = () => {
+    setSettingsError(null)
+    return ipc.settingsGet().then(s => { setSettings(s); setLoaded(true) })
+      .catch(e => setSettingsError(`Could not load settings: ${String(e)}`))
+  }
 
   useEffect(() => {
-    ipc.settingsGet().then(setSettings).catch(() => {})
+    load()
     ipc.listTerminals().then(setTerminals).catch(() => setTerminals([]))
   }, [])
 
@@ -117,12 +125,15 @@ export function GeneralSettings() {
   }
 
   const handleSave = async () => {
+    if (!loaded) return
     setSaving(true)
+    setSaved(false)
+    setSettingsError(null)
     try {
       await ipc.settingsSave(settings)
       setSaved(true)
       window.dispatchEvent(new Event(SETTINGS_CHANGED_EVENT))
-    } catch {}
+    } catch (e) { setSettingsError(`Could not save settings: ${String(e)}. Retry Save.`) }
     finally { setSaving(false) }
   }
 
@@ -156,8 +167,10 @@ export function GeneralSettings() {
     }
   }
 
+  if (!loaded) return settingsError ? <SettingsError error={settingsError} onRetry={load} /> : <div className="p-3">Loading settings…</div>
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
+      {settingsError && <SettingsError error={settingsError} />}
       <div className="flex-1 overflow-y-auto">
 
         <Section title="Sync">

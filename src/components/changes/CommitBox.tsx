@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useRepoStore } from '@/stores/repoStore'
 import { useOperationStore } from '@/stores/operationStore'
 import { ipc } from '@/ipc'
@@ -10,6 +10,7 @@ import { ActionBtn } from '@/components/ui/ActionBtn'
 import { AppCheckbox } from '@/components/ui/AppCheckbox'
 
 type HookState = 'idle' | 'running' | 'passed' | 'failed'
+const drafts = new Map<string, { title: string; message: string }>()
 
 interface CommitBoxProps {
   deferredStagePaths?: string[]
@@ -20,21 +21,42 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
   const opRun = useOperationStore(s => s.run)
   const dialog = useDialogStore()
 
-  const [title, setTitle]               = useState('')
-  const [message, setMessage]           = useState('')
+  const [title, setTitle]               = useState(() => repoPath ? drafts.get(repoPath)?.title ?? '' : '')
+  const [message, setMessage]           = useState(() => repoPath ? drafts.get(repoPath)?.message ?? '' : '')
   const [isCommitting, setIsCommitting] = useState(false)
   const [error, setError]               = useState<string | null>(null)
 
   const [amend, setAmend]               = useState(false)
   const [lastMessage, setLastMessage]   = useState<string | null>(null)
   const [headPushed, setHeadPushed]     = useState(false)
-  const [originalTitle, setOriginalTitle]     = useState('')
-  const [originalMessage, setOriginalMessage] = useState('')
+  const [originalTitle, setOriginalTitle]     = useState(title)
+  const [originalMessage, setOriginalMessage] = useState(message)
 
   const pushError = useErrorStore(s => s.pushRaw)
   const [hookState, setHookState]       = useState<HookState>('idle')
   const [hookOutput, setHookOutput]     = useState('')
   const [hookDuration, setHookDuration] = useState(0)
+  const workflowBusy = useRef(false)
+  const draftRepo = useRef(repoPath)
+  const draft = useRef({ title: '', message: '' })
+  // Save only the original draft while amend temporarily displays HEAD's message.
+  draft.current = amend ? { title: originalTitle, message: originalMessage } : { title, message }
+  useEffect(() => {
+    if (draftRepo.current !== repoPath) {
+      const next = repoPath ? drafts.get(repoPath) : null
+      setTitle(next?.title ?? '')
+      setMessage(next?.message ?? '')
+      setOriginalTitle(next?.title ?? '')
+      setOriginalMessage(next?.message ?? '')
+      setAmend(false)
+      setError(null)
+      setHookState('idle')
+      draftRepo.current = repoPath
+    }
+    return () => {
+      if (repoPath) drafts.set(repoPath, draft.current)
+    }
+  }, [repoPath])
 
   // Load HEAD info so the amend toggle can pre-fill the message and warn
   // when the commit is already pushed.
@@ -117,6 +139,8 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
       } else {
         await opRun('Committing…', () => ipc.commit(repoPath, finalMessage, noVerify))
       }
+      drafts.delete(repoPath)
+      if (useRepoStore.getState().repoPath !== repoPath) return
       setTitle('')
       setMessage('')
       setOriginalTitle('')
@@ -132,7 +156,7 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
 
     } catch (e) {
       const s = String(e)
-      setError(s)
+      if (useRepoStore.getState().repoPath === repoPath) setError(s)
       pushError(s)
       // The failure may stem from files that changed on disk since the last
       // refresh — reconcile the list so stale rows don't linger.
@@ -143,7 +167,9 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
   }
 
   const handleCommit = async () => {
-    if (!canCommit || !repoPath) return
+    if (!canCommit || !repoPath || workflowBusy.current) return
+    workflowBusy.current = true
+    setIsCommitting(true)
 
     // Run pre-commit hook inline first
     setHookState('running')
@@ -169,28 +195,39 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
       setHookState('idle')
       setError(String(e))
       refreshStatus()
+    } finally {
+      workflowBusy.current = false
+      setIsCommitting(false)
     }
   }
 
   const handleBypass = async () => {
-    const confirmed = await dialog.confirm({
-      title: 'Bypass pre-commit hook',
-      message: 'The hook reported a failure. Bypassing means it will not run.',
-      detail: 'Only proceed if you know the hook failure is not blocking.',
-      confirmLabel: 'Bypass & Commit',
-      danger: true,
-    })
-    if (!confirmed) return
-    setHookState('idle')
-    setHookOutput('')
+    if (workflowBusy.current || !canCommit) return
+    workflowBusy.current = true
+    setIsCommitting(true)
     try {
-      await prepareDeferredStage()
-    } catch (e) {
-      setError(String(e))
-      refreshStatus()
-      return
+      const confirmed = await dialog.confirm({
+        title: 'Bypass pre-commit hook',
+        message: 'The hook reported a failure. Bypassing means it will not run.',
+        detail: 'Only proceed if you know the hook failure is not blocking.',
+        confirmLabel: 'Bypass & Commit',
+        danger: true,
+      })
+      if (!confirmed) return
+      setHookState('idle')
+      setHookOutput('')
+      try {
+        await prepareDeferredStage()
+      } catch (e) {
+        setError(String(e))
+        refreshStatus()
+        return
+      }
+      await runCommit(true)
+    } finally {
+      workflowBusy.current = false
+      setIsCommitting(false)
     }
-    await runCommit(true)
   }
 
   const commitLabel = (() => {

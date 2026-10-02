@@ -89,6 +89,7 @@ export const CHANNELS = {
   // Notifications + webhooks
   NOTIFICATION_LIST:           'notification:list',
   NOTIFICATION_MARK_READ:      'notification:mark-read',
+  NOTIFICATION_CLEAR_ALL:      'notification:clear-all',
   NOTIFICATION_DESKTOP_NOTIFY: 'notification:desktop-notify',
   WEBHOOK_TEST:           'webhook:test',
   WEBHOOK_LOAD:           'webhook:load',

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { ipc, AppSettings, DesktopNotificationEvents, DesktopNotificationEvent } from '@/ipc'
 import { ActionBtn } from '@/components/ui/ActionBtn'
+import { SettingsError } from './SettingsError'
 
 const DEFAULTS: DesktopNotificationEvents = {
   appUpdate:         true,
@@ -97,12 +98,18 @@ export function NotificationSettings() {
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [saved,    setSaved]    = useState(false)
   const [saving,   setSaving]   = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const load = () => {
+    setError(null)
+    return ipc.settingsGet().then(setSettings).catch(e => setError(`Could not load notification settings: ${String(e)}`))
+  }
 
   useEffect(() => {
-    ipc.settingsGet().then(setSettings).catch(() => {})
+    load()
   }, [])
 
   if (!settings) {
+    if (error) return <SettingsError error={error} onRetry={load} />
     return (
       <div className="px-3 py-6 text-[11px] font-mono text-lg-text-secondary">
         Loading…
@@ -126,15 +133,16 @@ export function NotificationSettings() {
   const handleSave = async () => {
     if (!settings) return
     setSaving(true)
+    setSaved(false)
+    setError(null)
     try {
       await ipc.settingsSave({
         ...settings,
         desktopNotificationEvents: events,
       })
       setSaved(true)
-    } catch {
-      // Save failures surface through the wrapped IPC logger; the user can
-      // retry by clicking Save again.
+    } catch (e) {
+      setError(`Could not save notification settings: ${String(e)}. Retry Save.`)
     } finally {
       setSaving(false)
     }
@@ -142,6 +150,7 @@ export function NotificationSettings() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
+      {error && <SettingsError error={error} />}
       <div className="flex-1 overflow-y-auto">
 
         <Section title="Recommended (high signal)">

@@ -1,3 +1,4 @@
+import path from 'path'
 import { ipcMain, dialog, shell, BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import { permissionService } from '../services/PermissionService'
 import { watcherService } from '../services/WatcherService'
@@ -65,7 +66,7 @@ const PROGRESS_CHANNELS = new Set<string>([
 // and step aside for these.
 const EXCLUSIVE_CHANNELS = new Set<string>([
   CHANNELS.GIT_DISCARD, CHANNELS.GIT_DISCARD_ALL, CHANNELS.GIT_STAGE,
-  CHANNELS.GIT_UNSTAGE, CHANNELS.GIT_COMMIT, CHANNELS.GIT_PULL,
+  CHANNELS.GIT_UNSTAGE, CHANNELS.GIT_COMMIT, CHANNELS.GIT_PULL, CHANNELS.GIT_RESET_TO,
   CHANNELS.GIT_PUSH, CHANNELS.GIT_UPDATE_FROM_MAIN, CHANNELS.GIT_CHECKOUT,
   CHANNELS.GIT_MERGE, CHANNELS.LFS_MIGRATE, CHANNELS.LFS_RESTORE,
   CHANNELS.CLEANUP_GC,
@@ -258,11 +259,13 @@ export function registerHandlers(): void {
     await shell.openExternal(url)
   })
 
-  handle(CHANNELS.SHELL_SHOW_IN_FOLDER, async (_event, fullPath: string) => {
+  handle(CHANNELS.SHELL_SHOW_IN_FOLDER, async (_event, fullPath: string, relativePath?: string) => {
+    if (relativePath !== undefined) fullPath = path.join(fullPath, relativePath)
     shell.showItemInFolder(fullPath)
   })
 
-  handle(CHANNELS.SHELL_OPEN_PATH, async (_event, fullPath: string) => {
+  handle(CHANNELS.SHELL_OPEN_PATH, async (_event, fullPath: string, relativePath?: string) => {
+    if (relativePath !== undefined) fullPath = path.join(fullPath, relativePath)
     const message = await shell.openPath(fullPath)
     if (message) throw new Error(`Could not open path "${fullPath}": ${message}`)
   })
@@ -339,24 +342,27 @@ export function registerHandlers(): void {
       if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
     })
 
-    if (branch.trim().toLowerCase() === 'main' && filesAhead.length > 0) {
+    if (filesAhead.length > 0) {
       try {
-        const { accounts, currentAccountId } = authService.listAccounts()
-        const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login
-        if (currentLogin) {
-          const locks = await lockService.listLocks(repoPath)
-          const pushedFiles = new Set(filesAhead)
-          await lockService.unlockFiles(
-            repoPath,
-            locks
-              .filter(lock => lock.owner.login === currentLogin && pushedFiles.has(lock.path))
-              .map(lock => ({ filePath: lock.path, lockId: lock.id })),
-            currentLogin,
-            currentLogin,
-            step => {
-              if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
-            },
-          )
+        const defaultBranch = await gitService.defaultBranch(repoPath)
+        if (branch.trim() === defaultBranch) {
+          const { accounts, currentAccountId } = authService.listAccounts()
+          const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login
+          if (currentLogin) {
+            const locks = await lockService.listLocks(repoPath)
+            const pushedFiles = new Set(filesAhead)
+            await lockService.unlockFiles(
+              repoPath,
+              locks
+                .filter(lock => lock.owner.login === currentLogin && pushedFiles.has(lock.path))
+                .map(lock => ({ filePath: lock.path, lockId: lock.id })),
+              currentLogin,
+              currentLogin,
+              step => {
+                if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
+              },
+            )
+          }
         }
       } catch {
         // Best-effort lock cleanup — do not fail successful push
@@ -760,6 +766,7 @@ export function registerHandlers(): void {
   handle(CHANNELS.NOTIFICATION_MARK_READ, async (_event, id: number) => {
     notificationService.markRead(id)
   })
+  handle(CHANNELS.NOTIFICATION_CLEAR_ALL, async () => notificationService.clearAll())
 
   handle(CHANNELS.NOTIFICATION_DESKTOP_NOTIFY, async (_event, request: {
     event: 'appUpdate' | 'prResolved' | 'forceUnlock' | 'operationComplete' | 'fatalError' | 'conflictForecast' | 'lockOnDirtyFile'
@@ -974,9 +981,9 @@ export function registerHandlers(): void {
     return gitService.aheadFilePaths(repoPath)
   })
 
-  handle(CHANNELS.GIT_RESET_TO, async (_event, repoPath: string, hash: string, mode: 'soft' | 'mixed' | 'hard') => {
+  handle(CHANNELS.GIT_RESET_TO, async (_event, repoPath: string, hash: string, mode: 'soft' | 'mixed' | 'hard', expectedHead?: string) => {
     if (mode === 'hard') await requireAdmin(repoPath)
-    return withUndo(repoPath, 'reset', 'Reset', () => runGitOp('Reset', () => gitService.resetTo(repoPath, hash, mode)))
+    return withUndo(repoPath, 'reset', 'Reset', () => runGitOp('Reset', () => gitService.resetTo(repoPath, hash, mode, expectedHead)))
   })
 
   handleRead(CHANNELS.GIT_FILE_LOG, (_event, repoPath: string, filePath: string, limit?: number) =>

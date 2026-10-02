@@ -58,11 +58,14 @@ export function FileRow({
   const [thumbnail, setThumbnail] = useState<string | null>(null)
 
   useEffect(() => {
+    let cancelled = false
+    setThumbnail(null)
     if (!isPreviewable) return
     const ref = file.staged ? 'INDEX' : 'WORKING'
     ipc.assetRenderThumbnail(repoPath, file.path, ref)
-      .then(p => setThumbnail(p))
+      .then(p => { if (!cancelled) setThumbnail(p) })
       .catch(() => {})
+    return () => { cancelled = true }
   }, [repoPath, file.path, isPreviewable, file.staged])
   const fileConflicts = forecastConflicts.filter(c => c.filePath === file.path || c.filePath.endsWith('/' + file.path))
   const { lockFile, unlockFile, watchFile } = useLockStore()
@@ -131,11 +134,11 @@ export function FileRow({
   }
   const doIgnoreFile   = async () => { close(); try { await ipc.addToGitignore(repoPath, file.path); onRefresh() } catch (e) { await dialog.alert({ title: 'Error', message: String(e) }) } }
   const doIgnoreFolder = async () => { close(); if (!dir) return; try { await ipc.addToGitignore(repoPath, dir + '/'); onRefresh() } catch (e) { await dialog.alert({ title: 'Error', message: String(e) }) } }
-  const doCopyFullPath = () => { close(); navigator.clipboard.writeText(fullPath.replace(/\//g, '\\')) }
-  const doCopyRelPath  = () => { close(); navigator.clipboard.writeText(file.path.replace(/\//g, '\\')) }
-  const doShowInExplorer = () => { close(); ipc.showInFolder(fullPath.replace(/\//g, '\\')) }
+  const doCopyFullPath = () => { close(); navigator.clipboard.writeText(fullPath) }
+  const doCopyRelPath  = () => { close(); navigator.clipboard.writeText(file.path) }
+  const doShowInExplorer = () => { close(); ipc.showInFolder(repoPath, file.path) }
   const doOpenVSCode     = () => { close(); ipc.openExternal(`vscode://file/${fullPath}`) }
-  const doOpenDefault    = () => { close(); ipc.openPath(fullPath.replace(/\//g, '\\')) }
+  const doOpenDefault    = () => { close(); ipc.openPath(repoPath, file.path) }
   const doLock    = async () => { close(); try { await lockFile(repoPath, file.path) } catch (e) { await dialog.alert({ title: 'Error', message: String(e) }) } }
   const doUnlock  = async (force = false) => {
     close()

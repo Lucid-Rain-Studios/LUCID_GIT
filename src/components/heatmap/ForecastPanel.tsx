@@ -56,7 +56,7 @@ export function ForecastPanel({ conflicts, enabled, lastPolledAt, onStart, onSto
         </div>
         {enabled && (
           <div style={{ marginTop: 4, fontFamily: 'var(--lg-font-ui)', fontSize: 10, color: '#4e5870' }}>
-            Polling every 5 min · last checked {timeAgo(lastPolledAt)}
+            Polling every 5 min · last checked {timeAgo(lastPolledAt)} · checks at most the first 10 remote branches
           </div>
         )}
       </div>
@@ -85,7 +85,7 @@ export function ForecastPanel({ conflicts, enabled, lastPolledAt, onStart, onSto
               No forecast conflicts
             </div>
             <div style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 12, color: '#4e5870', marginTop: 4 }}>
-              Your modified files don't overlap with any remote branch changes.
+              No overlaps found among the checked branches. Coverage is limited to the first 10 remote branches.
             </div>
           </div>
         )}

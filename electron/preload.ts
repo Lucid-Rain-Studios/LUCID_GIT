@@ -7,10 +7,10 @@ const api = {
     ipcRenderer.invoke(CHANNELS.DIALOG_OPEN_DIRECTORY),
   openExternal: (url: string): Promise<void> =>
     ipcRenderer.invoke(CHANNELS.SHELL_OPEN_EXTERNAL, url),
-  showInFolder: (fullPath: string): Promise<void> =>
-    ipcRenderer.invoke(CHANNELS.SHELL_SHOW_IN_FOLDER, fullPath),
-  openPath: (fullPath: string): Promise<void> =>
-    ipcRenderer.invoke(CHANNELS.SHELL_OPEN_PATH, fullPath),
+  showInFolder: (fullPath: string, relativePath?: string): Promise<void> =>
+    ipcRenderer.invoke(CHANNELS.SHELL_SHOW_IN_FOLDER, fullPath, relativePath),
+  openPath: (fullPath: string, relativePath?: string): Promise<void> =>
+    ipcRenderer.invoke(CHANNELS.SHELL_OPEN_PATH, fullPath, relativePath),
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   startDeviceFlow: () =>
@@ -187,6 +187,7 @@ const api = {
   // ── Notifications + webhooks ──────────────────────────────────────────────
   notificationList: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.NOTIFICATION_LIST, repoPath),
+  notificationClearAll: () => ipcRenderer.invoke(CHANNELS.NOTIFICATION_CLEAR_ALL),
   notificationMarkRead: (id: number) =>
     ipcRenderer.invoke(CHANNELS.NOTIFICATION_MARK_READ, id),
   notifyDesktop: (request: {
@@ -307,8 +308,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GIT_INDEX_LOCK_REMOVE, repoPath),
   aheadFilePaths: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_AHEAD_FILE_PATHS, repoPath),
-  gitResetTo: (repoPath: string, hash: string, mode: 'soft' | 'mixed' | 'hard') =>
-    ipcRenderer.invoke(CHANNELS.GIT_RESET_TO, repoPath, hash, mode),
+  gitResetTo: (repoPath: string, hash: string, mode: 'soft' | 'mixed' | 'hard', expectedHead?: string) =>
+    ipcRenderer.invoke(CHANNELS.GIT_RESET_TO, repoPath, hash, mode, expectedHead),
   gitLsFiles: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_LS_FILES, repoPath),
   gitFileLog: (repoPath: string, filePath: string, limit?: number) =>

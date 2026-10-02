@@ -375,20 +375,24 @@ export function BinaryDiff({ file, repoPath }: BinaryDiffProps) {
   const thumbRef  = file.staged ? 'INDEX' : 'WORKING'
 
   useEffect(() => {
+    let cancelled = false
     setHistLoading(true)
     setHistory(null)
     ipc.gitFileLog(repoPath, file.path, 60)
-      .then(setHistory)
-      .catch(() => setHistory([]))
-      .finally(() => setHistLoading(false))
+      .then(value => { if (!cancelled) setHistory(value) })
+      .catch(() => { if (!cancelled) setHistory([]) })
+      .finally(() => { if (!cancelled) setHistLoading(false) })
+    return () => { cancelled = true }
   }, [repoPath, file.path])
 
   useEffect(() => {
+    let cancelled = false
     if (!isUEAsset) { setThumbnail(null); return }
     setThumbnail(null)
     ipc.assetRenderThumbnail(repoPath, file.path, thumbRef)
-      .then(p => setThumbnail(p))
+      .then(p => { if (!cancelled) setThumbnail(p) })
       .catch(() => {})
+    return () => { cancelled = true }
   }, [repoPath, file.path, thumbRef, isUEAsset])
 
   const asset    = classifyAsset(file.path)

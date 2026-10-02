@@ -137,19 +137,21 @@ export function AssetDiffViewer({ file, repoPath, staged }: AssetDiffViewerProps
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState<string | null>(null)
 
-  const leftRef  = 'HEAD'
+  const leftRef  = staged ? 'HEAD' : 'INDEX'
   const rightRef = staged ? 'INDEX' : 'WORKING'
 
   useEffect(() => {
+    let cancelled = false
     setResult(null)
     setLoading(true)
     setError(null)
 
     ipc.assetDiffPreview(repoPath, file.path, leftRef, rightRef)
-      .then(setResult)
-      .catch(e => setError(String(e)))
-      .finally(() => setLoading(false))
-  }, [repoPath, file.path, staged])
+      .then(value => { if (!cancelled) setResult(value) })
+      .catch(e => { if (!cancelled) setError(String(e)) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [repoPath, file.path, leftRef, rightRef])
 
   const filename = file.path.split('/').pop() ?? file.path
   const typeLabel = result ? (ASSET_TYPE_LABELS[result.assetType] ?? 'Binary') : ''

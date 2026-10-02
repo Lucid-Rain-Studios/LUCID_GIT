@@ -154,13 +154,12 @@ class ForecastService {
       st.conflicts = newConflicts
     }
 
-    if (newConflicts.length > 0) {
-      BrowserWindow.getAllWindows().forEach(win => {
+    BrowserWindow.getAllWindows().forEach(win => {
         if (!win.webContents.isDestroyed()) {
           win.webContents.send(CHANNELS.EVT_FORECAST_CONFLICT, newConflicts)
         }
-      })
-
+    })
+    if (newConflicts.length > 0) {
       // Only toast on NEWLY-detected conflicts so the user isn't pinged every
       // poll cycle for the same overlap. Compare by file+remoteBranch tuple.
       const wasKnown = new Set(previousConflicts.map(c => `${c.filePath}::${c.remoteBranch}`))

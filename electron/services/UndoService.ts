@@ -94,7 +94,11 @@ class UndoService {
         if (reset.exitCode !== 0) return { ok: false, label: cp.label, message: reset.stderr.trim() || 'Undo failed.' }
         // Restore the pre-op working changes captured in the snapshot (best-effort).
         if (cp.stashRef) {
-          await execSafe(['stash', 'apply', cp.stashRef], repoPath)
+          const restored = await execSafe(['stash', 'apply', '--index', cp.stashRef], repoPath)
+          if (restored.exitCode !== 0) return {
+            ok: false, label: cp.label,
+            message: `Could not restore the saved staging state. Snapshot ${cp.stashRef} is retained for recovery: ${restored.stderr.trim() || restored.stdout.trim()}`,
+          }
         }
       }
       this.checkpoints.delete(repoPath)

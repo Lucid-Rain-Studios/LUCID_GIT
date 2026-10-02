@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { ipc, AppNotification } from '@/ipc'
 
 const MAX_NOTIFICATIONS = 100
+let clearedBefore = 0
 
 interface NotificationState {
   notifications: AppNotification[]
@@ -10,7 +11,9 @@ interface NotificationState {
   push:        (n: AppNotification) => void
   markRead:    (id: number) => void
   markAllRead: () => void
-  clearAll:    () => void
+  clearAll:    () => Promise<void>
+  clearing: boolean
+  clearError: string | null
   resolveRequest: { repoPath: string; containsLocalChanges: string[]; availableToUnlock: string[] } | null
   requestResolve: (payload: { repoPath: string; containsLocalChanges: string[]; availableToUnlock: string[] }) => void
   clearResolveRequest: () => void
@@ -26,12 +29,15 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   notifications: [],
   unreadCount:   0,
   resolveRequest: null,
+  clearing: false,
+  clearError: null,
 
   push: (n) => set(state => {
-    const notifications = [n, ...state.notifications].slice(0, MAX_NOTIFICATIONS)
+    if (new Date(n.createdAt).getTime() <= clearedBefore) return state
+    const notifications = [n, ...state.notifications.filter(item => item.id !== n.id)].slice(0, MAX_NOTIFICATIONS)
     return {
       notifications,
-      unreadCount: state.unreadCount + (n.read ? 0 : 1),
+      unreadCount: notifications.filter(item => !item.read).length,
     }
   }),
 
@@ -57,7 +63,22 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     }))
   },
 
-  clearAll: () => set({ notifications: [], unreadCount: 0 }),
+  clearAll: async () => {
+    if (get().clearing) return
+    const ids = new Set(get().notifications.map(n => n.id))
+    const cutoff = Date.now()
+    set({ clearing: true, clearError: null })
+    try {
+      await ipc.notificationClearAll()
+      clearedBefore = cutoff
+      set(state => {
+        const notifications = state.notifications.filter(n => !ids.has(n.id))
+        return { notifications, unreadCount: notifications.filter(n => !n.read).length }
+      })
+    } catch (e) {
+      set({ clearError: `Could not clear notifications: ${String(e)}. Try again.` })
+    } finally { set({ clearing: false }) }
+  },
 
   requestResolve: (payload) => set({ resolveRequest: payload }),
   clearResolveRequest: () => set({ resolveRequest: null }),

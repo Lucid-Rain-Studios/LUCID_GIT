@@ -658,8 +658,8 @@ export interface LucidGitAPI {
   openDirectory:  () => Promise<string | null>
   openFile:       (defaultPath?: string) => Promise<string | null>
   openExternal:   (url: string) => Promise<void>
-  showInFolder:   (fullPath: string) => Promise<void>
-  openPath:       (fullPath: string) => Promise<void>
+  showInFolder:   (fullPath: string, relativePath?: string) => Promise<void>
+  openPath:       (fullPath: string, relativePath?: string) => Promise<void>
   openTerminal:   (cwd?: string, terminalId?: string) => Promise<void>
   listTerminals:  () => Promise<TerminalProfile[]>
 
@@ -770,6 +770,7 @@ export interface LucidGitAPI {
   // Notifications + webhooks
   notificationList: (repoPath: string) => Promise<AppNotification[]>
   notificationMarkRead: (id: number) => Promise<void>
+  notificationClearAll: () => Promise<void>
   notifyDesktop: (request: DesktopNotifyRequest) => Promise<void>
   webhookTest: (url: string) => Promise<boolean>
   webhookLoad: (repoPath: string) => Promise<WebhookConfig | null>
@@ -839,7 +840,7 @@ export interface LucidGitAPI {
   getIndexLockInfo: (repoPath: string) => Promise<{ path: string; ageSeconds: number; mtimeMs: number } | null>
   removeIndexLock: (repoPath: string) => Promise<boolean>
   aheadFilePaths: (repoPath: string) => Promise<string[]>
-  gitResetTo: (repoPath: string, hash: string, mode: 'soft' | 'mixed' | 'hard') => Promise<void>
+  gitResetTo: (repoPath: string, hash: string, mode: 'soft' | 'mixed' | 'hard', expectedHead?: string) => Promise<void>
   gitLsFiles: (repoPath: string) => Promise<string[]>
   gitFileLog: (repoPath: string, filePath: string, limit?: number) => Promise<CommitEntry[]>
   gitBranchActivity: (repoPath: string) => Promise<BranchActivity[]>

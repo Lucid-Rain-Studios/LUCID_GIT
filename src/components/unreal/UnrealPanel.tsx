@@ -50,7 +50,7 @@ export function UnrealPanel({ repoPath }: UnrealPanelProps) {
         ipc.uePluginStatus(repoPath),
         ipc.ueConfigStatus(repoPath),
         ipc.gitGetIdentity(repoPath),
-        ipc.getGitConfig(repoPath, 'lfs.lockverify'),
+        ipc.getGitConfig(repoPath, 'lfs.locksverify'),
       ])
       setProject(proj)
       setSetupStatus(status)
@@ -279,11 +279,11 @@ export function UnrealPanel({ repoPath }: UnrealPanelProps) {
             )}
           </div>
 
-          {/* lfs.lockverify */}
+          {/* lfs.locksverify */}
           <div className="px-3 pb-3 border-t border-lg-border/50 pt-2 space-y-1.5">
             <div className="text-[10px] text-lg-text-primary font-semibold">LFS Lock Verification</div>
             <StatusRow
-              label="lfs.lockverify = true (blocks pushing locked files)"
+              label="lfs.locksverify = true (blocks pushing locked files)"
               ok={lockVerify === true}
             />
             <p className="text-[10px] text-lg-text-secondary leading-relaxed">
@@ -296,7 +296,7 @@ export function UnrealPanel({ repoPath }: UnrealPanelProps) {
                 loading={busy === 'lockverify'}
                 variant={lockVerify ? 'secondary' : 'accent'}
                 onClick={() => run('lockverify', () =>
-                  ipc.setGitConfig(repoPath, 'lfs.lockverify', 'true')
+                  ipc.setGitConfig(repoPath, 'lfs.locksverify', 'true')
                 )}
               >
                 {busy === 'lockverify' ? 'Enabling…'

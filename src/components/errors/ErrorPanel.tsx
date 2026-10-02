@@ -5,6 +5,7 @@ import { useRepoStore } from '@/stores/repoStore'
 import { LucidGitError, FixStep, FixAction } from '@/lib/gitErrors'
 import { cn } from '@/lib/utils'
 import { ActionBtn } from '@/components/ui/ActionBtn'
+import { useDialogStore } from '@/stores/dialogStore'
 
 interface ErrorPanelProps {
   onReauth: () => void
@@ -52,10 +53,20 @@ export function ErrorPanel({ onReauth, onNavigateTab, onOpenMergeResolver }: Err
           await onOpenMergeResolver()
           break
 
-        case 'run-lfs-migrate':
+        case 'run-lfs-migrate': {
+          const patterns = action.patterns.length ? action.patterns : ['*.uasset', '*.umap']
+          const confirmed = await useDialogStore.getState().confirm({
+            title: 'Migrate repository history to LFS',
+            message: `Rewrite all branches and tags in ${repoPath} for: ${patterns.join(', ')}?`,
+            detail: 'This changes commit IDs across the entire repository history. A force-push and coordination with collaborators will be required. Make a backup before continuing.',
+            confirmLabel: 'Migrate History',
+            danger: true,
+          })
+          if (!confirmed || useRepoStore.getState().repoPath !== repoPath) break
           await ipc.lfsMigrate(repoPath, action.patterns.length ? action.patterns : ['*.uasset', '*.umap'])
           setAutoFixResult('LFS migration complete. Force-push required.')
           break
+        }
 
         case 'open-settings':
           handleDismiss()

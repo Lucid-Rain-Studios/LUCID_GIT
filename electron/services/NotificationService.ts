@@ -28,6 +28,15 @@ function save(repoPath: string, notifications: AppNotification[]): void {
 let _counter = 0
 
 class NotificationService {
+  clearAll(): void {
+    const directory = app.getPath('userData')
+    for (const file of fs.readdirSync(directory)) {
+      if (/^notifications-[a-f0-9]{8}\.json$/.test(file)) {
+        fs.writeFileSync(path.join(directory, file), '[]', 'utf8')
+      }
+    }
+  }
+
   list(repoPath: string): AppNotification[] {
     return load(repoPath)
   }

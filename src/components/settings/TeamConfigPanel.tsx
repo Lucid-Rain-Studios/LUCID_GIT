@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { ipc, TeamConfig } from '@/ipc'
 import { ActionBtn } from '@/components/ui/ActionBtn'
+import { SettingsError } from './SettingsError'
 
 interface TeamConfigPanelProps {
   repoPath: string
@@ -19,20 +20,26 @@ export function TeamConfigPanel({ repoPath }: TeamConfigPanelProps) {
   const [saving, setSaving]         = useState(false)
   const [saved, setSaved]           = useState(false)
   const [loaded, setLoaded]         = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    ipc.teamConfigLoad(repoPath).then(c => {
+  const load = useCallback(() => {
+    setLoaded(false)
+    setError(null)
+    return ipc.teamConfigLoad(repoPath).then(c => {
       const cfg = c ?? DEFAULTS
       setConfig(cfg)
       setPatternsText(cfg.lfsPatterns.join('\n'))
       setHookIdsText(cfg.hookIds.join('\n'))
       setLoaded(true)
-    }).catch(() => setLoaded(true))
+    }).catch(e => setError(`Could not load team settings: ${String(e)}`))
   }, [repoPath])
+  useEffect(() => { load() }, [load])
 
   const handleSave = async () => {
+    if (!loaded) return
     setSaving(true)
     setSaved(false)
+    setError(null)
     const patterns = patternsText.split('\n').map(s => s.trim()).filter(Boolean)
     const hookIds  = hookIdsText.split('\n').map(s => s.trim()).filter(Boolean)
     const final: TeamConfig = { ...config, lfsPatterns: patterns, hookIds }
@@ -40,11 +47,12 @@ export function TeamConfigPanel({ repoPath }: TeamConfigPanelProps) {
       await ipc.teamConfigSave(repoPath, final)
       setConfig(final)
       setSaved(true)
-    } catch {}
+    } catch (e) { setError(`Could not save team settings: ${String(e)}. Retry Save.`) }
     finally { setSaving(false) }
   }
 
   if (!loaded) {
+    if (error) return <SettingsError error={error} onRetry={load} />
     return (
       <div className="flex-1 flex items-center justify-center">
         <span className="text-[11px] font-mono text-lg-text-secondary animate-pulse">Loading…</span>
@@ -54,6 +62,7 @@ export function TeamConfigPanel({ repoPath }: TeamConfigPanelProps) {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
+      {error && <SettingsError error={error} />}
       <div className="flex-1 overflow-y-auto">
 
         <div className="border-b border-lg-border">

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BranchDiffCommit, ipc } from '@/ipc'
 import { usePRStore } from '@/stores/prStore'
 import { useRepoStore } from '@/stores/repoStore'
@@ -155,6 +155,9 @@ export function PRDialog() {
   const [error, setError]   = useState<string | null>(null)
   const [result, setResult] = useState<{ number: number; htmlUrl: string; title: string } | null>(null)
   const [mergeCommits, setMergeCommits] = useState<BranchDiffCommit[]>([])
+  const touched = useRef({ title: false, body: false, base: false })
+  const submitting = useRef(false)
+  const requestClose = useCallback(() => { if (!submitting.current) closeDialog() }, [closeDialog])
 
   const slug  = remoteUrl ? parseGitHubSlug(remoteUrl) : null
   const parts = slug ? slug.split('/') : []
@@ -176,6 +179,8 @@ export function PRDialog() {
 
   useEffect(() => {
     if (!open || !repoPath || !headBranch) return
+    let cancelled = false
+    touched.current = { title: false, body: false, base: false }
     setTitle(branchToTitle(normalizeBranchName(headBranch)))
     setBody('')
     setDraft(false)
@@ -184,8 +189,9 @@ export function PRDialog() {
     setResult(null)
 
     ipc.gitDefaultBranch(repoPath)
-      .then(def => setBase(def))
-      .catch(() => setBase('main'))
+      .then(def => { if (!cancelled && !touched.current.base && !submitting.current) setBase(def) })
+      .catch(() => { if (!cancelled && !touched.current.base && !submitting.current) setBase('main') })
+    return () => { cancelled = true }
   }, [open, repoPath, headBranch])
 
   useEffect(() => {
@@ -202,8 +208,8 @@ export function PRDialog() {
         setMergeCommits(commits)
         if (commits.length > 0) {
           const firstMeaningful = commits.find(c => !c.message.includes('Merge remote-tracking branch'))
-          setTitle((firstMeaningful ?? commits[0]).message)
-          setBody(commits.map(c => `- ${c.message}`).join('\n'))
+          if (!touched.current.title && !submitting.current) setTitle((firstMeaningful ?? commits[0]).message)
+          if (!touched.current.body && !submitting.current) setBody(commits.map(c => `- ${c.message}`).join('\n'))
         }
       })
       .catch(() => {
@@ -220,19 +226,20 @@ export function PRDialog() {
   // Close on Escape
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeDialog() }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') requestClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, closeDialog])
+  }, [open, requestClose])
 
-  const overlayDismiss = useDialogOverlayDismiss(closeDialog)
+  const overlayDismiss = useDialogOverlayDismiss(requestClose)
 
   if (!open) return null
 
   const canSubmit = title.trim().length > 0 && owner && repo && base && phase === 'form'
 
   const submit = async () => {
-    if (!canSubmit || !headBranch) return
+    if (!canSubmit || !headBranch || submitting.current) return
+    submitting.current = true
     setPhase('submitting')
     setError(null)
     try {
@@ -260,6 +267,8 @@ export function PRDialog() {
       showStatusToast('PR creation failed.')
       setError(String(e).replace(/^Error:\s*/, ''))
       setPhase('error')
+    } finally {
+      submitting.current = false
     }
   }
 
@@ -302,7 +311,8 @@ export function PRDialog() {
             )}
             <button
               className="lg-compact-icon-button"
-              onClick={closeDialog}
+              onClick={requestClose}
+              disabled={busy}
               style={{
                 width: 22, height: 22, borderRadius: 5, border: 'none',
                 background: 'transparent', color: '#4a566a', cursor: 'pointer',
@@ -327,7 +337,7 @@ export function PRDialog() {
               <span style={{ color: '#283047', fontSize: 13 }}>→</span>
               <SelectInput
                 value={base}
-                onChange={setBase}
+                onChange={value => { touched.current.base = true; setBase(value) }}
                 options={baseOptions}
                 disabled={busy}
               />
@@ -338,7 +348,7 @@ export function PRDialog() {
               <Label>Title</Label>
               <TextInput
                 value={title}
-                onChange={setTitle}
+                onChange={value => { touched.current.title = true; setTitle(value) }}
                 placeholder="PR title"
                 disabled={busy}
                 autoFocus
@@ -350,7 +360,7 @@ export function PRDialog() {
               <Label>Description <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: '#283047' }}>— optional</span></Label>
               <TextArea
                 value={body}
-                onChange={setBody}
+                onChange={value => { touched.current.body = true; setBody(value) }}
                 placeholder="What does this PR do? Why is it needed?"
                 disabled={busy}
                 rows={4}
@@ -382,7 +392,7 @@ export function PRDialog() {
 
             {/* Actions */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <Btn label="Cancel" onClick={closeDialog} disabled={busy} />
+              <Btn label="Cancel" onClick={requestClose} disabled={busy} />
               <Btn
                 label={busy ? 'Creating…' : phase === 'error' ? 'Try Again' : 'Create Pull Request'}
                 onClick={phase === 'error' ? () => { setPhase('form'); setError(null) } : submit}

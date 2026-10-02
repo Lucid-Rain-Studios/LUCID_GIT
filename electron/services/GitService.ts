@@ -1,3 +1,4 @@
+import { BINARY_EXTENSIONS } from '../util/binary-formats'
 import Database from 'better-sqlite3'
 import fs from 'fs'
 import os from 'os'
@@ -43,17 +44,7 @@ const OUR_GIT_OPS_DRAIN_MS = 5000
 
 // ── Diff helpers ──────────────────────────────────────────────────────────────
 
-const BINARY_EXTS = new Set([
-  '.uasset', '.umap', '.udk', '.ubulk', '.upk', '.pak', '.uexp', '.ucas',
-  '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tga', '.psd', '.tiff', '.ico',
-  '.wav', '.mp3', '.ogg', '.flac', '.aiff', '.wem',
-  '.ttf', '.otf', '.woff', '.woff2',
-  '.exe', '.dll', '.so', '.dylib', '.lib', '.pdb',
-  '.zip', '.7z', '.rar', '.tar', '.gz', '.bz2',
-  '.pdf', '.doc', '.docx', '.xls', '.xlsx',
-  '.mp4', '.avi', '.mov', '.mkv', '.webm',
-  '.fbx', '.obj', '.dae',
-])
+const BINARY_EXTS = new Set([...BINARY_EXTENSIONS].map(ext => '.' + ext))
 
 function langFromPath(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase()
@@ -1805,7 +1796,13 @@ class GitService {
   }
 
   /** Reset HEAD to a given commit with the specified mode. */
-  async resetTo(repoPath: string, hash: string, mode: 'soft' | 'mixed' | 'hard'): Promise<void> {
+  async resetTo(repoPath: string, hash: string, mode: 'soft' | 'mixed' | 'hard', expectedHead?: string): Promise<void> {
+    if (expectedHead) {
+      const head = await execSafe(['rev-parse', 'HEAD'], repoPath)
+      if (head.exitCode !== 0 || head.stdout.trim() !== expectedHead) {
+        throw new Error('Undo commit is only available for the current HEAD. Refresh history and try again.')
+      }
+    }
     await exec(['reset', `--${mode}`, hash], repoPath)
   }
 
@@ -2080,7 +2077,7 @@ ${lastError}` : '')
   }
 
   async stashSave(repoPath: string, message?: string, paths?: string[]): Promise<void> {
-    const args = ['stash', 'push']
+    const args = ['stash', 'push', '--include-untracked']
     if (message?.trim()) args.push('-m', message.trim())
     if (paths && paths.length > 0) args.push('--', ...paths)
     await exec(args, repoPath)
@@ -2379,7 +2376,8 @@ ${lastError}` : '')
     // Recovery-wrapped: this is the write that finalizes a conflict resolution,
     // so it lands right after the checkout/add pair most likely to have left an
     // orphaned index.lock behind.
-    await this.runWithLfsRecovery(repoPath, ['commit', '--no-edit']).catch(async () => {
+    await this.runWithLfsRecovery(repoPath, ['commit', '--no-edit']).catch(async (error) => {
+      if (!/empty commit message|no commit message/i.test(String(error))) throw error
       const branchLabel = targetBranch.replace(/^origin\//, '')
       await exec(['commit', '-m', `Merge branch '${branchLabel}'`], repoPath)
     })
@@ -2653,28 +2651,14 @@ ${lastError}` : '')
     return true
   }
 
-/** Resolve a branch name to a ref usable for merge. Prefers origin/<branch>
-   *  over the local branch — matching GitHub Desktop, which fetches before
-   *  merging and uses the remote-tracking ref so a stale local branch never
-   *  silently merges old commits. If the caller passed an explicit "origin/X"
-   *  ref, we use it directly. */
+  /** Preserve the selected local or remote ref; never substitute another branch. */
   private async resolveBranchRef(repoPath: string, targetBranch: string): Promise<string> {
-    if (targetBranch.startsWith('origin/')) {
-      const res = await execSafe(['rev-parse', '--verify', targetBranch], repoPath)
-      if (res.exitCode === 0) return targetBranch
-    }
-
-    const defaultBranch = await this.remoteDefaultBranch(repoPath)
-    const bareName = targetBranch.replace(/^origin\//, '')
-    const candidates = targetBranch === defaultBranch.name
-      ? [defaultBranch.ref, targetBranch]
-      : [`origin/${bareName}`, bareName]
-
-    for (const ref of candidates) {
-      const res = await execSafe(['rev-parse', '--verify', ref], repoPath)
-      if (res.exitCode === 0) return ref
-    }
-    return targetBranch
+    const ref = targetBranch.startsWith('refs/') ? targetBranch
+      : targetBranch.startsWith('origin/') ? `refs/remotes/${targetBranch}`
+      : `refs/heads/${targetBranch}`
+    const result = await execSafe(['rev-parse', '--verify', `${ref}^{commit}`], repoPath)
+    if (result.exitCode !== 0) throw new Error(`Branch no longer exists: ${targetBranch}`)
+    return ref
   }
 
   // ── Cleanup ───────────────────────────────────────────────────────────────
@@ -3415,8 +3399,8 @@ ${lastError}` : '')
 
     if (isBinary) return { oldContent: '', newContent: '', isBinary: true, language }
 
-    // HEAD content — empty string for new files
-    const headRes = await execSafe(['show', `HEAD:${filePath}`], repoPath)
+    // Staged changes compare HEAD to index; unstaged changes compare index to disk.
+    const headRes = await execSafe(['show', staged ? `HEAD:${filePath}` : `:${filePath}`], repoPath)
     const oldContent = headRes.exitCode === 0 ? headRes.stdout : ''
 
     // Working/index content

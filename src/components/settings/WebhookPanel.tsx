@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { ipc, WebhookConfig } from '@/ipc'
 import { ActionBtn } from '@/components/ui/ActionBtn'
+import { SettingsError } from './SettingsError'
 
 interface WebhookPanelProps {
   repoPath: string
@@ -61,13 +62,18 @@ export function WebhookPanel({ repoPath }: WebhookPanelProps) {
   const [quietStart, setQuietStart] = useState('')
   const [quietEnd, setQuietEnd]     = useState('')
   const [useQuiet, setUseQuiet]     = useState(false)
+  const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   // Load saved config on mount / repo change
-  useEffect(() => {
+  const load = useCallback(() => {
+    setLoaded(false)
+    setError(null)
     ipc.notificationList(repoPath).catch(() => {}) // warm up
-    ipc.webhookLoad(repoPath)
+    return ipc.webhookLoad(repoPath)
       .then(saved => {
-        if (!saved) return
+        setLoaded(true)
+        if (!saved) { setConfig(DEFAULT_CONFIG); setRolesInput(''); setUseQuiet(false); return }
         setConfig(saved)
         setRolesInput((saved.mentionRoles ?? []).join(', '))
         if (saved.quietHours) {
@@ -80,8 +86,9 @@ export function WebhookPanel({ repoPath }: WebhookPanelProps) {
           setQuietEnd('')
         }
       })
-      .catch(() => {})
+      .catch(e => setError(`Could not load webhook settings: ${String(e)}`))
   }, [repoPath])
+  useEffect(() => { load() }, [load])
 
   const updateEvent = (key: keyof WebhookConfig['events'], value: boolean) => {
     setConfig(c => ({ ...c, events: { ...c.events, [key]: value } }))
@@ -89,8 +96,10 @@ export function WebhookPanel({ repoPath }: WebhookPanelProps) {
   }
 
   const handleSave = async () => {
+    if (!loaded) return
     setSaving(true)
     setSaved(false)
+    setError(null)
     const roles = rolesInput.split(',').map(s => s.trim()).filter(Boolean)
     const finalConfig: WebhookConfig = {
       ...config,
@@ -104,7 +113,7 @@ export function WebhookPanel({ repoPath }: WebhookPanelProps) {
       setConfig(finalConfig)
       setSaved(true)
     } catch (e) {
-      console.error('Webhook save failed:', e)
+      setError(`Could not save webhook settings: ${String(e)}. Retry Save.`)
     } finally {
       setSaving(false)
     }
@@ -124,8 +133,10 @@ export function WebhookPanel({ repoPath }: WebhookPanelProps) {
     }
   }
 
+  if (!loaded) return error ? <SettingsError error={error} onRetry={load} /> : <div className="p-3">Loading webhook settings…</div>
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
+      {error && <SettingsError error={error} />}
       <div className="flex-1 overflow-y-auto">
 
         {/* ── Discord webhook URL ────────────────────────────────────────────── */}
