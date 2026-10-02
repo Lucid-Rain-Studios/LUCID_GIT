@@ -102,7 +102,7 @@ test('LG-081 local lock actions and polling share IDs and distinguish a replacem
   const lock = id => ({ id, path: 'Assets/file.uasset', owner: { login: 'owner', name: 'Owner' }, lockedAt: new Date(now).toISOString() })
   const { lockService } = component('electron/services/LockService.ts', {
     electron: { BrowserWindow: { getAllWindows: () => [] } },
-    '../util/dugite-exec': { exec: async () => ({}), gitAuthArgs: () => [] },
+    '../util/dugite-exec': { exec: async () => ({}), gitAuthArgs: () => [], withGitTimeout: fn => fn() },
     './AuthService': { authService: { getCurrentToken: async () => null, listAccounts: () => ({ accounts: [] }) } },
     './GitService': { gitService: { getRemoteUrl: async () => null } },
     './HeatmapService': { heatmapService: service }, './NotificationService': { notificationService: { push: () => ({}) } },

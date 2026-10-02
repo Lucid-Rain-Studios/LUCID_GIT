@@ -2,6 +2,9 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { CHANNELS } from './ipc/channels'
 
 const api = {
+  diagnoseIndex: (repoPath: string) => ipcRenderer.invoke(CHANNELS.GIT_INDEX_DIAGNOSE, repoPath),
+  repairIndex: (repoPath: string, token: string) => ipcRenderer.invoke(CHANNELS.GIT_INDEX_REPAIR, repoPath, token),
+  undoIndexRepair: (repoPath: string, id: string) => ipcRenderer.invoke(CHANNELS.GIT_INDEX_UNDO, repoPath, id),
   // ── OS dialogs + shell ────────────────────────────────────────────────────
   openDirectory: (): Promise<string | null> =>
     ipcRenderer.invoke(CHANNELS.DIALOG_OPEN_DIRECTORY),
@@ -46,8 +49,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GIT_UNSTAGE, repoPath, paths),
   commit: (repoPath: string, message: string, noVerify?: boolean) =>
     ipcRenderer.invoke(CHANNELS.GIT_COMMIT, repoPath, message, noVerify),
-  push: (repoPath: string) =>
-    ipcRenderer.invoke(CHANNELS.GIT_PUSH, repoPath),
+  push: (repoPath: string, force?: boolean) =>
+    ipcRenderer.invoke(CHANNELS.GIT_PUSH, repoPath, force),
   pull: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_PULL, repoPath),
   fetch: (repoPath: string, background?: boolean) =>
@@ -341,6 +344,9 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GIT_UNWATCH_STATUS, repoPath),
 
   // ── Presence ──────────────────────────────────────────────────────────────
+  presenceConfigLoad: (repoPath: string) => ipcRenderer.invoke(CHANNELS.PRESENCE_CONFIG_LOAD, repoPath),
+  presenceConfigSave: (repoPath: string, config: unknown) => ipcRenderer.invoke(CHANNELS.PRESENCE_CONFIG_SAVE, repoPath, config),
+  presenceConfigTest: (repoPath: string, config: unknown) => ipcRenderer.invoke(CHANNELS.PRESENCE_CONFIG_TEST, repoPath, config),
   presenceRead: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.PRESENCE_READ, repoPath),
   presenceUpdate: (repoPath: string, login: string, entry: unknown) =>
@@ -425,6 +431,8 @@ const api = {
   // ── Bug logs ──────────────────────────────────────────────────────────────
   logGetText: () =>
     ipcRenderer.invoke(CHANNELS.LOG_GET_TEXT),
+  logClear: () =>
+    ipcRenderer.invoke(CHANNELS.LOG_CLEAR),
   logGetSuggestion: () =>
     ipcRenderer.invoke(CHANNELS.LOG_GET_SUGGESTION),
   logSaveDialog: () =>

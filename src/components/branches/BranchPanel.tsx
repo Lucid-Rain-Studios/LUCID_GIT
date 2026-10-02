@@ -362,7 +362,7 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
       const [activityAll, locks, presenceFile, prs, diff] = await opRun(`Loading branch insights for ${selected}…`, () => Promise.all([
         ipc.gitBranchActivity(repoPath).catch(() => []),
         ipc.listLocks(repoPath).catch(() => []),
-        ipc.presenceRead(repoPath).catch(() => ({ version: 1, entries: {} })),
+        Promise.resolve({ version: 1, entries: {} }),
         (async () => {
           if (!ghSlug) return []
           const [owner, repo] = ghSlug.split('/')

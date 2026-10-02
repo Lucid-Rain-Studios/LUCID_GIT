@@ -1,5 +1,5 @@
 import path from 'path'
-import { app, ipcMain, dialog, shell, BrowserWindow, type IpcMainInvokeEvent } from 'electron'
+import { app, ipcMain, dialog, shell, BrowserWindow, powerMonitor, type IpcMainInvokeEvent } from 'electron'
 import { permissionService } from '../services/PermissionService'
 import { watcherService } from '../services/WatcherService'
 import { dependencyService } from '../services/DependencyService'
@@ -7,12 +7,15 @@ import { heatmapService } from '../services/HeatmapService'
 import { forecastService } from '../services/ForecastService'
 import { assetDiffService } from '../services/AssetDiffService'
 import { presenceService } from '../services/PresenceService'
-import type { PresenceEntry } from '../types'
+import { firebasePresenceService, validateFirebaseConfig } from '../services/FirebasePresenceService'
+import { PresenceSession } from '../services/PresenceSession'
+import type { PresenceEntry, FirebasePresenceConfig } from '../types'
 import { CHANNELS } from './channels'
 import { exec, execSafe, execWithStdin, withGitTimeout, preemptRepoReads } from '../util/dugite-exec'
 import { parseNumstat } from '../util/git-paths'
 import { withRepoSlot } from '../util/repo-gate'
 import { gitService } from '../services/GitService'
+import { indexRecoveryService } from '../services/IndexRecoveryService'
 import { authService } from '../services/AuthService'
 import { logService } from '../services/LogService'
 import { lockService } from '../services/LockService'
@@ -66,6 +69,7 @@ const PROGRESS_CHANNELS = new Set<string>([
 // `.git/index.lock`. Reads are not blocked outright — they run a few at a time
 // and step aside for these.
 const EXCLUSIVE_CHANNELS = new Set<string>([
+  CHANNELS.GIT_INDEX_REPAIR, CHANNELS.GIT_INDEX_UNDO,
   CHANNELS.GIT_DISCARD, CHANNELS.GIT_DISCARD_ALL, CHANNELS.GIT_STAGE,
   CHANNELS.GIT_UNSTAGE, CHANNELS.GIT_COMMIT, CHANNELS.GIT_PULL, CHANNELS.GIT_RESET_TO,
   CHANNELS.GIT_PUSH, CHANNELS.GIT_UPDATE_FROM_MAIN, CHANNELS.GIT_CHECKOUT,
@@ -174,6 +178,19 @@ async function requireWrite(repoPath: string): Promise<void> {
   }
   const perm = await permissionService.fetchPermission(repoPath)
   if (perm === 'read') throw new Error('PERMISSION_DENIED: Write access required for this operation')
+}
+
+function assertPresenceAccount(accountId: string | null): void {
+  if (!accountId || authService.listAccounts().currentAccountId !== accountId) {
+    throw new Error('PERMISSION_DENIED: Account changed. Retry with the current repository admin.')
+  }
+}
+
+async function requirePresenceAdmin(repoPath: string): Promise<string | null> {
+  const accountId = authService.listAccounts().currentAccountId
+  await requireAdmin(repoPath)
+  assertPresenceAccount(accountId)
+  return accountId
 }
 
 export function registerHandlers(): void {
@@ -309,6 +326,10 @@ export function registerHandlers(): void {
     return gitService.status(repoPath)
   })
 
+  handle(CHANNELS.GIT_INDEX_DIAGNOSE, (_event, repoPath: string) => indexRecoveryService.diagnose(repoPath))
+  handle(CHANNELS.GIT_INDEX_REPAIR, (_event, repoPath: string, token: string) => indexRecoveryService.repair(repoPath, token))
+  handle(CHANNELS.GIT_INDEX_UNDO, (_event, repoPath: string, id: string) => indexRecoveryService.undo(repoPath, id))
+
   handleRead(CHANNELS.GIT_CURRENT_BRANCH, async (_event, repoPath: string) => {
     return gitService.currentBranch(repoPath)
   })
@@ -338,11 +359,11 @@ export function registerHandlers(): void {
     return gitService.commit(repoPath, message, noVerify)
   })
 
-  handle(CHANNELS.GIT_PUSH, async (event, repoPath: string) => {
+  handle(CHANNELS.GIT_PUSH, async (event, repoPath: string, force?: boolean) => {
     if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, { id: 'push-prepare', label: 'Preparing push', status: 'running', progress: 3 })
     const { branch, filesAhead } = await gitService.push(repoPath, (step) => {
       if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
-    })
+    }, force === true)
     const reportUnlockFailure = (detail: string) => {
       if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, { id: 'push-unlock', label: 'Push succeeded; locks retained', status: 'error', detail })
       try {
@@ -636,8 +657,10 @@ export function registerHandlers(): void {
   })
 
 // ── Locks — Phase 5 ───────────────────────────────────────────────────────
-  handleRead(CHANNELS.LOCK_LIST, async (_event, repoPath: string) => {
-    return lockService.listLocks(repoPath)
+  handle(CHANNELS.LOCK_LIST, async (_event, repoPath: string) => {
+    // LockService owns the deadline inside its LFS queue. An outer deadline
+    // would abandon queued work and let it start after the caller timed out.
+    return withRepoSlot(repoPath, 'read', () => lockService.listLocks(repoPath))
   })
 
   handle(CHANNELS.LOCK_FILE, async (event, repoPath: string, filePath: string) => {
@@ -1087,14 +1110,82 @@ export function registerHandlers(): void {
   })
 
   // ── Presence ─────────────────────────────────────────────────────────────
-  handle(CHANNELS.PRESENCE_READ, (_event, repoPath: string) => {
-    presenceService.removeStale(repoPath)
-    return presenceService.read(repoPath)
+  handle(CHANNELS.PRESENCE_READ, async (_event, repoPath: string) => {
+    const accountId = await requirePresenceAdmin(repoPath)
+    assertPresenceAccount(accountId)
+    const config = firebasePresenceService.load(repoPath)
+    if (config?.enabled) return firebasePresenceService.read(config)
+    return { ...presenceService.read(repoPath), source: 'local' }
   })
 
-  handle(CHANNELS.PRESENCE_UPDATE, (_event, repoPath: string, login: string, entry: PresenceEntry) =>
-    presenceService.update(repoPath, login, entry)
-  )
+  handle(CHANNELS.PRESENCE_CONFIG_LOAD, async (_event, repoPath: string) => {
+    const accountId = await requirePresenceAdmin(repoPath)
+    assertPresenceAccount(accountId)
+    return firebasePresenceService.load(repoPath)
+  })
+  handle(CHANNELS.PRESENCE_CONFIG_SAVE, async (_event, repoPath: string, config: FirebasePresenceConfig) => {
+    const accountId = await requirePresenceAdmin(repoPath)
+    assertPresenceAccount(accountId)
+    const normalized = validateFirebaseConfig(config)
+    // Finish writes for the old connection before replacing its routing.
+    presenceSession?.stop()
+    try {
+      await firebasePresenceService.drain()
+      assertPresenceAccount(accountId)
+      await requirePresenceAdmin(repoPath)
+      assertPresenceAccount(accountId)
+      firebasePresenceService.save(repoPath, normalized)
+    } finally {
+      // A failed save must not leave the previously working session stopped.
+      if (authService.listAccounts().currentAccountId === accountId) presenceSession?.start(repoPath)
+    }
+  })
+  handle(CHANNELS.PRESENCE_CONFIG_TEST, async (_event, repoPath: string, config: FirebasePresenceConfig) => {
+    const accountId = await requirePresenceAdmin(repoPath)
+    assertPresenceAccount(accountId)
+    return firebasePresenceService.test(config)
+  })
+
+  let presenceSession: PresenceSession | null = null
+  const startPresenceTracking = () => {
+    if (presenceSession) return presenceSession
+    const session = new PresenceSession(
+      () => {
+        const { accounts, currentAccountId } = authService.listAccounts()
+        return accounts.find(a => a.userId === currentAccountId) ?? null
+      },
+      () => powerMonitor.getSystemIdleState(300),
+      (repoPath, login, entry) => {
+        const config = firebasePresenceService.load(repoPath)
+        if (config?.enabled) {
+          void firebasePresenceService.publish(repoPath, entry).catch(() => {})
+        } else presenceService.update(repoPath, login, entry)
+      },
+    )
+    const tickPresence = () => { try { session.tick() } catch { /* Retry on the next heartbeat. */ } }
+    const heartbeat = setInterval(tickPresence, 30_000)
+    powerMonitor.on('lock-screen', () => { session.setLocked(true); tickPresence() })
+    powerMonitor.on('unlock-screen', () => { session.setLocked(false); tickPresence() })
+    powerMonitor.on('suspend', () => { session.setLocked(true); tickPresence() })
+    powerMonitor.on('resume', () => { session.setLocked(false); tickPresence() })
+    let exiting = false
+    app.on('before-quit', event => {
+      if (exiting) return
+      exiting = true
+      clearInterval(heartbeat)
+      try { session.stop() } catch { /* Expiration handles failed final writes. */ }
+      event.preventDefault()
+      // Offline is best effort; never hold application exit on a lost network.
+      void Promise.race([firebasePresenceService.drain(), new Promise(resolve => setTimeout(resolve, 2_000))])
+        .finally(() => app.quit())
+    })
+    presenceSession = session
+    return session
+  }
+  handle(CHANNELS.PRESENCE_UPDATE, (_event, repoPath: string, _login: string, _entry: PresenceEntry) => {
+    if (!repoPath) { presenceSession?.stop(); return }
+    startPresenceTracking().start(repoPath)
+  })
 
   // ── Lock Heatmap & Conflict Forecasting — Phase 19 ───────────────────────
   handle(CHANNELS.HEATMAP_COMPUTE, (_event, repoPath: string, timeWindowDays: number, groupBy: 'folder' | 'type') =>
@@ -1156,6 +1247,7 @@ export function registerHandlers(): void {
   handle(CHANNELS.LOG_GET_TEXT, () =>
     logService.getFormattedText()
   )
+  handle(CHANNELS.LOG_CLEAR, () => logService.clear())
 
   handle(CHANNELS.LOG_GET_SUGGESTION, () =>
     logService.getSuggestion()

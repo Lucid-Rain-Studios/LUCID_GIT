@@ -10,7 +10,7 @@ test.afterAll(cleanup)
 test('LG-032 unsigned users can open local repositories and clone without clearing the active checkout', async () => {
   const opened = [], repo = { repoPath: null, recentRepos: [], openRepo: async p => opened.push(p), error: null }
   const harness = component('src/components/layout/AppShell.tsx', {
-    '@/stores/repoStore': { useRepoStore: store(repo) }, '@/stores/authStore': { useAuthStore: store({ accounts: [], currentAccountId: null }) },
+    '@/stores/repoStore': { useRepoStore: store(repo) }, '@/stores/authStore': { useAuthStore: store({ accounts: [], currentAccountId: null, isAdmin: () => false }) },
     '@/stores/operationStore': { useOperationStore: store({}) }, '@/stores/conflictStore': { useConflictStore: store({}) }, '@/stores/lockStore': { useLockStore: store({}) },
     '@/stores/notificationStore': { useNotificationStore: store({ notifications: [] }) }, '@/stores/statusToastStore': { useStatusToastStore: store({}) },
     '@/stores/forecastStore': { useForecastStore: store({ conflicts: [] }) }, '@/lib/useAutoFetch': { useAutoFetch: noop },

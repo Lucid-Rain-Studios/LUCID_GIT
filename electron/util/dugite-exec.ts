@@ -461,9 +461,10 @@ export async function execWithStdin(
   args: string[],
   repoPath: string,
   stdin: string,
+  environment: Record<string, string> = {},
 ): Promise<{ stdout: string; stderr: string }> {
   const result = await trackGitOp(repoPath, () => GitProcess.exec(args, repoPath, {
-    env: { ...process.env, ...GIT_BASE_ENV },
+    env: { ...process.env, ...GIT_BASE_ENV, ...environment },
     processCallback: child => registerGitProcess(child, args, repoPath),
     stdin,
     stdinEncoding: 'utf8',
@@ -631,10 +632,11 @@ export function gitAuthArgs(token: string | null, remoteUrl?: string | null): st
 
 export async function execSafe(
   args: string[],
-  repoPath: string
+  repoPath: string,
+  environment: Record<string, string> = {}
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const result = await trackGitOp(repoPath, () => GitProcess.exec(args, repoPath, {
-    env: { ...process.env, ...GIT_BASE_ENV },
+    env: { ...process.env, ...GIT_BASE_ENV, ...environment },
     processCallback: child => registerGitProcess(child, args, repoPath),
   }))
   return {

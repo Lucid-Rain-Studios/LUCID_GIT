@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { BrowserWindow } from 'electron'
-import { exec, execWithStdin, gitAuthArgs } from '../util/dugite-exec'
+import { exec, execWithStdin, gitAuthArgs, withGitTimeout } from '../util/dugite-exec'
 import { authService } from './AuthService'
 import { CHANNELS } from '../ipc/channels'
 import type { Lock, OperationStep } from '../types'
@@ -82,6 +82,7 @@ class LockService {
   // ── Core LFS commands ───────────────────────────────────────────────────────
 
   private authoritative = new Map<string, { locks: Lock[]; at: number; accountId: string | null }>()
+  private pendingLists = new Map<string, { accountId: string | null; promise: Promise<Lock[]> }>()
 
   async assertStageAllowed(repoPath: string, paths: string[]): Promise<void> {
     if (!paths.length) return
@@ -100,7 +101,21 @@ class LockService {
   }
 
   async listLocks(repoPath: string): Promise<Lock[]> {
-    return this.withLfsLock(repoPath, () => this.listLocksUnguarded(repoPath))
+    const accountId = authService.listAccounts().currentAccountId
+    const pending = this.pendingLists.get(repoPath)
+    if (pending && pending.accountId === accountId) return pending.promise
+    // The deadline belongs to the listing, not time spent waiting for an
+    // existing LFS operation. Share refreshes without reusing stale results.
+    const promise = this.withLfsLock(repoPath, () => withGitTimeout(
+      () => this.listLocksUnguarded(repoPath), 30_000, 'lock:list',
+    ))
+    const entry = { accountId, promise }
+    this.pendingLists.set(repoPath, entry)
+    try {
+      return await promise
+    } finally {
+      if (this.pendingLists.get(repoPath) === entry) this.pendingLists.delete(repoPath)
+    }
   }
 
   private async listLocksUnguarded(repoPath: string): Promise<Lock[]> {

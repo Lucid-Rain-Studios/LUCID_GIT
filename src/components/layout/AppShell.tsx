@@ -181,6 +181,23 @@ export function AppShell() {
     return () => { cancelled = true }
   }, [repoPath])
   const { loadAccounts, accounts, currentAccountId } = useAuthStore()
+  const canViewTeam = useAuthStore(s => !!repoPath && s.isAdmin(repoPath))
+  useEffect(() => {
+    if (leftTab === 'presence' && !canViewTeam) setLeftTab('dashboard')
+  }, [leftTab, canViewTeam])
+
+  // Publish activity independently of the selected tab and repository role.
+  useEffect(() => {
+    const account = accounts.find(a => a.userId === currentAccountId)
+    if (!repoPath || !account) return
+    const entry = {
+      login: account.login, name: account.name, branch: '', modifiedCount: 0,
+      modifiedFiles: [], lastSeen: new Date().toISOString(),
+    }
+    void ipc.presenceUpdate(repoPath, account.login, entry).catch(() => {})
+    return () => { void ipc.presenceUpdate('', account.login, entry).catch(() => {}) }
+  }, [repoPath, currentAccountId, accounts])
+
   const { loadLocks, setLocks } = useLockStore()
 
   const { notifications, push: pushNotification, resolveRequest, clearResolveRequest } = useNotificationStore()
@@ -653,10 +670,10 @@ export function AppShell() {
             <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
               <RepoMapPanel repoPath={repoPath} />
             </PanelErrorBoundary>
-          ) : leftTab === 'presence' ? (
+          ) : leftTab === 'presence' && canViewTeam ? (
             /* ── Team Presence — full width ── */
             <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
-              <PresencePanel repoPath={repoPath} />
+              <PresencePanel repoPath={repoPath} onConfigure={() => { setSettingsSection('presence'); setLeftTab('settings') }} />
             </PanelErrorBoundary>
           ) : leftTab === 'activity' ? (
             /* ── Activity feed — full width ── */

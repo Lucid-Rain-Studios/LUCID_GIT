@@ -636,7 +636,7 @@ class GitService {
   }
 
   /** Push current branch to its upstream. Streams progress and returns the pre-push metadata. */
-  async push(repoPath: string, onProgress?: ProgressCallback): Promise<{ branch: string; filesAhead: string[] }> {
+  async push(repoPath: string, onProgress?: ProgressCallback, force = false): Promise<{ branch: string; filesAhead: string[] }> {
     // These lookups are independent. Keeping them here means the push handler does
     // not repeat branch/upstream discovery before starting the real operation.
     const [token, remoteUrl, branch, upstreamRes] = await Promise.all([
@@ -661,6 +661,7 @@ class GitService {
     const pushArgs = upstreamRes.exitCode !== 0
       ? [...gitAuthArgs(token, remoteUrl), 'push', '--progress', '--set-upstream', 'origin', branch]
       : [...gitAuthArgs(token, remoteUrl), 'push', '--progress']
+    if (force) pushArgs.push('--force-with-lease')
 
     onProgress?.({ id: 'push-connect', label: 'Connecting to remote', status: 'running', progress: 12 })
     // Push is idempotent, so replaying a partially-completed push is safe.

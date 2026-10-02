@@ -3,6 +3,7 @@ import { GeneralSettings } from './GeneralSettings'
 import { AppearanceSettings } from './AppearanceSettings'
 import { NotificationSettings } from './NotificationSettings'
 import { WebhookPanel } from './WebhookPanel'
+import { FirebasePresenceSettings } from './FirebasePresenceSettings'
 import { TeamConfigPanel } from './TeamConfigPanel'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -11,13 +12,14 @@ interface SettingsPageProps {
   repoPath: string | null
 }
 
-type SettingsTab = 'general' | 'appearance' | 'notifications' | 'discord' | 'team'
+type SettingsTab = 'general' | 'appearance' | 'notifications' | 'discord' | 'team' | 'presence'
 
 const ALL_TABS: { id: SettingsTab; label: string; requiresRepo?: boolean; adminOnly?: boolean }[] = [
   { id: 'general',       label: 'General' },
   { id: 'appearance',    label: 'Appearance' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'discord',       label: 'Discord',     requiresRepo: true, adminOnly: true },
+  { id: 'presence', label: 'Team presence', requiresRepo: true, adminOnly: true },
   { id: 'team',          label: 'Team config', requiresRepo: true, adminOnly: true },
 ]
 
@@ -29,7 +31,7 @@ export function SettingsPage({ repoPath, initialSection }: SettingsPageProps) {
   }, [initialSection])
   const isAdmin = useAuthStore(s => s.isAdmin(repoPath ?? ''))
 
-  const tabs = ALL_TABS.filter(t => !t.requiresRepo || !!repoPath)
+  const tabs = ALL_TABS.filter(t => (!t.requiresRepo || !!repoPath) && (t.id !== 'presence' || isAdmin))
   const activeTab = tabs.find(t => t.id === tab) ? tab : 'general'
   const activeTabDef = tabs.find(t => t.id === activeTab)
   const showAdminBanner = activeTabDef?.adminOnly && !isAdmin && !!repoPath
@@ -67,6 +69,7 @@ export function SettingsPage({ repoPath, initialSection }: SettingsPageProps) {
         {activeTab === 'general'       && <GeneralSettings />}
         {activeTab === 'notifications' && <NotificationSettings />}
         {activeTab === 'discord'       && repoPath && <WebhookPanel repoPath={repoPath} />}
+        {activeTab === 'presence' && repoPath && isAdmin && <FirebasePresenceSettings repoPath={repoPath} />}
         {activeTab === 'team'          && repoPath && <TeamConfigPanel repoPath={repoPath} />}
       </div>
     </div>

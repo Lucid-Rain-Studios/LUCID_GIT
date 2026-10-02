@@ -43,7 +43,6 @@ const NAV_GROUPS: NavGroup[] = [
     key: 'tools', label: 'Tools',
     items: [
       { id: 'tools',    label: 'Tools',            Icon: ToolsIcon },
-      { id: 'presence', label: 'Team',             Icon: PresenceIcon },
       { id: 'activity', label: 'Activity',         Icon: ActivityIcon },
       { id: 'locks',    label: 'Locked Files',     Icon: LocksIcon },
       { id: 'content',  label: 'Content Browser',  Icon: ContentBrowserIcon },
@@ -56,6 +55,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     key: 'admin', label: 'Admin', adminOnly: true,
     items: [
+      { id: 'presence', label: 'Team', Icon: PresenceIcon },
       { id: 'overview',  label: 'Overview',  Icon: OverviewIcon },
       { id: 'changelog', label: 'Changelog', Icon: ChangelogIcon },
       { id: 'lfs',       label: 'LFS',       Icon: LFSIcon },
@@ -72,7 +72,7 @@ const VISIBILITY_KEY  = 'lucid-git:sidebar-visibility'
 const VISIBILITY_DEFAULTS: Record<string, string[]> = {
   workspace: ['dashboard', 'timeline', 'branches'],
   tools:     ['tools', 'activity', 'locks', 'content', 'logs'],
-  admin:     ['overview', 'changelog', 'lfs', 'cleanup', 'unreal', 'hooks'],
+  admin:     ['presence', 'overview', 'changelog', 'lfs', 'cleanup', 'unreal', 'hooks'],
 }
 
 function parseGitHubSlug(url: string): string | null {
@@ -90,6 +90,11 @@ function loadCollapsed(): Record<string, boolean> {
 function loadVisibility(): Record<string, string[]> {
   try {
     const stored = JSON.parse(localStorage.getItem(VISIBILITY_KEY) ?? '{}') as Record<string, string[]>
+    // Migrate Team's old location while preserving other visibility choices.
+    if (stored.tools?.includes('presence')) {
+      if (Array.isArray(stored.admin) && !stored.admin.includes('presence')) stored.admin.push('presence')
+      stored.tools = stored.tools.filter(id => id !== 'presence')
+    }
     const result: Record<string, string[]> = {}
     for (const key of Object.keys(VISIBILITY_DEFAULTS)) {
       if (!Array.isArray(stored[key])) {

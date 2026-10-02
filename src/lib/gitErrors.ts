@@ -1,4 +1,4 @@
-// Git error parsing library — 20 error codes
+// Git error parsing library.
 // Each error is matched from raw git stderr output.
 
 export type ErrorSeverity = 'warning' | 'error' | 'fatal'
@@ -50,6 +50,29 @@ interface ErrorDef {
 }
 
 const DEFS: ErrorDef[] = [
+  {
+    code: 'SHARED_INDEX_UNREADABLE',
+    test: /sharedindex\.[0-9a-f]+[^\r\n]*:\s*(?:index file (?:open failed|smaller than expected)|unable to map index file)|broken index, expect [^\r\n]*sharedindex\./i,
+    title: 'Git cannot read the shared staging index',
+    description: 'This repository uses a split index whose shared data is missing, damaged or inaccessible. Open Tools → Index Recovery and click Diagnose to check whether a backed-up rebuild is possible.',
+    causes: ['Missing or damaged sharedindex data', 'File access or storage problems affecting the shared index'],
+    fixes: [{ label: 'Open Tools → Index Recovery. Diagnose checks the cause and enables a reversible repair when safe. Existing sharedindex files are preserved.' }],
+    severity: 'fatal',
+    canAutoFix: false,
+  },
+  {
+    code: 'INDEX_UNREADABLE',
+    // Match staging-index diagnostics, not generic "bad signature", pack .idx
+    // failures, permission errors or index.lock contention.
+    test: /index file corrupt|index file smaller than expected|bad index version \d+|bad index file (?:sha1 |sha256 )?signature|unknown index entry format|index uses [^\r\n]*extension, which we do not understand/i,
+    title: 'Git cannot read the repository index',
+    description: 'The staging index is corrupt or uses an extension this Git version cannot read. Restarting or clearing the lock cache will not rebuild it. Open Tools → Index Recovery and click Diagnose for a backed-up, verified repair.',
+    causes: ['Damaged index data', 'An index extension unsupported by the Git version running this operation'],
+    fixes: [{ label: 'Open Tools → Index Recovery, then Diagnose. Review the detected issue and click Back up and repair. Undo is available while the repaired staging state and HEAD remain unchanged.' }],
+    docsUrl: 'https://git-scm.com/docs/git-reset',
+    severity: 'fatal',
+    canAutoFix: false,
+  },
   {
     // Git 2.35.2+ refuses a repository whose folder belongs to another user.
     // Studios hit this constantly — project drives, network shares, a clone

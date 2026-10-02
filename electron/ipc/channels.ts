@@ -11,6 +11,9 @@ export const CHANNELS = {
   GIT_IS_REPO:       'git:is-repo',
   GIT_CLONE:         'git:clone',
   GIT_STATUS:        'git:status',
+  GIT_INDEX_DIAGNOSE: 'git:index-diagnose',
+  GIT_INDEX_REPAIR:   'git:index-repair',
+  GIT_INDEX_UNDO:     'git:index-undo',
   GIT_CURRENT_BRANCH:'git:current-branch',
   GIT_STAGE:         'git:stage',
   GIT_UNSTAGE:       'git:unstage',
@@ -172,6 +175,9 @@ export const CHANNELS = {
   ASSET_EXTRACT_METADATA:  'asset:extract-metadata',
 
   // Presence
+  PRESENCE_CONFIG_LOAD: 'presence:config-load',
+  PRESENCE_CONFIG_SAVE: 'presence:config-save',
+  PRESENCE_CONFIG_TEST: 'presence:config-test',
   PRESENCE_READ:   'presence:read',
   PRESENCE_UPDATE: 'presence:update',
 
@@ -235,6 +241,7 @@ export const CHANNELS = {
 
   // Bug logs
   LOG_GET_TEXT:      'log:get-text',
+  LOG_CLEAR:         'log:clear',
   LOG_GET_SUGGESTION:'log:get-suggestion',
   LOG_SAVE_DIALOG:   'log:save-dialog',
   LOG_RENDERER_EVENT:'log:renderer-event',

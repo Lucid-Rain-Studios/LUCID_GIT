@@ -393,6 +393,7 @@ export interface BranchDiffSummary {
 }
 
 export interface PresenceEntry {
+  status?: 'active' | 'away' | 'offline'
   login: string
   name: string
   branch: string
@@ -402,7 +403,25 @@ export interface PresenceEntry {
   lastPush?: string  // ISO
 }
 
+
+export interface FirebasePresenceConfig {
+  enabled: boolean
+  apiKey: string
+  authDomain: string
+  projectId: string
+  databaseURL: string
+  workspaceId: string
+}
+
+export interface FirebasePresenceTest {
+  uid: string
+  canRead: boolean
+  canPublish: boolean
+  message: string
+}
+
 export interface PresenceFile {
+  source?: 'local' | 'firebase'
   version: number
   entries: Record<string, PresenceEntry>
 }

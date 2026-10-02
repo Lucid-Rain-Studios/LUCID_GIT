@@ -171,10 +171,21 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
     return () => { unsubAvail(); unsubReady(); unsubError() }
   }, [])
 
-  const doPush = async () => {
+  const doPush = async (force = false) => {
     if (!repoPath || syncOp !== 'idle') return
+    if (force) {
+      const approved = await useDialogStore.getState().confirm({
+        title: 'Force push?',
+        message: `Replace the remote history of ${currentBranch} with your local branch?`,
+        detail: 'This can remove commits from the remote branch. Force with lease will reject the push if the remote has changed since your last fetch.',
+        confirmLabel: 'Force push',
+        danger: true,
+      })
+      const current = useRepoStore.getState()
+      if (!approved || current.repoPath !== repoPath || current.currentBranch !== currentBranch) return
+    }
     setSyncOp('pushing'); setSyncErr(null)
-    try { await opRun('Pushing…', () => ipc.push(repoPath)); await refreshRevisionState(); showStatusToast('Push successful.') }
+    try { await opRun(force ? 'Force pushing…' : 'Pushing…', () => ipc.push(repoPath, force)); await refreshRevisionState(); showStatusToast('Push successful.') }
     catch (e) {
       const s = String(e)
       if (s.toLowerCase().includes('everything up-to-date') || s.toLowerCase().includes('up to date')) {
@@ -387,22 +398,8 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
 
   const currentAccount = accounts.find(a => a.userId === currentAccountId)
 
-  const [branchPresence, setBranchPresence] = useState<Record<string, PresenceEntry[]>>({})
-
-  useEffect(() => {
-    if (!branchMenuOpen || !repoPath) return
-    ipc.presenceRead(repoPath).then(file => {
-      const cutoff = Date.now() - 30 * 60 * 1000
-      const byBranch: Record<string, PresenceEntry[]> = {}
-      Object.values(file.entries)
-        .filter(e => new Date(e.lastSeen).getTime() > cutoff)
-        .forEach(e => {
-          if (!byBranch[e.branch]) byBranch[e.branch] = []
-          byBranch[e.branch].push(e)
-        })
-      setBranchPresence(byBranch)
-    }).catch(() => {})
-  }, [branchMenuOpen, repoPath])
+  // Presence is private to the Admin Team view.
+  const branchPresence: Record<string, PresenceEntry[]> = {}
 
   const showBanner = !updateDismissed && (updateReady || !!updateInfo)
   const [permWarnDismissed, setPermWarnDismissed] = useState(false)
@@ -750,6 +747,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
 
               <FlowArrow />
 
+              <PushDropdown disabled={!isIdle || updatingFromMain} onForcePush={() => doPush(true)} contextKey={`${repoPath}:${currentBranch}`}>
               <SyncBtn
                 label={pushButtonLabel(busyState, hasUpstream)}
                 icon={<ArrowUp />}
@@ -759,8 +757,9 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
                 error={false}
                 disabled={!canPushNow}
                 disabledReason={pushReason}
-                onClick={doPush}
+                onClick={() => doPush()}
               />
+              </PushDropdown>
 
               <FlowArrow />
 
@@ -1313,6 +1312,50 @@ function MergeDownIcon({ color = 'currentColor' }: { color?: string }) {
 // ── Small inline components ─────────────────────────────────────────────────────
 
 // ── Sync button (Fetch & Pull / Push) ─────────────────────────────────────────
+
+function PushDropdown({ children, disabled, onForcePush, contextKey }: {
+  children: React.ReactNode; disabled: boolean; onForcePush: () => void; contextKey: string
+}) {
+  const [open, setOpen] = useState(false)
+  const menuRef = React.useRef<HTMLDivElement>(null)
+  const triggerRef = React.useRef<HTMLButtonElement>(null)
+  const itemRef = React.useRef<HTMLButtonElement>(null)
+  useEffect(() => { setOpen(false) }, [contextKey, disabled])
+  useEffect(() => {
+    if (!open) return
+    itemRef.current?.focus()
+    const dismiss = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', dismiss)
+    return () => document.removeEventListener('mousedown', dismiss)
+  }, [open])
+  return (
+    <div ref={menuRef} style={{ position: 'relative', display: 'flex', gap: 2 }}
+      onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false) }}
+      onKeyDown={event => {
+        if (event.key === 'Escape') { setOpen(false); triggerRef.current?.focus() }
+        if (event.key === 'ArrowDown' && !disabled) { event.preventDefault(); setOpen(true); itemRef.current?.focus() }
+      }}>
+      {children}
+      <button ref={triggerRef} className="lg-toolbar-control" aria-label="Push options"
+        aria-haspopup="menu" aria-expanded={open} disabled={disabled}
+        onClick={() => setOpen(value => !value)}
+        style={{ height: 28, width: 23, borderRadius: 5, border: '1px solid var(--lg-border)', background: 'transparent', color: 'var(--lg-text-primary)', cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1 }}>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="m2 3.5 3 3 3-3" stroke="currentColor" strokeWidth="1.4" /></svg>
+      </button>
+      {open && !disabled && (
+        <div role="menu" aria-label="Push options" style={{ position: 'absolute', top: 33, right: 0, zIndex: 100, minWidth: 150, padding: 4, borderRadius: 6, border: '1px solid var(--lg-border)', background: 'var(--lg-bg-secondary)', boxShadow: '0 8px 24px #0006' }}>
+          <button ref={itemRef} role="menuitem" className="lg-toolbar-control"
+            onClick={() => { setOpen(false); triggerRef.current?.focus(); onForcePush() }}
+            style={{ width: '100%', padding: '8px 10px', textAlign: 'left', border: 0, borderRadius: 4, background: 'transparent', color: '#e84040', fontSize: 12.5, cursor: 'pointer' }}>
+            Force push…
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
 
 function SyncBtn({
   label, icon, count, countColor, active, error, disabled, disabledReason, onClick,

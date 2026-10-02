@@ -200,6 +200,28 @@ class LogService {
 
   // ── Formatted output ──────────────────────────────────────────────────────────
 
+  async clear(): Promise<void> {
+    if (!this.storePath || !this.current) throw new Error('Logging is not initialized')
+    if (this.flushTimer) clearTimeout(this.flushTimer)
+    this.flushTimer = null
+    const past = this.pastSessions
+    const entries = this.current.entries
+    this.pastSessions = []
+    this.current.entries = []
+    const file = this.storePath
+    const snapshot: LogStore = { sessions: [{ ...this.current, entries: [] }] }
+    const write = this.writes.then(() => writeJsonAsync(file, snapshot))
+    this.writes = write.catch(() => {})
+    try {
+      await write
+    } catch (error) {
+      this.pastSessions = past
+      this.current.entries = [...entries, ...this.current.entries]
+      this.schedulePersist()
+      throw error
+    }
+  }
+
   getFormattedText(): string {
     const all: LogSession[] = [...this.pastSessions]
     if (this.current) all.push(this.current)

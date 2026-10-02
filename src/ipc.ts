@@ -1,4 +1,6 @@
 // Typed wrappers around window.lucidGit.*
+import type { IndexDiagnosis, IndexRepairResult } from '../electron/indexRecoveryTypes'
+export type { IndexDiagnosis, IndexRepairResult } from '../electron/indexRecoveryTypes'
 // This file is the single source of truth for the renderer-side IPC contract.
 
 // ── Domain types ─────────────────────────────────────────────────────────────
@@ -489,6 +491,7 @@ export interface BranchHealthReport {
 }
 
 export interface PresenceEntry {
+  status?: 'active' | 'away' | 'offline'
   login: string
   name: string
   branch: string
@@ -498,7 +501,25 @@ export interface PresenceEntry {
   lastPush?: string
 }
 
+
+export interface FirebasePresenceConfig {
+  enabled: boolean
+  apiKey: string
+  authDomain: string
+  projectId: string
+  databaseURL: string
+  workspaceId: string
+}
+
+export interface FirebasePresenceTest {
+  uid: string
+  canRead: boolean
+  canPublish: boolean
+  message: string
+}
+
 export interface PresenceFile {
+  source?: 'local' | 'firebase'
   version: number
   entries: Record<string, PresenceEntry>
 }
@@ -682,11 +703,14 @@ export interface LucidGitAPI {
   isRepo: (repoPath: string) => Promise<boolean>
   clone: (args: { url: string; dir: string; depth?: number }) => Promise<void>
   status: (repoPath: string) => Promise<FileStatus[]>
+  diagnoseIndex: (repoPath: string) => Promise<IndexDiagnosis>
+  repairIndex: (repoPath: string, token: string) => Promise<IndexRepairResult>
+  undoIndexRepair: (repoPath: string, id: string) => Promise<void>
   currentBranch: (repoPath: string) => Promise<string>
   stage: (repoPath: string, paths: string[]) => Promise<void>
   unstage: (repoPath: string, paths: string[]) => Promise<void>
   commit: (repoPath: string, message: string, noVerify?: boolean) => Promise<void>
-  push: (repoPath: string) => Promise<void>
+  push: (repoPath: string, force?: boolean) => Promise<void>
   pull: (repoPath: string) => Promise<void>
   fetch: (repoPath: string, background?: boolean) => Promise<void>
   log: (repoPath: string, args?: { limit?: number; all?: boolean; filePath?: string; refs?: string[] }) => Promise<CommitEntry[]>
@@ -866,6 +890,9 @@ export interface LucidGitAPI {
   unwatchStatusChanges: (repoPath: string) => Promise<void>
 
   // Presence
+  presenceConfigLoad: (repoPath: string) => Promise<FirebasePresenceConfig | null>
+  presenceConfigSave: (repoPath: string, config: FirebasePresenceConfig) => Promise<void>
+  presenceConfigTest: (repoPath: string, config: FirebasePresenceConfig) => Promise<FirebasePresenceTest>
   presenceRead: (repoPath: string) => Promise<PresenceFile>
   presenceUpdate: (repoPath: string, login: string, entry: PresenceEntry) => Promise<void>
 
@@ -913,6 +940,7 @@ export interface LucidGitAPI {
 
   // Bug logs
   logGetText: () => Promise<string>
+  logClear: () => Promise<void>
   logGetSuggestion: () => Promise<string | null>
   logSaveDialog: () => Promise<string | null>
   logRendererEvent: (source: string, message: string, detail?: unknown) => Promise<void>
