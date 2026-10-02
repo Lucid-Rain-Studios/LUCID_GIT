@@ -13,3 +13,4 @@ Thumbs.db
 
 # Playwright run output
 test-results/
+/audit
