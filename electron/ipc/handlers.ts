@@ -246,7 +246,7 @@ export function registerHandlers(): void {
     await undoService.recordCheckpoint(repoPath, op, label)
     try {
       const result = await fn()
-      undoService.markAvailable(repoPath)
+      await undoService.markAvailable(repoPath)
       return result
     } catch (error) {
       undoService.discard(repoPath)

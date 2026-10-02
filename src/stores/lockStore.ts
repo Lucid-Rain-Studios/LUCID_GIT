@@ -1,5 +1,9 @@
 import { create } from 'zustand'
+import { useRepoStore, repoSessionVersion } from './repoStore'
 import { ipc, Lock, type BulkUnlockResult, type UnlockTarget } from '@/ipc'
+
+let loadRequest = 0
+const active = (repoPath: string, session: number) => useRepoStore.getState().repoPath === repoPath && repoSessionVersion() === session
 
 function parseGitHubSlug(url: string): string | null {
   const ssh = url.match(/^git@github\.com:(.+?)\/(.+?)(?:\.git)?$/i)
@@ -29,9 +33,13 @@ export const useLockStore = create<LockState>((set, get) => ({
   error:     null,
 
   loadLocks: async (repoPath) => {
+    const session = repoSessionVersion()
+    if (!active(repoPath, session)) return
+    const request = ++loadRequest
     set({ isLoading: true, error: null })
     try {
       const locks = await ipc.listLocks(repoPath)
+      if (!active(repoPath, session) || request !== loadRequest) return
 
       // PR "ghost lock" overlay: all files in open PRs are treated as locked by a synthetic user.
       // This keeps ownership stable until the PR is resolved:
@@ -71,28 +79,33 @@ export const useLockStore = create<LockState>((set, get) => ({
         ...locks.filter(l => !ghostPaths.has(l.path.replace(/\\/g, '/'))),
         ...ghostLocks,
       ]
-      set({ locks: mergedLocks, isLoading: false })
+      if (active(repoPath, session) && request === loadRequest) set({ locks: mergedLocks, isLoading: false })
     } catch {
       // LFS may not be initialised — treat as empty, don't surface error
-      set({ locks: [], isLoading: false })
+      if (active(repoPath, session) && request === loadRequest) set({ locks: [], isLoading: false })
     }
   },
 
   lockFile: async (repoPath, filePath) => {
+    const session = repoSessionVersion()
+    if (!active(repoPath, session)) throw new Error('Repository changed. Retry the lock action in the active repository.')
     set({ error: null })
     try {
       // ipc.lockFile returns the created Lock — use it immediately, no second round-trip
       const lock = await ipc.lockFile(repoPath, filePath)
+      if (!active(repoPath, session)) return
       set(state => ({
         locks: [...state.locks.filter(l => l.path !== filePath), lock],
       }))
     } catch (e) {
-      set({ error: String(e) })
+      if (active(repoPath, session)) set({ error: String(e) })
       throw e
     }
   },
 
   unlockFile: async (repoPath, filePath, force, lockId) => {
+    const session = repoSessionVersion()
+    if (!active(repoPath, session)) throw new Error('Repository changed. Retry the unlock action in the active repository.')
     const normalizedPath = filePath.replace(/\\/g, '/')
     const resolvedLockId = lockId ?? get().locks.find(l => l.path.replace(/\\/g, '/') === normalizedPath)?.id
     set({ error: null })
@@ -107,12 +120,14 @@ export const useLockStore = create<LockState>((set, get) => ({
     } catch (e) {
       // Roll back on failure by reloading authoritative list
       const locks = await ipc.listLocks(repoPath).catch(() => [])
-      set({ locks, error: String(e) })
+      if (active(repoPath, session)) set({ locks, error: String(e) })
       throw e
     }
   },
 
   unlockFiles: async (repoPath, targets) => {
+    const session = repoSessionVersion()
+    if (!active(repoPath, session)) throw new Error('Repository changed. Retry the unlock action in the active repository.')
     const realTargets = targets.filter(target => !target.lockId?.startsWith('ghost-pr-'))
     if (realTargets.length === 0) return { unlocked: [], failed: [] }
 
@@ -125,7 +140,7 @@ export const useLockStore = create<LockState>((set, get) => ({
 
     try {
       const result = await ipc.unlockFiles(repoPath, realTargets)
-      if (result.failed.length > 0) {
+      if (active(repoPath, session) && result.failed.length > 0) {
         const failedPaths = new Set(result.failed.map(item => item.filePath.replace(/\\/g, '/')))
         const failedLocks = removedLocks.filter(lock => failedPaths.has(lock.path.replace(/\\/g, '/')))
         set(state => ({
@@ -135,7 +150,7 @@ export const useLockStore = create<LockState>((set, get) => ({
       }
       return result
     } catch (error) {
-      set(state => ({
+      if (active(repoPath, session)) set(state => ({
         locks: [...state.locks.filter(lock => !targetPaths.has(lock.path.replace(/\\/g, '/'))), ...removedLocks],
         error: String(error),
       }))
@@ -148,5 +163,5 @@ export const useLockStore = create<LockState>((set, get) => ({
   },
 
   setLocks:   (locks) => set({ locks }),
-  clearLocks: ()      => set({ locks: [], error: null }),
+  clearLocks: ()      => { loadRequest++; set({ locks: [], isLoading: false, error: null }) },
 }))

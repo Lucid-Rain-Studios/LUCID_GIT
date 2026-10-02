@@ -27,8 +27,7 @@ const MAX_CONCURRENT_READS = 4
 const PREEMPT_READS_AFTER_MS = 10_000
 
 /**
- * Hard ceiling on waiting for a slot, after which the operation takes one
- * regardless and says so.
+ * Hard ceiling on waiting for a slot. Failure never bypasses exclusivity.
  *
  * This is a safety valve, not a tuning knob. A gate that can block forever
  * turns any bookkeeping mistake into a permanently hung application, which is
@@ -86,7 +85,7 @@ function release(gate: RepoGate, kind: OperationKind): void {
 }
 
 /**
- * Hand slots to whoever may now run, in arrival order.
+ * Hand slots to the oldest writer first, otherwise to waiting reads.
  *
  * The slot is claimed here, as the waiter is woken, rather than by the waiter
  * once it resumes. Waking only resolves a promise, and its continuation does
@@ -98,8 +97,11 @@ function pump(key: string): void {
   const gate = gates.get(key)
   if (!gate) return
 
-  while (gate.waiting.length > 0 && canRun(gate, gate.waiting[0].kind)) {
-    const waiter = gate.waiting.shift()!
+  while (gate.waiting.length > 0) {
+    const writer = gate.waiting.findIndex(w => w.kind === 'write')
+    const next = writer === -1 ? 0 : writer
+    if (!canRun(gate, gate.waiting[next].kind)) break
+    const [waiter] = gate.waiting.splice(next, 1)
     claim(gate, waiter.kind)
     waiter.wake()
   }
@@ -116,20 +118,21 @@ function waitForSlot(
   repoPath: string,
   preemptReads?: (repoPath: string) => void,
 ): Promise<void> {
-  return new Promise<void>(resolve => {
+  return new Promise<void>((resolve, reject) => {
     let settled = false
     let preemptTimer: ReturnType<typeof setTimeout> | null = null
     let valveTimer: ReturnType<typeof setTimeout> | null = null
 
-    const finish = () => {
+    const finish = (error?: Error) => {
       if (settled) return
       settled = true
       if (preemptTimer) clearTimeout(preemptTimer)
       if (valveTimer) clearTimeout(valveTimer)
-      resolve()
+      if (error) reject(error)
+      else resolve()
     }
 
-    const waiter: Waiter = { kind, wake: finish }
+    const waiter: Waiter = { kind, wake: () => finish() }
     gate.waiting.push(waiter)
 
     if (kind === 'write' && preemptReads) {
@@ -144,13 +147,10 @@ function waitForSlot(
       if (at !== -1) gate.waiting.splice(at, 1)
       logService.warn(
         'git.gate',
-        `A ${kind} waited ${MAX_WAIT_FOR_SLOT_MS / 1000}s for ${repoPath} and is taking a slot anyway. `
-        + `That should not happen — the gate is miscounting.`,
+        `A ${kind} timed out waiting for the repository slot: ${repoPath}`,
       )
-      // Claimed even though the gate said no, so the release below stays
-      // symmetrical and the counters do not drift further.
-      claim(gate, kind)
-      finish()
+      finish(new Error(`Timed out waiting for repository ${kind} access. Retry after the current operation finishes.`))
+      pump(gateKey(repoPath))
     }, MAX_WAIT_FOR_SLOT_MS)
   })
 }

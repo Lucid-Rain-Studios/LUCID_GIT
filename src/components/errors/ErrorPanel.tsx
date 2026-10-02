@@ -36,6 +36,11 @@ export function ErrorPanel({ onReauth, onNavigateTab, onOpenMergeResolver }: Err
 
   const dispatch = async (action: FixAction) => {
     if (!repoPath) return
+    if (!['reauth', 'open-settings'].includes(action.type) &&
+        (!current?.repoPath || current.repoPath !== repoPath || useRepoStore.getState().repoPath !== current.repoPath)) {
+      setAutoFixResult('This error belongs to a different repository. Return to its repository before applying a fix.')
+      return
+    }
     setAutoFixBusy(true)
     setAutoFixResult(null)
     try {
@@ -186,6 +191,7 @@ export function ErrorPanel({ onReauth, onNavigateTab, onOpenMergeResolver }: Err
             <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: '#d6deef' }}>
               {current.description}
             </p>
+            {current.repoPath && <p style={{ margin: 0, fontSize: 11, color: '#aab4ca' }}>Repository: {current.repoPath}</p>}
 
             {/* Raw output — always visible so you never need Bug Logs */}
             <div>

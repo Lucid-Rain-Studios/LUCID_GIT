@@ -919,7 +919,7 @@ export interface LucidGitAPI {
 
   // Events: main → renderer — each returns an unsubscribe function
   onOperationProgress: (cb: (step: OperationStep) => void) => () => void
-  onLockChanged: (cb: (locks: Lock[]) => void) => () => void
+  onLockChanged: (cb: (event: { repoPath: string; locks: Lock[] }) => void) => () => void
   onNotification: (cb: (notification: AppNotification) => void) => () => void
   onUpdateAvailable: (cb: (info: UpdateInfo) => void) => () => void
   onStatusChanged: (cb: () => void) => () => void

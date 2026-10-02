@@ -23,6 +23,7 @@ export interface FixStep {
 }
 
 export interface LucidGitError {
+  repoPath?: string | null
   code: string
   gitMessage: string
   title: string

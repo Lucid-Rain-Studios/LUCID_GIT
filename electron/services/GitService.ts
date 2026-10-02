@@ -3,7 +3,7 @@ import Database from 'better-sqlite3'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { exec, execSafe, execWithProgress, execWithStdin, gitAuthArgs, gitOpActivity, waitForGitOpsToDrain, withGitTimeout, ProgressCallback } from '../util/dugite-exec'
+import { exec, execSafe, execWithProgress, execWithStdin, gitAuthArgs, withGitTimeout, ProgressCallback } from '../util/dugite-exec'
 import { authService } from './AuthService'
 import { logService } from './LogService'
 import { parseGitLog, GIT_LOG_FORMAT } from '../util/git-log-parse'
@@ -12,11 +12,6 @@ import { FileStatus, BranchInfo, CommitEntry, ChangelogEntry, ChangelogQuery, Di
 // Brief fallback delay for a genuinely concurrent repack. Persistent missing
 // indexes are repaired directly before this delay is considered.
 const STALE_PACK_RETRY_DELAY_MS = 2000
-
-// A .git/index.lock this old was left behind by a process that is no longer
-// writing — git removes its own lock within milliseconds of finishing. Matches
-// the threshold the cherry-pick conflict dialog uses for its manual prompt.
-const STALE_INDEX_LOCK_S = 5
 
 // Every Git LFS pointer opens with this line, and the spec caps the whole file
 // at 1 KB. Together they identify a pointer left on disk by a failed smudge
@@ -35,12 +30,6 @@ function assertWithinBudget(deadline: number, what: string): void {
     + `scan does not finish in the time the UI can wait for it.`
   )
 }
-
-// How long to let our own in-flight git processes finish before judging who
-// owns an index.lock. Long enough to cover a status refresh crawling under an
-// antivirus scan, short enough that a genuinely foreign lock still reports
-// quickly.
-const OUR_GIT_OPS_DRAIN_MS = 5000
 
 // ── Diff helpers ──────────────────────────────────────────────────────────────
 
@@ -899,16 +888,6 @@ class GitService {
     await execSafe(['lfs', 'uninstall', '--local'], repoPath)
     await execSafe(['lfs', 'install', '--local'], repoPath)
     await execSafe(['merge', '--abort'], repoPath)
-
-    const gitDirRes = await execSafe(['rev-parse', '--git-dir'], repoPath)
-    if (gitDirRes.exitCode !== 0) return
-    const gitDir = path.resolve(repoPath, gitDirRes.stdout.trim())
-    const lockPath = path.join(gitDir, 'index.lock')
-    try {
-      await fs.promises.rm(lockPath, { force: true })
-    } catch {
-      // best-effort cleanup
-    }
   }
 
   /** Fetch all remotes. Streams progress. */
@@ -1361,11 +1340,7 @@ class GitService {
     }
 
     if (lockCacheFailure || indexLockFailure) {
-      // A git or git-lfs subprocess that died mid-write leaves index.lock
-      // behind, and every later index write fails until it is removed. Only a
-      // lock old enough that nothing can still own it is cleared; a fresh one
-      // is left for the caller to surface, since removing it during a real
-      // write corrupts the index.
+      // Retry only if the lock is already gone. Its age cannot prove ownership.
       const removed = await this.clearStaleIndexLock(repoPath)
       return !indexLockFailure || removed
     }
@@ -1398,59 +1373,10 @@ class GitService {
     return /unable to create '.*index\.lock'.*file exists/is.test(message)
   }
 
-  /**
-   * Remove an orphaned `.git/index.lock`. Returns false — leaving the lock in
-   * place — when it may belong to a live writer, so callers surface the
-   * failure instead of racing it.
-   *
-   * Age alone is not enough to decide. A lock our own crashed git/git-lfs
-   * subprocess left one second ago is indistinguishable by age from one Unreal
-   * created one second ago, and inside an active flow (resolve conflict →
-   * `git add`) the orphan never gets a chance to age out — the user just loops
-   * on the same error, because the command that trips over the lock is never
-   * the command that created it. So ownership is the primary test: a lock
-   * whose mtime falls inside a window where one of our own git processes was
-   * running belongs to us, and once none of ours are in flight it is orphaned.
-   * Age remains the fallback for locks predating this app session.
-   */
+  /** Git index locks carry no owner PID. Age and overlapping app activity
+   * cannot prove ownership, so leave an existing lock for deliberate recovery. */
   private async clearStaleIndexLock(repoPath: string): Promise<boolean> {
-    // Snapshot before any further git command — `getIndexLockInfo` runs
-    // rev-parse, which would otherwise show up as one of our in-flight
-    // processes and as a run window of its own.
-    let ops = gitOpActivity(repoPath)
-
-    // Something of ours is still running, so the lock may be legitimately
-    // held by it. Give that work a moment to finish and look again: reporting
-    // an external writer while one of our own commands is mid-write is the
-    // wrong diagnosis, and the wait is bounded so a genuinely foreign lock
-    // still surfaces promptly.
-    if (ops.inFlight > 0) {
-      await waitForGitOpsToDrain(repoPath, OUR_GIT_OPS_DRAIN_MS)
-      ops = gitOpActivity(repoPath)
-    }
-
-    const info = await this.getIndexLockInfo(repoPath)
-    if (!info) return true            // nothing to clear; retry is unblocked
-
-    // Anything of ours still running means the lock may be legitimately held
-    // by that process — never touch it.
-    const ourProcessOrphaned = ops.inFlight === 0 && ops.ranDuring(info.mtimeMs)
-
-    const agedOut = info.ageSeconds >= STALE_INDEX_LOCK_S
-    if (!ourProcessOrphaned && !agedOut) return false
-
-    try {
-      await fs.promises.rm(info.path, { force: true })
-      logService.warn(
-        'git.index-lock-recovery',
-        ourProcessOrphaned
-          ? `Removed an index lock orphaned by our own git subprocess: ${info.path}`
-          : `Removed a stale ${info.ageSeconds}s-old index lock: ${info.path}`,
-      )
-      return true
-    } catch {
-      return false
-    }
+    return (await this.getIndexLockInfo(repoPath)) === null
   }
 
   private async authenticatedArgs(repoPath: string, args: string[]): Promise<string[]> {
@@ -1848,7 +1774,9 @@ class GitService {
           const stat = await fs.promises.lstat(fullPath)
           if (stat.isDirectory()) await fs.promises.rm(fullPath, { recursive: true, force: true })
           else await fs.promises.unlink(fullPath)
-        } catch { /* ignore */ }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        }
         processed++
         // Throttle: emit every 25 files (or on the final file) to avoid IPC flood on huge lists.
         if (processed === total || processed % 25 === 0) report(processed)
@@ -1862,8 +1790,8 @@ class GitService {
       const auth = await this.authenticatedArgs(repoPath, [])
       // Unstage first (no-op if not staged), then restore working tree.
       // Two passes — each pass covers `total` files, so the bar fills in halves.
-      await runInPathChunks(paths, c => execSafe([...auth, 'restore', '--staged', '--', ...c], repoPath), (p) => report(Math.floor(p / 2)))
-      await runInPathChunks(paths, c => execSafe([...auth, 'restore', '--', ...c], repoPath), (p) => report(Math.floor(total / 2) + Math.floor(p / 2)))
+      await runInPathChunks(paths, c => exec([...auth, 'restore', '--staged', '--', ...c], repoPath), (p) => report(Math.floor(p / 2)))
+      await runInPathChunks(paths, c => exec([...auth, 'restore', '--', ...c], repoPath), (p) => report(Math.floor(total / 2) + Math.floor(p / 2)))
     }
     report(total, 'done')
   }
@@ -2639,16 +2567,11 @@ ${lastError}` : '')
     }
   }
 
-  /**
-   * Remove a stale .git/index.lock. Caller must warn the user — deleting the
-   * lock while another git process is genuinely writing the index can corrupt
-   * the repo. Returns true if a lock was removed.
-   */
+  /** Refuse opaque locks whose owner cannot be proven absent. */
   async removeIndexLock(repoPath: string): Promise<boolean> {
     const info = await this.getIndexLockInfo(repoPath)
     if (!info) return false
-    await fs.promises.unlink(info.path)
-    return true
+    throw new Error('Cannot prove the owner of index.lock has stopped. Close other Git clients and verify no Git operation is running before manually removing ' + info.path)
   }
 
   /** Preserve the selected local or remote ref; never substitute another branch. */

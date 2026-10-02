@@ -86,10 +86,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const result = await ipc.pollDeviceFlow(deviceFlow.deviceCode)
       if (result) {
-        const { accounts } = await ipc.listAccounts()
+        const { accounts, currentAccountId } = await ipc.listAccounts()
         set({
           accounts,
-          currentAccountId: result.userId,
+          currentAccountId,
           deviceFlow:       null,
           isPolling:        false,
         })

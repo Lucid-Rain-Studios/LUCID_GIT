@@ -187,7 +187,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
         return
       }
       showStatusToast('Push failed.')
-      setSyncErr(s); pushErr(s)
+      setSyncErr(s); pushErr(s, repoPath)
     }
     finally { setSyncOp('idle') }
   }
@@ -257,7 +257,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
       } else {
         showStatusToast(`Update from ${defaultBranch} failed.`)
       }
-      pushErr(s)
+      pushErr(s, repoPath)
       if (inProgressBranch && onMergeConflict) {
         onMergeConflict(inProgressBranch)
       }
@@ -289,7 +289,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
     } catch (e) {
       const s = String(e)
       showStatusToast('Fetch failed.')
-      setSyncErr(s); pushErr(s)
+      setSyncErr(s); pushErr(s, repoPath)
     }
     finally { setSyncOp('idle') }
   }
@@ -346,7 +346,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
         return
       }
       showStatusToast('Pull failed.')
-      setSyncErr(s); pushErr(s)
+      setSyncErr(s); pushErr(s, repoPath)
     }
     finally { setSyncOp('idle') }
   }

@@ -2,8 +2,9 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import * as crypto from 'crypto'
-import { execSync } from 'child_process'
-import { execSafe } from '../util/dugite-exec'
+import { execBinary, gitAuthArgs } from '../util/dugite-exec'
+import { authService } from './AuthService'
+import { gitService } from './GitService'
 import { ueHeadlessService } from './UEHeadlessService'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -162,38 +163,26 @@ class AssetDiffService {
 
     // Git blob extraction
     const gitRef = ref === 'INDEX' ? `:${filePath}` : `${ref}:${filePath}`
-    const { exitCode, stdout } = await execSafe(['cat-file', '-p', gitRef], repoPath)
-
-    if (exitCode !== 0) return { blobPath: null, sizeBytes: 0 }
-
-    // LFS pointer? Attempt smudge.
-    if (stdout.startsWith(LFS_POINTER)) {
-      // Write pointer to a temp file, smudge it
-      const ptrFile = path.join(destDir, `${side}.lfsptr`)
+    let binary: Buffer
+    try {
+      binary = await execBinary(['cat-file', '-p', gitRef], repoPath)
+    } catch {
+      return { blobPath: null, sizeBytes: 0 }
+    }
+    if (binary.subarray(0, LFS_POINTER.length).toString() === LFS_POINTER) {
+      const pointer = binary.toString('utf8')
       try {
-        await fs.promises.writeFile(ptrFile, stdout, 'utf8')
-        // git lfs smudge reads from stdin; use execSafe to pipe
-          const binary = execSync(
-          `git lfs smudge -- "${filePath}"`,
-          { cwd: repoPath, input: stdout, maxBuffer: 256 * 1024 * 1024 }
-        ) as Buffer
-        await fs.promises.writeFile(destFile, binary)
-        await fs.promises.unlink(ptrFile).catch(() => {})
-        return { blobPath: destFile, sizeBytes: binary.length }
+        const [token, remoteUrl] = await Promise.all([
+          authService.getCurrentToken(), gitService.getRemoteUrl(repoPath),
+        ])
+        binary = await execBinary([...gitAuthArgs(token, remoteUrl), 'lfs', 'smudge', '--', filePath], repoPath, binary)
+        if (binary.subarray(0, LFS_POINTER.length).toString() === LFS_POINTER) throw new Error('LFS content unavailable')
       } catch {
-        // LFS server unavailable — return null but extract size from pointer
-        const sizeMatch = stdout.match(/size (\d+)/)
-        await fs.promises.unlink(ptrFile).catch(() => {})
+        const sizeMatch = pointer.match(/size (\d+)/)
         return { blobPath: null, sizeBytes: sizeMatch ? parseInt(sizeMatch[1]) : 0 }
       }
     }
-
-    // Plain binary blob
     try {
-      const binary = execSync(
-        `git cat-file -p ${gitRef}`,
-        { cwd: repoPath, maxBuffer: 256 * 1024 * 1024 }
-      ) as Buffer
       await fs.promises.writeFile(destFile, binary)
       return { blobPath: destFile, sizeBytes: binary.length }
     } catch {

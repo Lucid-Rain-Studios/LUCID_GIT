@@ -9,7 +9,6 @@ import { markFetchPerformed } from '@/lib/fetchState'
 import { ActionBtn } from '@/components/ui/ActionBtn'
 import { AppCheckbox } from '@/components/ui/AppCheckbox'
 
-type HookState = 'idle' | 'running' | 'passed' | 'failed'
 const drafts = new Map<string, { title: string; message: string }>()
 
 interface CommitBoxProps {
@@ -25,6 +24,7 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
   const [message, setMessage]           = useState(() => repoPath ? drafts.get(repoPath)?.message ?? '' : '')
   const [isCommitting, setIsCommitting] = useState(false)
   const [error, setError]               = useState<string | null>(null)
+  const [commitFailed, setCommitFailed] = useState(false)
 
   const [amend, setAmend]               = useState(false)
   const [lastMessage, setLastMessage]   = useState<string | null>(null)
@@ -33,9 +33,6 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
   const [originalMessage, setOriginalMessage] = useState(message)
 
   const pushError = useErrorStore(s => s.pushRaw)
-  const [hookState, setHookState]       = useState<HookState>('idle')
-  const [hookOutput, setHookOutput]     = useState('')
-  const [hookDuration, setHookDuration] = useState(0)
   const workflowBusy = useRef(false)
   const draftRepo = useRef(repoPath)
   const draft = useRef({ title: '', message: '' })
@@ -50,7 +47,7 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
       setOriginalMessage(next?.message ?? '')
       setAmend(false)
       setError(null)
-      setHookState('idle')
+      setCommitFailed(false)
       draftRepo.current = repoPath
     }
     return () => {
@@ -131,6 +128,7 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
     if (!repoPath) return
     setIsCommitting(true)
     setError(null)
+    setCommitFailed(false)
 
     try {
       const finalMessage = buildCommitMessage()
@@ -146,8 +144,6 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
       setOriginalTitle('')
       setOriginalMessage('')
       setAmend(false)
-      setHookState('idle')
-      setHookOutput('')
       await refreshStatus()
 
       // Keep upstream sync counts accurate for Pull/Push badges
@@ -156,8 +152,11 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
 
     } catch (e) {
       const s = String(e)
-      if (useRepoStore.getState().repoPath === repoPath) setError(s)
-      pushError(s)
+      if (useRepoStore.getState().repoPath === repoPath) {
+        setError(s)
+        setCommitFailed(true)
+      }
+      pushError(s, repoPath)
       // The failure may stem from files that changed on disk since the last
       // refresh — reconcile the list so stale rows don't linger.
       refreshStatus()
@@ -171,28 +170,14 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
     workflowBusy.current = true
     setIsCommitting(true)
 
-    // Run pre-commit hook inline first
-    setHookState('running')
-    setHookOutput('')
+    // Native Git owns hook ordering and validation.
     setError(null)
 
     try {
       await prepareDeferredStage()
-      const result = await ipc.hookRunPreCommit(repoPath)
-
-      if (!result.exists || result.exitCode === 0) {
-        setHookState(result.exists ? 'passed' : 'idle')
-        setHookDuration(result.durationMs)
-        // Hook passed (or no hook) — proceed with --no-verify to avoid double-run
-        await runCommit(result.exists)
-        if (result.exists) setHookState('idle')
-      } else {
-        setHookState('failed')
-        setHookOutput(result.output)
-        setHookDuration(result.durationMs)
-      }
+      // Git runs its complete native hook sequence once, including commit-msg.
+      await runCommit(false)
     } catch (e) {
-      setHookState('idle')
       setError(String(e))
       refreshStatus()
     } finally {
@@ -202,28 +187,21 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
   }
 
   const handleBypass = async () => {
-    if (workflowBusy.current || !canCommit) return
+    if (!canCommit || !repoPath || !commitFailed || workflowBusy.current) return
     workflowBusy.current = true
     setIsCommitting(true)
     try {
       const confirmed = await dialog.confirm({
-        title: 'Bypass pre-commit hook',
-        message: 'The hook reported a failure. Bypassing means it will not run.',
-        detail: 'Only proceed if you know the hook failure is not blocking.',
-        confirmLabel: 'Bypass & Commit',
-        danger: true,
+        title: 'Bypass commit hooks',
+        message: 'Retry the failed commit while skipping pre-commit and commit-msg checks?',
+        detail: 'This bypasses repository commit policy. Review the failure before continuing.',
+        confirmLabel: 'Bypass & Commit', danger: true,
       })
-      if (!confirmed) return
-      setHookState('idle')
-      setHookOutput('')
-      try {
-        await prepareDeferredStage()
-      } catch (e) {
-        setError(String(e))
-        refreshStatus()
-        return
-      }
+      if (!confirmed || useRepoStore.getState().repoPath !== repoPath) return
+      await prepareDeferredStage()
       await runCommit(true)
+    } catch (e) {
+      setError(String(e))
     } finally {
       workflowBusy.current = false
       setIsCommitting(false)
@@ -232,7 +210,6 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
 
   const commitLabel = (() => {
     if (isCommitting)            return amend ? 'Amending…' : 'Committing…'
-    if (hookState === 'running') return 'Running hook…'
     if (amend) {
       return selectedCount > 0
         ? `Amend (+${selectedCount} file${selectedCount !== 1 ? 's' : ''})`
@@ -321,44 +298,6 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
         className="w-full bg-lg-bg-primary border border-lg-border rounded px-2 py-1.5 text-xs font-mono text-lg-text-primary placeholder:text-lg-text-secondary resize-none focus:outline-none focus:border-lg-accent disabled:opacity-40 transition-colors"
       />
 
-      {hookState === 'running' && (
-        <div className="flex items-center gap-1.5 text-[10px] font-mono text-lg-text-secondary animate-pulse">
-          <span className="w-1.5 h-1.5 rounded-full bg-lg-accent-secondary animate-pulse" />
-          Running pre-commit hook…
-        </div>
-      )}
-
-      {hookState === 'passed' && (
-        <div className="text-[10px] font-mono text-lg-success">
-          ✓ Hook passed ({hookDuration}ms)
-        </div>
-      )}
-
-      {hookState === 'failed' && (
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-1.5 text-[10px] font-mono text-lg-error">
-            <span>✗ Pre-commit hook failed ({hookDuration}ms)</span>
-          </div>
-          {hookOutput && (
-            <pre className={cn(
-              'p-2 bg-lg-bg-primary border border-lg-error/40 rounded',
-              'text-[9px] font-mono text-lg-error/90 max-h-32 overflow-y-auto whitespace-pre-wrap'
-            )}>
-              {hookOutput}
-            </pre>
-          )}
-          <ActionBtn
-            onClick={handleBypass}
-            disabled={isCommitting}
-            color="#f5a832"
-            size="sm"
-            style={{ width: '100%', height: 24, fontSize: 10, fontFamily: 'var(--lg-font-mono)' }}
-          >
-            Bypass hook (confirm required)
-          </ActionBtn>
-        </div>
-      )}
-
       {error && (
         <div
           className="text-[10px] font-mono text-lg-error truncate"
@@ -368,17 +307,20 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
         </div>
       )}
 
-      {hookState !== 'failed' && (
-        <ActionBtn
-          onClick={handleCommit}
-          disabled={!canCommit || hookState === 'running'}
-          color={amend ? '#f5a832' : '#2dbd6e'}
-          size="sm"
-          style={{ width: '100%', height: 28, fontSize: 11, fontFamily: 'var(--lg-font-mono)', fontWeight: 600 }}
-        >
-          {commitLabel}
+      {commitFailed && (
+        <ActionBtn onClick={handleBypass} disabled={isCommitting} color="#f5a832" size="sm">
+          Bypass hooks & retry (confirm required)
         </ActionBtn>
       )}
+      <ActionBtn
+        onClick={handleCommit}
+        disabled={!canCommit}
+        color={amend ? '#f5a832' : '#2dbd6e'}
+        size="sm"
+        style={{ width: '100%', height: 28, fontSize: 11, fontFamily: 'var(--lg-font-mono)', fontWeight: 600 }}
+      >
+        {commitLabel}
+      </ActionBtn>
     </div>
   )
 }

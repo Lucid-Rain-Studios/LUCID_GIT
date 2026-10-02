@@ -271,7 +271,7 @@ class AuthService {
     const idx = data.accounts.findIndex(a => a.userId === userId)
     if (idx >= 0) data.accounts[idx] = meta
     else data.accounts.push(meta)
-    if (!data.currentAccountId) data.currentAccountId = userId
+    data.currentAccountId = userId
     writeData(data)
 
     this.scopeValidatedAt.set(userId, Date.now())

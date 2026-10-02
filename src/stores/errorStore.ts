@@ -6,7 +6,7 @@ interface ErrorState {
   current: LucidGitError | null
   history: LucidGitError[]
   push: (error: LucidGitError) => void
-  pushRaw: (raw: string) => void
+  pushRaw: (raw: string, repoPath?: string | null) => void
   dismiss: () => void
   clearHistory: () => void
 }
@@ -23,8 +23,8 @@ export const useErrorStore = create<ErrorState>((set) => ({
     }))
   },
 
-  pushRaw: (raw) => {
-    const err = parseGitErrorOrGeneric(raw)
+  pushRaw: (raw, repoPath = null) => {
+    const err = { ...parseGitErrorOrGeneric(raw), repoPath }
     logUiError('renderer.errorStore.raw', err.title, { raw, parsed: err })
     set((s) => ({
       current: err,

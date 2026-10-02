@@ -9,7 +9,7 @@ test('LG-012 migration requires confirmation and cancels without IPC', async () 
   const panel = component('src/components/errors/ErrorPanel.tsx', {
     '@/ipc': { ipc: { lfsMigrate: async (...args) => calls.push(args) } },
     '@/stores/repoStore': { useRepoStore: store({ repoPath: 'project', currentBranch: 'main' }) },
-    '@/stores/errorStore': { useErrorStore: store({ current: { severity: 'error', causes: [], fixes: [{}] }, history: [] }) },
+    '@/stores/errorStore': { useErrorStore: store({ current: { repoPath: 'project', severity: 'error', causes: [], fixes: [{}] }, history: [] }) },
     '@/stores/dialogStore': { useDialogStore: store({ confirm: async opts => { confirmations.push(opts); return approved } }) },
   })
   const tree = panel.render('ErrorPanel', {})
@@ -23,11 +23,11 @@ test('LG-012 migration requires confirmation and cancels without IPC', async () 
   expect(calls).toEqual([['project', ['*.uasset']]])
 })
 
-test('LG-027 repeated shortcut starts only one hook workflow', async () => {
+test('LG-027 repeated shortcut starts only one native commit workflow', async () => {
   const hook = deferred(), calls = []
   const state = { repoPath: 'A', fileStatus: [{ staged: true, path: 'file' }], refreshStatus: async () => {}, bumpSyncTick() {} }
   const panel = component('src/components/changes/CommitBox.tsx', {
-    '@/ipc': { ipc: { hookRunPreCommit: () => { calls.push('hook'); return hook.promise }, commit: async () => calls.push('commit'), fetch: async () => {} } },
+    '@/ipc': { ipc: { commit: () => { calls.push('commit'); return hook.promise }, fetch: async () => {} } },
     '@/stores/repoStore': { useRepoStore: store(state) },
     '@/stores/operationStore': { useOperationStore: store({ run: (_, fn) => fn() }) },
     '@/stores/errorStore': { useErrorStore: store({ pushRaw() {} }) },
@@ -40,10 +40,10 @@ test('LG-027 repeated shortcut starts only one hook workflow', async () => {
   const click = find(tree, n => n.props?.onClick?.name === 'handleCommit').props.onClick
   const first = click(), second = click()
   await flush()
-  expect(calls).toEqual(['hook'])
+  expect(calls).toEqual(['commit'])
   hook.resolve({ exists: false, exitCode: 0, durationMs: 1 })
   await Promise.all([first, second])
-  expect(calls).toEqual(['hook', 'commit'])
+  expect(calls).toEqual(['commit'])
 })
 
 test('LG-028 drafts survive repository switches without carrying into another repo', () => {

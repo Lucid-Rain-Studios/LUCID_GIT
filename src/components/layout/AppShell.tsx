@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import lucidGitIcon from '@/lib/icons/lucid_git.svg'
-import { ipc, OperationStep, Lock, AppNotification } from '@/ipc'
+import { ipc, OperationStep, AppNotification } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useOperationStore } from '@/stores/operationStore'
 import { useAuthStore } from '@/stores/authStore'
@@ -273,7 +273,9 @@ export function AppShell() {
   }, [updateStep])
 
   useEffect(() => {
-    const unsub = ipc.onLockChanged((updated: Lock[]) => setLocks(updated))
+    const unsub = ipc.onLockChanged(({ repoPath: sourceRepo, locks }) => {
+      if (useRepoStore.getState().repoPath === sourceRepo) setLocks(locks)
+    })
     return unsub
   }, [setLocks])
 

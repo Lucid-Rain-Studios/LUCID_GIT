@@ -572,7 +572,7 @@ function ResolveDialog({
         // only record was the devtools console, leaving the user with no idea
         // why the PR never merged. Route it through the error panel so the
         // parsed cause and its fixes are on screen.
-        pushError(msg)
+        pushError(msg, repoPath)
       }
       console.error('PR merge/close failed', e)
     } finally { setBusy(false) }
