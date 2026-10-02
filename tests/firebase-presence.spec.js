@@ -76,7 +76,7 @@ test('two clones publish and admin reads one shared roster; members cannot read 
  const shared = await admin.service.read(config)
  expect(shared.source).toBe('firebase'); expect(shared.entries['uid-admin'].status).toBe('active'); expect(shared.entries['uid-member'].status).toBe('away')
  await expect(member.service.read(config)).rejects.toThrow('denied access')
- expect(fs.existsSync(path.join(member.repo, '.lucid-git', 'presence.json'))).toBe(false)
+ expect(fs.existsSync(path.join(member.repo, '.lucid-git', 'lucid-presence.json'))).toBe(false)
  const saved = fs.readFileSync(path.join(member.repo, '.lucid-git', 'firebase-presence.json'), 'utf8')
  expect(saved).not.toContain('firebase-uid'); expect(saved).not.toContain('github-member')
  for (const call of db.calls.filter(c => c.method === 'PUT')) expect(Object.keys(JSON.parse(call.body))).toEqual(['status','lastSeen'])

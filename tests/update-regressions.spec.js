@@ -14,7 +14,7 @@ const entry = { login: 'alice', name: 'Alice', branch: '', modifiedCount: 0, mod
 function presenceFile() {
   const repo = tmpDir('lg-presence-upgrade-')
   fs.mkdirSync(path.join(repo, '.lucid-git'))
-  return { repo, file: path.join(repo, '.lucid-git/presence.json') }
+  return { repo, file: path.join(repo, '.lucid-git/lucid-presence.json') }
 }
 
 test('legacy versionless presence migrates without losing entries or the original backup', () => {
@@ -39,8 +39,8 @@ for (const original of ['{broken', '{"version":2,"entries":{}}', '{"version":1,"
     presenceService.update(repo, 'alice', entry)
     const names = fs.readdirSync(path.dirname(file)).filter(name => name.includes('.invalid-'))
     expect(names).toHaveLength(2)
-    expect(fs.readFileSync(path.join(path.dirname(file), names.find(name => name.startsWith('presence.json.invalid-'))), 'utf8')).toBe(original)
-    expect(fs.readFileSync(path.join(path.dirname(file), names.find(name => name.startsWith('presence.json.bak.invalid-'))), 'utf8')).toBe(backup)
+    expect(fs.readFileSync(path.join(path.dirname(file), names.find(name => name.startsWith('lucid-presence.json.invalid-'))), 'utf8')).toBe(original)
+    expect(fs.readFileSync(path.join(path.dirname(file), names.find(name => name.startsWith('lucid-presence.json.bak.invalid-'))), 'utf8')).toBe(backup)
     expect(presenceService.read(repo).entries.alice).toEqual(entry)
     presenceService.update(repo, 'alice', { ...entry, status: 'away' })
     expect(fs.readdirSync(path.dirname(file)).filter(name => name.includes('.invalid-'))).toEqual(names)
@@ -72,7 +72,7 @@ test('presence I/O failures propagate without archiving or resetting data', () =
   try { expect(() => presenceService.update(repo, 'alice', entry)).toThrow('access denied') }
   finally { fs.readFileSync = read }
   expect(fs.readFileSync(file, 'utf8')).toBe('{}')
-  expect(fs.readdirSync(path.dirname(file))).toEqual(['presence.json'])
+  expect(fs.readdirSync(path.dirname(file))).toEqual(['lucid-presence.json'])
 })
 
 function repository() {
@@ -87,14 +87,87 @@ function repository() {
 }
 
 test('presence recovery archives and backups stay excluded from Git', () => {
-  const repo = repository(), file = path.join(repo, '.lucid-git/presence.json')
+  const repo = repository(), file = path.join(repo, '.lucid-git/lucid-presence.json')
   fs.mkdirSync(path.dirname(file))
   fs.writeFileSync(file, '{broken')
   presenceService.update(repo, 'alice', entry)
   presenceService.update(repo, 'alice', { ...entry, status: 'away' })
   expect(fs.readdirSync(path.dirname(file)).some(name => name.includes('.invalid-'))).toBe(true)
   expect(fs.existsSync(file + '.bak')).toBe(true)
-  expect(git(repo, '--no-optional-locks', 'status', '--porcelain', '--untracked-files=all')).toBe('')
+  expect(git(repo, '--no-optional-locks', 'status', '--porcelain', '--untracked-files=all', '--', '.lucid-git')).toBe('')
+  expect(git(repo, 'check-ignore', '.lucid-git/lucid-presence.json', '.lucid-git/lucid-presence.json.bak').trim().split(/\r?\n/)).toHaveLength(2)
+})
+
+test('shared ignore rule precedes the first activity write and survives a teammate clone', () => {
+  const repo = repository(), ignore = path.join(repo, '.gitignore')
+  fs.writeFileSync(ignore, '# Keep project rules\n*.log\n!/.lucid-git/*')
+  const mkdir = fs.mkdirSync
+  fs.mkdirSync = (candidate, ...args) => {
+    if (candidate === path.join(repo, '.lucid-git')) {
+      expect(fs.readFileSync(ignore, 'utf8')).toBe('# Keep project rules\n*.log\n!/.lucid-git/*\n/.lucid-git/lucid-presence.json*\n')
+    }
+    return mkdir(candidate, ...args)
+  }
+  try { presenceService.update(repo, 'alice', entry) }
+  finally { fs.mkdirSync = mkdir }
+  const rule = fs.readFileSync(ignore, 'utf8')
+  presenceService.update(repo, 'alice', entry)
+  expect(fs.readFileSync(ignore, 'utf8')).toBe(rule)
+  git(repo, 'add', '.gitignore')
+  git(repo, '-c', 'core.hooksPath=', 'commit', '-qm', 'shared activity ignore')
+  const clone = tmpDir('lg-presence-clone-')
+  git(clone, 'clone', '-q', repo, '.')
+  presenceService.update(clone, 'bob', { ...entry, login: 'bob' })
+  presenceService.update(clone, 'bob', { ...entry, login: 'bob', status: 'away' })
+  git(clone, 'add', '-A')
+  expect(git(clone, 'status', '--porcelain', '--untracked-files=all')).toBe('')
+  expect(fs.existsSync(path.join(clone, '.lucid-git/lucid-presence.json.bak'))).toBe(true)
+})
+
+test('an unwritable ignore rule prevents creating unprotected activity', () => {
+  const repo = repository(), ignore = path.join(repo, '.gitignore')
+  const append = fs.appendFileSync
+  fs.appendFileSync = (candidate, ...args) => {
+    if (candidate === ignore) throw Object.assign(new Error('ignore access denied'), { code: 'EACCES' })
+    return append(candidate, ...args)
+  }
+  try { expect(() => presenceService.update(repo, 'alice', entry)).toThrow('ignore access denied') }
+  finally { fs.appendFileSync = append }
+  expect(fs.existsSync(path.join(repo, '.lucid-git'))).toBe(false)
+})
+
+test('renamed activity leaves tracked legacy presence untouched and Firebase configuration shareable', async () => {
+  const repo = repository(), dir = path.join(repo, '.lucid-git')
+  fs.mkdirSync(dir)
+  const legacy = '{"entries":{"old-user":{"lastSeen":"2020-01-01"}}}'
+  fs.writeFileSync(path.join(dir, 'presence.json'), legacy)
+  git(repo, 'add', '.lucid-git/presence.json')
+  git(repo, '-c', 'core.hooksPath=', 'commit', '-qm', 'legacy activity')
+  presenceService.update(repo, 'alice', entry)
+  presenceService.update(repo, 'alice', { ...entry, status: 'away' })
+  fs.writeFileSync(path.join(dir, 'firebase-presence.json'), '{}')
+  fs.writeFileSync(path.join(repo, 'file.txt'), 'stage this')
+  await gitService.stage(repo, [
+    '.lucid-git/lucid-presence.json',
+    '.lucid-git/lucid-presence.json.bak',
+    '.\\.lucid-git\\lucid-presence.json',
+    '.lucid-git/firebase-presence.json', 'file.txt',
+  ])
+  expect(git(repo, 'ls-files', '--', '.lucid-git/lucid-presence.json*')).toBe('')
+  expect(git(repo, 'diff', '--cached', '--name-only').trim().split(/\r?\n/)).toEqual(['.lucid-git/firebase-presence.json', 'file.txt'])
+  expect(fs.readFileSync(path.join(dir, 'presence.json'), 'utf8')).toBe(legacy)
+  expect(git(repo, 'diff', 'HEAD', '--', '.lucid-git/presence.json')).toBe('')
+  expect(Object.keys(presenceService.read(repo).entries)).toEqual(['alice'])
+})
+
+test('activity ignore works in linked worktrees and is restored after a later negation', () => {
+  const repo = repository(), worktree = tmpDir('lg-presence-worktree-')
+  git(repo, '-c', 'core.hooksPath=', 'worktree', 'add', '-qb', 'presence-test', worktree)
+  presenceService.update(worktree, 'alice', entry)
+  fs.appendFileSync(path.join(worktree, '.gitignore'), '!/.lucid-git/*\n')
+  presenceService.update(worktree, 'alice', entry)
+  expect(git(worktree, 'status', '--porcelain', '--untracked-files=all', '--', '.lucid-git')).toBe('')
+  expect(fs.statSync(path.join(worktree, '.git')).isFile()).toBe(true)
 })
 
 test('Update from main fetches once and retries only the contended merge', async () => {

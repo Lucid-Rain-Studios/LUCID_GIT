@@ -492,6 +492,13 @@ class GitService {
 
   /** Stage specific paths (handles additions, modifications, and deletions). */
   async stage(repoPath: string, paths: string[], onProgress?: ProgressCallback): Promise<void> {
+    // update-index bypasses ignore rules. A stale selection must never stage
+    // local activity, even if a previous client already tracked this filename.
+    const eligible = paths.filter(p => !p.replace(/\\/g, '/').replace(/^\.\//, '').startsWith('.lucid-git/lucid-presence.json'))
+    if (eligible.length !== paths.length) {
+      logService.warn('git.stage', 'Skipped local presence activity files while staging.')
+      paths = eligible
+    }
     if (paths.length === 0) return
 
     const total = paths.length
