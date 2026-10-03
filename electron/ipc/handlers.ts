@@ -29,7 +29,7 @@ import { settingsService } from '../services/SettingsService'
 import { terminalService } from '../services/TerminalService'
 import { teamConfigService } from '../services/TeamConfigService'
 import { gitHubService } from '../services/GitHubService'
-import type { PRCreateArgs, PRListArgs, PRActionArgs } from '../services/GitHubService'
+import type { PRCreateArgs, PRListArgs, PRActionArgs, PRCompareArgs } from '../services/GitHubService'
 import { prMonitorService } from '../services/PRMonitorService'
 import { undoService, UndoableOp } from '../services/UndoService'
 import type { WebhookConfig, AppSettings, TeamConfig } from '../types'
@@ -54,6 +54,8 @@ const READ_TIMEOUT_MS = 30_000
 // Previously this covered push and pull alone, and every other long operation
 // here had no terminator at all.
 const PROGRESS_CHANNELS = new Set<string>([
+  CHANNELS.GIT_PUBLISH_PR_BRANCH,
+  CHANNELS.GIT_BRANCH_CREATE,
   CHANNELS.CLEANUP_GC, CHANNELS.CLEANUP_SHALLOW, CHANNELS.CLEANUP_SIZE,
   CHANNELS.CLEANUP_UNSHALLOW, CHANNELS.DEP_BUILD_GRAPH, CHANNELS.GIT_CLONE,
   CHANNELS.GIT_DISCARD, CHANNELS.GIT_DISCARD_ALL, CHANNELS.GIT_FETCH,
@@ -70,6 +72,8 @@ const PROGRESS_CHANNELS = new Set<string>([
 // `.git/index.lock`. Reads are not blocked outright — they run a few at a time
 // and step aside for these.
 const EXCLUSIVE_CHANNELS = new Set<string>([
+  CHANNELS.GIT_PUBLISH_PR_BRANCH,
+  CHANNELS.GIT_BRANCH_CREATE,
   CHANNELS.GIT_INDEX_REPAIR, CHANNELS.GIT_INDEX_UNDO,
   CHANNELS.GIT_DISCARD, CHANNELS.GIT_DISCARD_ALL, CHANNELS.GIT_STAGE,
   CHANNELS.GIT_UNSTAGE, CHANNELS.GIT_COMMIT, CHANNELS.GIT_PULL, CHANNELS.GIT_RESET_TO,
@@ -444,8 +448,10 @@ export function registerHandlers(): void {
     return gitService.branchList(repoPath)
   })
 
-  handle(CHANNELS.GIT_BRANCH_CREATE, async (_event, repoPath: string, name: string, from?: string) => {
-    return gitService.createBranch(repoPath, name, from)
+  handle(CHANNELS.GIT_BRANCH_CREATE, async (event, repoPath: string, name: string, from?: string) => {
+    return gitService.createBranch(repoPath, name, from, step => {
+      if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
+    })
   })
 
   handle(CHANNELS.GIT_BRANCH_RENAME, async (_event, repoPath: string, oldName: string, newName: string) => {
@@ -1281,6 +1287,16 @@ export function registerHandlers(): void {
     logService.error(source || 'renderer', `${message || 'Renderer error'}${suffix}`)
   })
   // ── GitHub API ─────────────────────────────────────────────────────────────
+  handle(CHANNELS.GIT_PUBLISH_PR_BRANCH, async (event, repoPath: string, branch: string, remoteUrl: string) => {
+    return gitService.publishPRBranch(repoPath, branch, remoteUrl, step => {
+      if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
+    })
+  })
+  handle(CHANNELS.GITHUB_COMPARE_PR, async (_event, args: PRCompareArgs) => {
+    const token = await authService.getCurrentToken()
+    if (!token) throw new Error('Not authenticated with GitHub')
+    return gitHubService.comparePRCommits(token, args)
+  })
   handle(CHANNELS.GITHUB_CREATE_PR, async (_event, args: PRCreateArgs) => {
     const token = await authService.getCurrentToken()
     if (!token) throw new Error('Not authenticated with GitHub')

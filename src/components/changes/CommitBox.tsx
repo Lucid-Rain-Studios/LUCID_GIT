@@ -29,6 +29,7 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
   const [amend, setAmend]               = useState(false)
   const [lastMessage, setLastMessage]   = useState<string | null>(null)
   const [headPushed, setHeadPushed]     = useState<boolean | null>(null)
+  const headInfoRepo = useRef(repoPath)
   const [originalTitle, setOriginalTitle]     = useState(title)
   const [originalMessage, setOriginalMessage] = useState(message)
 
@@ -58,9 +59,15 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
   // Load HEAD info so the amend toggle can pre-fill the message and warn
   // when the commit is already pushed.
   useEffect(() => {
-    if (!repoPath) { setLastMessage(null); setHeadPushed(null); return }
+    // Keep the last result visible during same-repository background checks.
+    // A different repository must never inherit the previous HEAD's status.
+    if (headInfoRepo.current !== repoPath || !repoPath) {
+      headInfoRepo.current = repoPath
+      setLastMessage(null)
+      setHeadPushed(null)
+    }
+    if (!repoPath) return
     let cancelled = false
-    setHeadPushed(null)
     Promise.all([
       ipc.lastCommitMessage(repoPath).catch(() => null),
       ipc.isHeadPushed(repoPath).catch(() => null),
@@ -252,14 +259,16 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
               {lastMessage.split('\n')[0]}
             </span>
           </span>
-          {headPushed && (
-            <span
-              className="text-[9px] font-mono text-lg-text-secondary/70 font-semibold shrink-0"
-              title="The last commit is already on the remote."
-            >
-              PUSHED
-            </span>
-          )}
+          <span
+            className={cn(
+              'text-[9px] font-mono text-lg-text-secondary/70 font-semibold shrink-0',
+              !headPushed && 'invisible',
+            )}
+            aria-hidden={!headPushed}
+            title={headPushed ? 'The last commit is already on the remote.' : undefined}
+          >
+            PUSHED
+          </span>
         </label>
       )}
 

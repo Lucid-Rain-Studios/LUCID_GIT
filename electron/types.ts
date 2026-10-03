@@ -264,6 +264,7 @@ export interface LfsLocksMaintenanceResult {
 }
 
 export interface SyncStatus {
+  hasPublishedBranch?: boolean
   ahead: number
   behind: number
   remoteName: string

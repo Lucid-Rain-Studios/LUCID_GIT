@@ -97,7 +97,7 @@ test('LG-058 PR typing and chosen base survive late defaults; all dismissals wai
   let closed = 0, dismiss, escape
   const state = { open: true, repoPath: 'repo', headBranch: 'feature/test', remoteUrl: 'https://github.com/org/repo.git', closeDialog: () => closed++ }
   const panel = component('src/components/pr/PRDialog.tsx', {
-    '@/ipc': { ipc: { gitDefaultBranch: () => base.promise, branchDiff: () => diff.promise, githubCreatePR: () => submit.promise, prMonitorRecord: async () => {} } },
+    '@/ipc': { ipc: { gitDefaultBranch: () => base.promise, githubComparePR: () => diff.promise, githubCreatePR: () => submit.promise, prMonitorRecord: async () => {} } },
     '@/stores/prStore': { usePRStore: store(state) },
     '@/stores/repoStore': { useRepoStore: store({ branches: [], bumpPrTick() {} }) },
     '@/stores/lockStore': { useLockStore: store({ locks: [] }) },
@@ -110,12 +110,16 @@ test('LG-058 PR typing and chosen base survive late defaults; all dismissals wai
   find(tree, n => n.type?.name === 'TextInput').props.onChange('Typed title')
   find(tree, n => n.type?.name === 'TextArea').props.onChange('Typed body')
   find(tree, n => n.type?.name === 'SelectInput').props.onChange('develop')
-  base.resolve('main'); diff.resolve({ aheadCommits: [{ message: 'generated', hash: 'abcdef', author: 'Test' }] })
+  base.resolve('main'); diff.resolve([{ message: 'generated', hash: 'abcdef', author: 'Test' }])
   await flush()
   tree = panel.render('PRDialog')
   expect(find(tree, n => n.type?.name === 'TextInput').props.value).toBe('Typed title')
   expect(find(tree, n => n.type?.name === 'TextArea').props.value).toBe('Typed body')
   expect(find(tree, n => n.type?.name === 'SelectInput').props.value).toBe('develop')
+  // The selected target changed, so its own successful preview is required.
+  panel.effects[1]()
+  await flush()
+  tree = panel.render('PRDialog')
   const pending = find(tree, n => n.props?.onClick?.name === 'submit').props.onClick()
   dismiss(); escape({ key: 'Escape' })
   find(tree, n => n.type === 'button' && n.props.className === 'lg-compact-icon-button').props.onClick()

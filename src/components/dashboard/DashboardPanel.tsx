@@ -20,7 +20,7 @@ import {
   pushButtonLabel,
   pushDisabledReason,
 } from '@/lib/syncButtonLogic'
-import { getTopBarSyncHandlers, getTopBarSyncSnapshot, onTopBarSyncChanged } from '@/lib/topBarSyncBridge'
+import { getTopBarSyncHandlers, getTopBarSyncSnapshot, onTopBarSyncChanged, hasBranchIntegrated, markBranchIntegrated } from '@/lib/topBarSyncBridge'
 import { FilePathText } from '@/components/ui/FilePathText'
 import { ActionBtn, ActionTab } from '@/components/ui/ActionBtn'
 import { MyPRStatusPill } from './MyPRStatusPill'
@@ -207,6 +207,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
     setBusy('pull')
     try {
       await opRun('Pulling…', () => ipc.pull(repoPath))
+      markBranchIntegrated(repoPath, currentBranch)
       const now = Date.now()
       localStorage.setItem(LAST_PULL_KEY(repoPath), String(now))
       setLastPull(now)
@@ -221,6 +222,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
     setBusy('push')
     try {
       await opRun('Pushing…', () => ipc.push(repoPath))
+      if (!(sync?.hasPublishedBranch ?? sync?.hasUpstream ?? true)) markBranchIntegrated(repoPath, currentBranch, false)
       await loadSync()
       bumpSyncTick()
     } finally { setBusy(null) }
@@ -316,6 +318,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
         unstaged={unstaged}
         busy={busyState}
         hasFetched={effectiveHasFetched}
+        hasIntegrated={hasBranchIntegrated(repoPath, currentBranch)}
         ghSlug={ghSlug}
         currentBranch={currentBranch}
         defaultBranch={defaultBranch}
@@ -381,7 +384,7 @@ interface FlowStepDef {
 }
 
 function DailyFlowStrip({
-  sync, staged, unstaged, busy, hasFetched, ghSlug, currentBranch, defaultBranch, updatingFromMain,
+  sync, staged, unstaged, busy, hasFetched, hasIntegrated = false, ghSlug, currentBranch, defaultBranch, updatingFromMain,
   conflictReport, conflictChecking,
   onFetch, onPull, onPush, onUpdateFromMain, onGoChanges, onDeepConflictCheck, onOpenPR, canCreatePR,
 }: {
@@ -389,6 +392,7 @@ function DailyFlowStrip({
   staged: number; unstaged: number
   busy: 'idle' | 'fetch' | 'pull' | 'push'
   hasFetched: boolean
+  hasIntegrated?: boolean
   ghSlug: string | null
   currentBranch: string
   defaultBranch: string
@@ -419,7 +423,8 @@ function DailyFlowStrip({
 
   const isBusy = busy !== 'idle'
   const hasUpstream = sync?.hasUpstream ?? true
-  const pushEnabled = canPush(hasFetched, behind, ahead, busy, hasUpstream)
+  const hasPublishedBranch = sync?.hasPublishedBranch ?? hasUpstream
+  const pushEnabled = !updatingFromMain && canPush(hasFetched, behind, ahead, busy, hasPublishedBranch, hasIntegrated)
   const onDefaultBranch = currentBranch === defaultBranch
   const updateFromMainEnabled = !onDefaultBranch && !updatingFromMain && !isBusy
 
@@ -433,15 +438,15 @@ function DailyFlowStrip({
     {
       label:    pullButtonLabel(busy),
       color:    '#f5a832',
-      disabled: !canPull(hasFetched, behind, busy),
-      disabledReason: pullDisabledReason(hasFetched, behind, busy),
+      disabled: !canPull(hasFetched, behind, busy, hasPublishedBranch && !hasIntegrated),
+      disabledReason: pullDisabledReason(hasFetched, behind, busy, hasPublishedBranch && !hasIntegrated),
       onClick:  onPull,
     },
     {
-      label:    pushButtonLabel(busy, hasUpstream),
+      label:    pushButtonLabel(busy, hasPublishedBranch),
       color:    pushEnabled ? '#2dbd6e' : undefined,
       disabled: !pushEnabled,
-      disabledReason: pushDisabledReason(hasFetched, behind, ahead, busy, hasUpstream),
+      disabledReason: updatingFromMain ? 'Update in progress' : pushDisabledReason(hasFetched, behind, ahead, busy, hasPublishedBranch, hasIntegrated),
       onClick:  onPush,
     },
     {

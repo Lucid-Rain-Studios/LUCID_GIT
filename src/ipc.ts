@@ -124,6 +124,8 @@ export interface MergeConflictText {
 }
 
 export interface SyncStatus {
+  /** Whether origin has this branch's own ref, independently of an inherited upstream. */
+  hasPublishedBranch?: boolean
   ahead: number
   behind: number
   remoteName: string
@@ -919,6 +921,8 @@ export interface LucidGitAPI {
 
   // GitHub API
   githubCreatePR: (args: { owner: string; repo: string; head: string; base: string; title: string; body: string; draft: boolean }) => Promise<{ number: number; htmlUrl: string; title: string }>
+  githubComparePR: (args: { owner: string; repo: string; head: string; base: string }) => Promise<BranchDiffCommit[]>
+  publishPRBranch: (repoPath: string, branch: string, remoteUrl: string) => Promise<void>
   githubListPRs:  (args: { owner: string; repo: string }) => Promise<PullRequest[]>
   githubPrFiles:  (args: { owner: string; repo: string; prNumber: number; expectedSha?: string }) => Promise<string[]>
   githubMergePR:  (args: { owner: string; repo: string; prNumber: number; repoPath: string; expectedSha: string }) => Promise<void>

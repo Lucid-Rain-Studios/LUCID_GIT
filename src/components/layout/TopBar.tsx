@@ -23,7 +23,7 @@ import {
 } from '@/lib/syncButtonLogic'
 import { useStatusToastStore } from '@/stores/statusToastStore'
 import { useDialogStore } from '@/stores/dialogStore'
-import { setTopBarSyncHandlers, updateTopBarSyncSnapshot } from '@/lib/topBarSyncBridge'
+import { setTopBarSyncHandlers, updateTopBarSyncSnapshot, hasBranchIntegrated, markBranchIntegrated } from '@/lib/topBarSyncBridge'
 import { ActionBtn } from '@/components/ui/ActionBtn'
 
 interface TopBarProps {
@@ -172,7 +172,8 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
   }, [])
 
   const doPush = async (force = false) => {
-    if (!repoPath || syncOp !== 'idle') return
+    if (!repoPath || syncOp !== 'idle' || updatingFromMain) return
+    if (!force && !canPushNow) return
     if (force) {
       const approved = await useDialogStore.getState().confirm({
         title: 'Force push?',
@@ -185,7 +186,11 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
       if (!approved || current.repoPath !== repoPath || current.currentBranch !== currentBranch) return
     }
     setSyncOp('pushing'); setSyncErr(null)
-    try { await opRun(force ? 'Force pushing…' : 'Pushing…', () => ipc.push(repoPath, force)); await refreshRevisionState(); showStatusToast('Push successful.') }
+    try {
+      await opRun(force ? 'Force pushing…' : 'Pushing…', () => ipc.push(repoPath, force))
+      if (!hasPublishedBranch) markBranchIntegrated(repoPath, currentBranch, false)
+      await refreshRevisionState(); showStatusToast('Push successful.')
+    }
     catch (e) {
       const s = String(e)
       if (s.toLowerCase().includes('everything up-to-date') || s.toLowerCase().includes('up to date')) {
@@ -245,6 +250,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
         stashed = true
       }
       await opRun(`Updating from ${defaultBranch}…`, () => ipc.updateFromMain(repoPath))
+      markBranchIntegrated(repoPath, currentBranch)
       markFetchPerformed(repoPath)
       sessionTopBarFetched.add(repoPath)
       setHasFetched(true)
@@ -284,9 +290,11 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
   const ghSlug = remoteUrl ? parseGitHubSlug(remoteUrl) : null
   const busyState = syncOp === 'idle' ? 'idle' : syncOp === 'fetching' ? 'fetch' : syncOp === 'pulling' ? 'pull' : 'push'
   const hasUpstream = sync?.hasUpstream ?? true
-  const canPushNow = canPush(hasFetched, sync?.behind ?? 0, sync?.ahead ?? 0, busyState, hasUpstream)
+  const hasPublishedBranch = sync?.hasPublishedBranch ?? hasUpstream
+  const hasIntegrated = !!repoPath && hasBranchIntegrated(repoPath, currentBranch)
+  const canPushNow = !updatingFromMain && canPush(hasFetched, sync?.behind ?? 0, sync?.ahead ?? 0, busyState, hasPublishedBranch, hasIntegrated)
   const canCreatePRNow = canCreatePR(!!ghSlug, currentBranch, busyState)
-  const pushReason = pushDisabledReason(hasFetched, sync?.behind ?? 0, sync?.ahead ?? 0, busyState, hasUpstream)
+  const pushReason = updatingFromMain ? 'Update in progress' : pushDisabledReason(hasFetched, sync?.behind ?? 0, sync?.ahead ?? 0, busyState, hasPublishedBranch, hasIntegrated)
   const createPRReason = createPRDisabledReason(!!ghSlug, currentBranch, busyState)
 
   const doFetch = async () => {
@@ -340,6 +348,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
         await opRun('Stashing local changes…', () => ipc.stashSave(repoPath, 'Auto-stash before pull'))
       }
       await opRun('Pulling…', () => ipc.pull(repoPath))
+      markBranchIntegrated(repoPath, currentBranch)
       markFetchPerformed(repoPath)
       sessionTopBarFetched.add(repoPath)
       setHasFetched(true)
@@ -727,10 +736,11 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
                 behindCount={hasBehind && isIdle ? (sync?.behind ?? 0) : 0}
                 aheadCount={isIdle && hasUpstream ? (sync?.ahead ?? 0) : 0}
                 hasFetched={hasFetched}
+                allowUpToDatePull={hasPublishedBranch && !hasIntegrated}
                 error={!!syncErr}
                 disabled={!isIdle}
                 fetchDisabledReason={fetchDisabledReason(busyState)}
-                pullDisabledReason={pullDisabledReason(hasFetched, sync?.behind ?? 0, busyState)}
+                pullDisabledReason={pullDisabledReason(hasFetched, sync?.behind ?? 0, busyState, hasPublishedBranch && !hasIntegrated)}
                 onFetch={doFetch}
                 onPull={doTopBarPull}
               />
@@ -749,7 +759,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
 
               <PushDropdown disabled={!isIdle || updatingFromMain} onForcePush={() => doPush(true)} contextKey={`${repoPath}:${currentBranch}`}>
               <SyncBtn
-                label={pushButtonLabel(busyState, hasUpstream)}
+                label={pushButtonLabel(busyState, hasPublishedBranch)}
                 icon={<ArrowUp />}
                 count={canPushNow && hasUpstream ? (sync?.ahead ?? 0) : 0}
                 countColor="#2dbd6e"
@@ -1679,16 +1689,17 @@ function CloneIcon() {
 // ── Split Fetch | Pull button ─────────────────────────────────────────────────
 
 function FetchPullSplitBtn({
-  fetchLabel, pullLabel, behindCount, aheadCount, hasFetched, error, disabled, fetchDisabledReason, pullDisabledReason, onFetch, onPull,
+  fetchLabel, pullLabel, behindCount, aheadCount, hasFetched, allowUpToDatePull = false, error, disabled, fetchDisabledReason, pullDisabledReason, onFetch, onPull,
 }: {
   fetchLabel: string; pullLabel: string; behindCount: number; aheadCount: number
   hasFetched: boolean; error: boolean; disabled: boolean
   fetchDisabledReason?: string | null; pullDisabledReason?: string | null
   onFetch: () => void; onPull: () => void
+  allowUpToDatePull?: boolean
 }) {
   const [hoverFetch, setHoverFetch] = React.useState(false)
   const [hoverPull,  setHoverPull]  = React.useState(false)
-  const pullDisabled = disabled || !hasFetched || behindCount === 0
+  const pullDisabled = disabled || !hasFetched || (behindCount === 0 && !allowUpToDatePull)
   const hasBehind   = behindCount > 0
   const fetchActive = !disabled
   const borderColor = error

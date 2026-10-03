@@ -642,6 +642,25 @@ class GitService {
     return aheadRes.stdout.trim() === '0'
   }
 
+  /** Publish the selected PR branch without switching HEAD or following another upstream. */
+  async publishPRBranch(repoPath: string, branch: string, expectedRemoteUrl: string, onProgress?: ProgressCallback): Promise<void> {
+    const ref = `refs/heads/${branch}`
+    const valid = await execSafe(['check-ref-format', ref], repoPath)
+    if (valid.exitCode !== 0) throw new Error('Invalid source branch name.')
+    const local = await execSafe(['show-ref', '--verify', ref], repoPath)
+    if (local.exitCode !== 0) throw new Error(`Source branch "${branch}" does not exist locally. Fetch it or select a local branch.`)
+    const remote = await exec(['remote', 'get-url', '--push', '--all', 'origin'], repoPath)
+    const urls = remote.stdout.trim().split(/\r?\n/)
+    if (!expectedRemoteUrl || urls.length !== 1 || urls[0] !== expectedRemoteUrl) {
+      throw new Error('The origin push destination differs from the PR repository. Reopen the PR dialog after checking the remote configuration.')
+    }
+    const token = await authService.getCurrentToken()
+    const args = [...gitAuthArgs(token, urls[0]), 'push', '--progress', '--set-upstream', 'origin', `${ref}:${ref}`]
+    onProgress?.({ id: 'pr-publish', label: `Pushing ${branch}`, status: 'running' })
+    await this.withStalePackRetry(repoPath, () => execWithProgress(args, repoPath, onProgress), onProgress)
+    onProgress?.({ id: 'pr-publish', label: `Pushed ${branch}`, status: 'done' })
+  }
+
   /** Push current branch to its upstream. Streams progress and returns the pre-push metadata. */
   async push(repoPath: string, onProgress?: ProgressCallback, force = false): Promise<{ branch: string; filesAhead: string[] }> {
     // These lookups are independent. Keeping them here means the push handler does
@@ -655,17 +674,18 @@ class GitService {
     if (!branch || branch === 'HEAD' || branch === 'unknown') {
       throw new Error('Cannot push from a detached HEAD. Switch to a branch first.')
     }
+    const hasPublishedBranch = await this.hasPublishedBranch(repoPath, branch)
     onProgress?.({ id: 'push-scan', label: 'Scanning outgoing changes', status: 'running', progress: 8 })
 
     let filesAhead: string[] = []
-    if (upstreamRes.exitCode === 0 && upstreamRes.stdout.trim()) {
+    if (hasPublishedBranch && upstreamRes.exitCode === 0 && upstreamRes.stdout.trim()) {
       const diffRes = await execSafe(['diff', '--name-only', '-z', `${upstreamRes.stdout.trim()}..HEAD`], repoPath)
       if (diffRes.exitCode === 0) {
         filesAhead = nulPaths(diffRes.stdout)
       }
     }
 
-    const pushArgs = upstreamRes.exitCode !== 0
+    const pushArgs = !hasPublishedBranch || upstreamRes.exitCode !== 0
       ? [...gitAuthArgs(token, remoteUrl), 'push', '--progress', '--set-upstream', 'origin', branch]
       : [...gitAuthArgs(token, remoteUrl), 'push', '--progress']
     if (force) pushArgs.push('--force-with-lease')
@@ -1129,7 +1149,7 @@ class GitService {
   }
 
   /** Create a new branch (and optionally check it out). */
-  async createBranch(repoPath: string, name: string, from?: string): Promise<void> {
+  async createBranch(repoPath: string, name: string, from?: string, onProgress?: ProgressCallback): Promise<void> {
     // On a case-insensitive filesystem two branches differing only by case
     // are one loose ref file, so git rejects this with a message naming the
     // branch the user just typed ("a branch named 'dev_Ben2' already
@@ -1146,7 +1166,16 @@ class GitService {
     const args = from
       ? ['checkout', '-b', name, from]
       : ['checkout', '-b', name]
-    await exec(args, repoPath)
+    onProgress?.({ id: 'branch-checkout', label: `Switching to ${name}`, status: 'running' })
+    await this.runWithLfsRecovery(repoPath, await this.authenticatedArgs(repoPath, [...args, '--progress']), {
+      alreadyDone: async () => (await this.currentBranch(repoPath)) === name,
+      retryArgs: async () => {
+        const exists = (await this.refNames(repoPath, 'refs/heads/')).includes(name)
+        return this.authenticatedArgs(repoPath, exists ? ['checkout', name, '--progress'] : [...args, '--progress'])
+      },
+    }, onProgress)
+    this.invalidateLfsCache(repoPath)
+    onProgress?.({ id: 'branch-checkout', label: `Switched to ${name}`, status: 'done' })
   }
 
   /** Rename a branch. Renames the current branch when oldName === HEAD. */
@@ -1219,12 +1248,15 @@ class GitService {
 
   /** Return ahead/behind counts for HEAD vs its upstream. */
   async getSyncStatus(repoPath: string): Promise<SyncStatus> {
+    const branch = await this.currentBranch(repoPath)
+    if (!branch || branch === 'HEAD' || branch === 'unknown') throw new Error('Switch to a branch to check its push status.')
+    const hasPublishedBranch = await this.hasPublishedBranch(repoPath, branch)
     const upRes = await execSafe(
       ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'],
       repoPath
     )
     if (upRes.exitCode !== 0) {
-      return { ahead: 0, behind: 0, remoteName: 'origin', remoteBranch: '', hasUpstream: false }
+      return { ahead: 0, behind: 0, remoteName: 'origin', remoteBranch: '', hasUpstream: false, hasPublishedBranch }
     }
     const remoteBranch = upRes.stdout.trim()
     const remoteName   = remoteBranch.split('/')[0]
@@ -1240,7 +1272,15 @@ class GitService {
       remoteName,
       remoteBranch,
       hasUpstream:  true,
+      hasPublishedBranch,
     }
+  }
+
+  private async hasPublishedBranch(repoPath: string, branch: string): Promise<boolean> {
+    const result = await execSafe(['show-ref', '--verify', '--quiet', `refs/remotes/origin/${branch}`], repoPath)
+    if (result.exitCode === 0) return true
+    if (result.exitCode === 1) return false
+    throw new Error(result.stderr || 'Unable to check whether the branch is published.')
   }
 
   /** Fetch origin then merge origin/main into HEAD. Streams progress. */
@@ -1312,16 +1352,20 @@ class GitService {
     repoPath: string,
     args: string[],
     options: { retryArgs?: () => Promise<string[]>; alreadyDone?: () => Promise<boolean> } = {},
+    onProgress?: ProgressCallback,
   ): Promise<void> {
+    const run = (command: string[]) => onProgress
+      ? execWithProgress(command, repoPath, onProgress)
+      : exec(command, repoPath)
     try {
       // Wrapped here rather than at the call sites (checkout / merge / conflict
       // resolution) so they all get the retry without nesting two of them.
-      await this.withStalePackRetry(repoPath, () => exec(args, repoPath))
+      await this.withStalePackRetry(repoPath, () => run(args), onProgress)
       return
     } catch (error) {
       if (!await this.recoverForRetry(repoPath, error)) throw error
       if (options.alreadyDone && await options.alreadyDone()) return
-      await exec(options.retryArgs ? await options.retryArgs() : args, repoPath)
+      await run(options.retryArgs ? await options.retryArgs() : args)
     }
   }
 

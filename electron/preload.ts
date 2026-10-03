@@ -336,8 +336,8 @@ const api = {
   // ── Asset diff previews — Phase 17 ───────────────────────────────────────
   assetDiffPreview: (repoPath: string, filePath: string, leftRef: string, rightRef: string, editorBinaryOverride?: string) =>
     ipcRenderer.invoke(CHANNELS.ASSET_DIFF_PREVIEW, repoPath, filePath, leftRef, rightRef, editorBinaryOverride),
-  assetRenderThumbnail: (repoPath: string, filePath: string, ref: string) =>
-    ipcRenderer.invoke(CHANNELS.ASSET_RENDER_THUMBNAIL, repoPath, filePath, ref),
+  // Thumbnail generation is disabled: never enqueue Git/asset work from UI tiles.
+  assetRenderThumbnail: async (): Promise<string | null> => null,
   assetExtractMetadata: (repoPath: string, filePath: string, ref: string) =>
     ipcRenderer.invoke(CHANNELS.ASSET_EXTRACT_METADATA, repoPath, filePath, ref),
 
@@ -394,6 +394,10 @@ const api = {
   // ── GitHub API ────────────────────────────────────────────────────────────
   githubCreatePR: (args: { owner: string; repo: string; head: string; base: string; title: string; body: string; draft: boolean }) =>
     ipcRenderer.invoke(CHANNELS.GITHUB_CREATE_PR, args),
+  githubComparePR: (args: { owner: string; repo: string; head: string; base: string }) =>
+    ipcRenderer.invoke(CHANNELS.GITHUB_COMPARE_PR, args),
+  publishPRBranch: (repoPath: string, branch: string, remoteUrl: string) =>
+    ipcRenderer.invoke(CHANNELS.GIT_PUBLISH_PR_BRANCH, repoPath, branch, remoteUrl),
   githubListPRs: (args: { owner: string; repo: string }) =>
     ipcRenderer.invoke(CHANNELS.GITHUB_LIST_PRS, args),
   githubPrFiles: (args: { owner: string; repo: string; prNumber: number }) =>

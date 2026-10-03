@@ -18,6 +18,14 @@ export interface PRResult {
   title: string
 }
 
+export type PRCompareArgs = Pick<PRCreateArgs, 'owner' | 'repo' | 'head' | 'base'>
+export interface PRCompareCommit {
+  hash: string
+  message: string
+  author: string
+  date: string
+}
+
 export interface PullRequest {
   number: number
   title: string
@@ -145,6 +153,60 @@ const REPO_LIST_TTL_MS = 5 * 60 * 1000
 const REPO_LIST_MAX_PAGES = 5   // up to 500 repos
 
 class GitHubService {
+  private comparisonInFlight = new Map<string, Promise<PRCompareCommit[]>>()
+
+  comparePRCommits(token: string, args: PRCompareArgs): Promise<PRCompareCommit[]> {
+    const key = JSON.stringify([createHash('sha256').update(token).digest('hex'), args.owner, args.repo, args.base, args.head])
+    const pending = this.comparisonInFlight.get(key)
+    if (pending) return pending
+    const request = this.fetchPRComparison(token, args).finally(() => this.comparisonInFlight.delete(key))
+    this.comparisonInFlight.set(key, request)
+    return request
+  }
+
+  private async fetchPRComparison(token: string, args: PRCompareArgs): Promise<PRCompareCommit[]> {
+    const root = `/repos/${encodeURIComponent(args.owner)}/${encodeURIComponent(args.repo)}`
+    // Pin published tips before paginating: local main may be months behind,
+    // and moving branch names can mix different comparisons between pages.
+    const [base, head] = await Promise.all([args.base, args.head].map(async (ref, index) => {
+      let data: { sha: string }
+      try {
+        data = await ghFetch(token, `${root}/commits/${encodeURIComponent(ref)}`) as { sha: string }
+      } catch (error) {
+        if (error instanceof GitHubApiError && error.status === 404) {
+          throw new GitHubApiError(index === 1
+            ? `PR_HEAD_NOT_PUBLISHED: Source branch "${ref}" is not available on ${args.owner}/${args.repo}. Push this branch before creating its PR.`
+            : `Target branch "${ref}" is not available on ${args.owner}/${args.repo}. Check the target branch and repository access.`, 404)
+        }
+        throw error
+      }
+      if (!/^[a-f0-9]{40}$/i.test(data.sha)) throw new GitHubApiError('GitHub returned an invalid branch revision')
+      return data.sha
+    }))
+    const commits = new Map<string, PRCompareCommit>()
+    let expected: number | undefined
+    for (let page = 1; page <= 100; page++) {
+      const data = await ghFetch(token, `${root}/compare/${base}...${head}?per_page=100&page=${page}`) as {
+        total_commits: number
+        commits: Array<{ sha: string; commit: { message: string; author: { name: string; date: string } } }>
+      }
+      if (!Number.isInteger(data.total_commits) || data.total_commits < 0 || !Array.isArray(data.commits)) {
+        throw new GitHubApiError('GitHub returned an invalid commit comparison')
+      }
+      if (expected === undefined) expected = data.total_commits
+      if (data.total_commits !== expected || expected > 10000) {
+        throw new GitHubApiError('Commit comparison completeness could not be verified; view the comparison on GitHub')
+      }
+      for (const entry of data.commits) commits.set(entry.sha, {
+        hash: entry.sha, message: entry.commit.message.split(/\r?\n/)[0],
+        author: entry.commit.author.name, date: entry.commit.author.date,
+      })
+      if (commits.size === expected) return [...commits.values()].reverse()
+      if (data.commits.length < 100) break
+    }
+    throw new GitHubApiError('GitHub returned an incomplete commit comparison; retry the preview')
+  }
+
   // `${owner}/${repo}` → last successfully fetched open-PR list. Serves two
   // purposes: a short-TTL response cache for the many independent pollers,
   // and a stale fallback when GitHub is temporarily down so the UI degrades
