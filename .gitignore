@@ -4,6 +4,7 @@ dist-renderer/
 dist/
 Build/
 Build-exe/
+Build-app/
 *.log
 npm-debug.log*
 .DS_Store
