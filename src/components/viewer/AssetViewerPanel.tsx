@@ -41,35 +41,42 @@ export function AssetViewerPanel() {
 
   // Load thumbnail when file/ref changes
   useEffect(() => {
+    let cancelled = false
+    setThumbLoading(false)
+    setThumbnail(null)
     if (!repoPath || !filePath || !isOpen) return
     if (!isUEAsset && !isImgAsset) return
     setThumbLoading(true)
     setThumbnail(null)
     ipc.assetRenderThumbnail(repoPath, filePath, selectedRef)
-      .then(p => setThumbnail(p))
+      .then(p => { if (!cancelled) setThumbnail(p) })
       .catch(() => {})
-      .finally(() => setThumbLoading(false))
-  }, [repoPath, filePath, selectedRef, isOpen])
+      .finally(() => { if (!cancelled) setThumbLoading(false) })
+    return () => { cancelled = true }
+  }, [repoPath, filePath, selectedRef, isOpen, isUEAsset, isImgAsset])
 
   // Load version history when file changes
   useEffect(() => {
+    let cancelled = false
     if (!repoPath || !filePath || !isOpen) return
     setVersions([])
     setVerLoading(true)
     ipc.gitFileLog(repoPath, filePath, 20)
       .then(commits => {
+        if (cancelled) return
         const cards: VersionCard[] = commits.map(c => ({ commit: c, thumb: null, loading: isUEAsset || isImgAsset }))
         setVersions(cards)
         if (!isUEAsset && !isImgAsset) return
         commits.forEach((c, i) => {
           ipc.assetRenderThumbnail(repoPath, filePath, c.hash)
-            .then(p => setVersions(prev => prev.map((v, idx) => idx === i ? { ...v, thumb: p, loading: false } : v)))
-            .catch(() => setVersions(prev => prev.map((v, idx) => idx === i ? { ...v, loading: false } : v)))
+            .then(p => { if (!cancelled) setVersions(prev => prev.map((v, idx) => idx === i ? { ...v, thumb: p, loading: false } : v)) })
+            .catch(() => { if (!cancelled) setVersions(prev => prev.map((v, idx) => idx === i ? { ...v, loading: false } : v)) })
         })
       })
-      .catch(() => setVersions([]))
-      .finally(() => setVerLoading(false))
-  }, [repoPath, filePath, isOpen])
+      .catch(() => { if (!cancelled) setVersions([]) })
+      .finally(() => { if (!cancelled) setVerLoading(false) })
+    return () => { cancelled = true }
+  }, [repoPath, filePath, isOpen, isUEAsset, isImgAsset])
 
   // Reset state when panel closes or file changes
   useEffect(() => {

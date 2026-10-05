@@ -1,4 +1,6 @@
 // Typed wrappers around window.lucidGit.*
+import type { IndexDiagnosis, IndexRepairResult, IndexRecoveryBlockers, IndexLockRecoveryResult, RecoveryGitTask } from '../electron/indexRecoveryTypes'
+export type { IndexDiagnosis, IndexRepairResult, IndexRecoveryBlockers, IndexLockRecoveryResult, RecoveryGitTask } from '../electron/indexRecoveryTypes'
 // This file is the single source of truth for the renderer-side IPC contract.
 
 // ── Domain types ─────────────────────────────────────────────────────────────
@@ -122,6 +124,8 @@ export interface MergeConflictText {
 }
 
 export interface SyncStatus {
+  /** Whether origin has this branch's own ref, independently of an inherited upstream. */
+  hasPublishedBranch?: boolean
   ahead: number
   behind: number
   remoteName: string
@@ -489,6 +493,7 @@ export interface BranchHealthReport {
 }
 
 export interface PresenceEntry {
+  status?: 'active' | 'away' | 'offline'
   login: string
   name: string
   branch: string
@@ -498,7 +503,25 @@ export interface PresenceEntry {
   lastPush?: string
 }
 
+
+export interface FirebasePresenceConfig {
+  enabled: boolean
+  apiKey: string
+  authDomain: string
+  projectId: string
+  databaseURL: string
+  workspaceId: string
+}
+
+export interface FirebasePresenceTest {
+  uid: string
+  canRead: boolean
+  canPublish: boolean
+  message: string
+}
+
 export interface PresenceFile {
+  source?: 'local' | 'firebase'
   version: number
   entries: Record<string, PresenceEntry>
 }
@@ -536,6 +559,7 @@ export interface ForecastConflict {
 }
 
 export interface ForecastStatus {
+  error?: string | null
   repoPath: string
   enabled: boolean
   lastPolledAt: number | null
@@ -626,6 +650,8 @@ export interface BranchDiffSummary {
 // ── GitHub Pull Requests ──────────────────────────────────────────────────────
 
 export interface PullRequest {
+  headSha: string
+  baseSha: string
   number: number
   title: string
   htmlUrl: string
@@ -658,12 +684,13 @@ export interface LucidGitAPI {
   openDirectory:  () => Promise<string | null>
   openFile:       (defaultPath?: string) => Promise<string | null>
   openExternal:   (url: string) => Promise<void>
-  showInFolder:   (fullPath: string) => Promise<void>
-  openPath:       (fullPath: string) => Promise<void>
+  showInFolder:   (fullPath: string, relativePath?: string) => Promise<void>
+  openPath:       (fullPath: string, relativePath?: string) => Promise<void>
   openTerminal:   (cwd?: string, terminalId?: string) => Promise<void>
   listTerminals:  () => Promise<TerminalProfile[]>
 
   // Auth
+  cancelDeviceFlow: (code?: string) => Promise<void>
   startDeviceFlow: () => Promise<DeviceFlowStart>
   pollDeviceFlow: (deviceCode: string) => Promise<{ token: string; userId: string } | null>
   listAccounts: () => Promise<{ accounts: Account[]; currentAccountId: string | null }>
@@ -678,13 +705,19 @@ export interface LucidGitAPI {
   isRepo: (repoPath: string) => Promise<boolean>
   clone: (args: { url: string; dir: string; depth?: number }) => Promise<void>
   status: (repoPath: string) => Promise<FileStatus[]>
+  diagnoseIndex: (repoPath: string) => Promise<IndexDiagnosis>
+  repairIndex: (repoPath: string, token: string) => Promise<IndexRepairResult>
+  undoIndexRepair: (repoPath: string, id: string) => Promise<void>
+  checkIndexBlockers: (repoPath: string) => Promise<IndexRecoveryBlockers>
+  stopIndexTasks: (repoPath: string, tasks: Array<Pick<RecoveryGitTask, 'pid' | 'startedAt'>>, confirmed: boolean) => Promise<number>
+  recoverIndexLock: (repoPath: string, token: string, confirmed: boolean) => Promise<IndexLockRecoveryResult>
   currentBranch: (repoPath: string) => Promise<string>
   stage: (repoPath: string, paths: string[]) => Promise<void>
   unstage: (repoPath: string, paths: string[]) => Promise<void>
   commit: (repoPath: string, message: string, noVerify?: boolean) => Promise<void>
-  push: (repoPath: string) => Promise<void>
+  push: (repoPath: string, force?: boolean) => Promise<void>
   pull: (repoPath: string) => Promise<void>
-  fetch: (repoPath: string) => Promise<void>
+  fetch: (repoPath: string, background?: boolean) => Promise<void>
   log: (repoPath: string, args?: { limit?: number; all?: boolean; filePath?: string; refs?: string[] }) => Promise<CommitEntry[]>
   changelog: (repoPath: string, query: ChangelogQuery) => Promise<ChangelogEntry[]>
   commitFiles: (repoPath: string, hash: string) => Promise<CommitFileChange[]>
@@ -770,6 +803,7 @@ export interface LucidGitAPI {
   // Notifications + webhooks
   notificationList: (repoPath: string) => Promise<AppNotification[]>
   notificationMarkRead: (id: number) => Promise<void>
+  notificationClearAll: () => Promise<void>
   notifyDesktop: (request: DesktopNotifyRequest) => Promise<void>
   webhookTest: (url: string) => Promise<boolean>
   webhookLoad: (repoPath: string) => Promise<WebhookConfig | null>
@@ -780,6 +814,7 @@ export interface LucidGitAPI {
   updateDownload: () => Promise<void>
   updateInstall: () => Promise<void>
   onUpdateReady: (cb: () => void) => () => void
+  onUpdateError: (cb: (message: string) => void) => () => void
 
   // Auto-fix helpers
   rebaseAbort: (repoPath: string) => Promise<void>
@@ -818,11 +853,12 @@ export interface LucidGitAPI {
 
   // App Settings
   settingsGet: () => Promise<AppSettings>
-  settingsSave: (settings: AppSettings) => Promise<void>
+  settingsSave: (settings: Partial<AppSettings>) => Promise<void>
 
   // Team Config
   teamConfigLoad: (repoPath: string) => Promise<TeamConfig | null>
   teamConfigSave: (repoPath: string, config: TeamConfig) => Promise<void>
+  teamConfigApply: (repoPath: string, config: TeamConfig) => Promise<void>
 
   // Git Tools
   gitRestoreFile: (repoPath: string, filePath: string, fromHash: string) => Promise<void>
@@ -839,7 +875,7 @@ export interface LucidGitAPI {
   getIndexLockInfo: (repoPath: string) => Promise<{ path: string; ageSeconds: number; mtimeMs: number } | null>
   removeIndexLock: (repoPath: string) => Promise<boolean>
   aheadFilePaths: (repoPath: string) => Promise<string[]>
-  gitResetTo: (repoPath: string, hash: string, mode: 'soft' | 'mixed' | 'hard') => Promise<void>
+  gitResetTo: (repoPath: string, hash: string, mode: 'soft' | 'mixed' | 'hard', expectedHead?: string) => Promise<void>
   gitLsFiles: (repoPath: string) => Promise<string[]>
   gitFileLog: (repoPath: string, filePath: string, limit?: number) => Promise<CommitEntry[]>
   gitBranchActivity: (repoPath: string) => Promise<BranchActivity[]>
@@ -859,6 +895,9 @@ export interface LucidGitAPI {
   unwatchStatusChanges: (repoPath: string) => Promise<void>
 
   // Presence
+  presenceConfigLoad: (repoPath: string) => Promise<FirebasePresenceConfig | null>
+  presenceConfigSave: (repoPath: string, config: FirebasePresenceConfig) => Promise<void>
+  presenceConfigTest: (repoPath: string, config: FirebasePresenceConfig) => Promise<FirebasePresenceTest>
   presenceRead: (repoPath: string) => Promise<PresenceFile>
   presenceUpdate: (repoPath: string, login: string, entry: PresenceEntry) => Promise<void>
 
@@ -871,7 +910,7 @@ export interface LucidGitAPI {
   forecastStatus: (repoPath: string) => Promise<ForecastStatus | null>
   forecastPause: () => Promise<void>
   forecastResume: () => Promise<void>
-  onForecastConflict: (cb: (conflicts: ForecastConflict[]) => void) => () => void
+  onForecastConflict: (cb: (status: ForecastStatus) => void) => () => void
 
   // Dependency-Aware Blame — Phase 18
   depBuildGraph: (repoPath: string) => Promise<DepGraphStatus>
@@ -882,9 +921,11 @@ export interface LucidGitAPI {
 
   // GitHub API
   githubCreatePR: (args: { owner: string; repo: string; head: string; base: string; title: string; body: string; draft: boolean }) => Promise<{ number: number; htmlUrl: string; title: string }>
+  githubComparePR: (args: { owner: string; repo: string; head: string; base: string }) => Promise<BranchDiffCommit[]>
+  publishPRBranch: (repoPath: string, branch: string, remoteUrl: string) => Promise<void>
   githubListPRs:  (args: { owner: string; repo: string }) => Promise<PullRequest[]>
-  githubPrFiles:  (args: { owner: string; repo: string; prNumber: number }) => Promise<string[]>
-  githubMergePR:  (args: { owner: string; repo: string; prNumber: number; repoPath: string }) => Promise<void>
+  githubPrFiles:  (args: { owner: string; repo: string; prNumber: number; expectedSha?: string }) => Promise<string[]>
+  githubMergePR:  (args: { owner: string; repo: string; prNumber: number; repoPath: string; expectedSha: string }) => Promise<void>
   githubClosePR:  (args: { owner: string; repo: string; prNumber: number }) => Promise<void>
   githubListRepos: () => Promise<GitHubRepo[]>
 
@@ -906,6 +947,7 @@ export interface LucidGitAPI {
 
   // Bug logs
   logGetText: () => Promise<string>
+  logClear: () => Promise<void>
   logGetSuggestion: () => Promise<string | null>
   logSaveDialog: () => Promise<string | null>
   logRendererEvent: (source: string, message: string, detail?: unknown) => Promise<void>
@@ -918,7 +960,7 @@ export interface LucidGitAPI {
 
   // Events: main → renderer — each returns an unsubscribe function
   onOperationProgress: (cb: (step: OperationStep) => void) => () => void
-  onLockChanged: (cb: (locks: Lock[]) => void) => () => void
+  onLockChanged: (cb: (event: { repoPath: string; locks: Lock[]; error?: string }) => void) => () => void
   onNotification: (cb: (notification: AppNotification) => void) => () => void
   onUpdateAvailable: (cb: (info: UpdateInfo) => void) => () => void
   onStatusChanged: (cb: () => void) => () => void

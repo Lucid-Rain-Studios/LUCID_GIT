@@ -1,4 +1,5 @@
-import { ipcMain, dialog, shell, BrowserWindow, type IpcMainInvokeEvent } from 'electron'
+import path from 'path'
+import { app, ipcMain, dialog, shell, BrowserWindow, powerMonitor, type IpcMainInvokeEvent } from 'electron'
 import { permissionService } from '../services/PermissionService'
 import { watcherService } from '../services/WatcherService'
 import { dependencyService } from '../services/DependencyService'
@@ -6,11 +7,16 @@ import { heatmapService } from '../services/HeatmapService'
 import { forecastService } from '../services/ForecastService'
 import { assetDiffService } from '../services/AssetDiffService'
 import { presenceService } from '../services/PresenceService'
-import type { PresenceEntry } from '../types'
+import { firebasePresenceService, validateFirebaseConfig } from '../services/FirebasePresenceService'
+import { PresenceSession } from '../services/PresenceSession'
+import type { PresenceEntry, FirebasePresenceConfig } from '../types'
+import type { RecoveryGitTask } from '../indexRecoveryTypes'
 import { CHANNELS } from './channels'
-import { withGitTimeout, preemptRepoReads } from '../util/dugite-exec'
+import { exec, execSafe, execWithStdin, withGitTimeout, preemptRepoReads } from '../util/dugite-exec'
+import { parseNumstat } from '../util/git-paths'
 import { withRepoSlot } from '../util/repo-gate'
 import { gitService } from '../services/GitService'
+import { indexRecoveryService } from '../services/IndexRecoveryService'
 import { authService } from '../services/AuthService'
 import { logService } from '../services/LogService'
 import { lockService } from '../services/LockService'
@@ -23,7 +29,7 @@ import { settingsService } from '../services/SettingsService'
 import { terminalService } from '../services/TerminalService'
 import { teamConfigService } from '../services/TeamConfigService'
 import { gitHubService } from '../services/GitHubService'
-import type { PRCreateArgs, PRListArgs, PRActionArgs } from '../services/GitHubService'
+import type { PRCreateArgs, PRListArgs, PRActionArgs, PRCompareArgs } from '../services/GitHubService'
 import { prMonitorService } from '../services/PRMonitorService'
 import { undoService, UndoableOp } from '../services/UndoService'
 import type { WebhookConfig, AppSettings, TeamConfig } from '../types'
@@ -48,6 +54,8 @@ const READ_TIMEOUT_MS = 30_000
 // Previously this covered push and pull alone, and every other long operation
 // here had no terminator at all.
 const PROGRESS_CHANNELS = new Set<string>([
+  CHANNELS.GIT_PUBLISH_PR_BRANCH,
+  CHANNELS.GIT_BRANCH_CREATE,
   CHANNELS.CLEANUP_GC, CHANNELS.CLEANUP_SHALLOW, CHANNELS.CLEANUP_SIZE,
   CHANNELS.CLEANUP_UNSHALLOW, CHANNELS.DEP_BUILD_GRAPH, CHANNELS.GIT_CLONE,
   CHANNELS.GIT_DISCARD, CHANNELS.GIT_DISCARD_ALL, CHANNELS.GIT_FETCH,
@@ -64,8 +72,11 @@ const PROGRESS_CHANNELS = new Set<string>([
 // `.git/index.lock`. Reads are not blocked outright — they run a few at a time
 // and step aside for these.
 const EXCLUSIVE_CHANNELS = new Set<string>([
+  CHANNELS.GIT_PUBLISH_PR_BRANCH,
+  CHANNELS.GIT_BRANCH_CREATE,
+  CHANNELS.GIT_INDEX_REPAIR, CHANNELS.GIT_INDEX_UNDO,
   CHANNELS.GIT_DISCARD, CHANNELS.GIT_DISCARD_ALL, CHANNELS.GIT_STAGE,
-  CHANNELS.GIT_UNSTAGE, CHANNELS.GIT_COMMIT, CHANNELS.GIT_PULL,
+  CHANNELS.GIT_UNSTAGE, CHANNELS.GIT_COMMIT, CHANNELS.GIT_PULL, CHANNELS.GIT_RESET_TO,
   CHANNELS.GIT_PUSH, CHANNELS.GIT_UPDATE_FROM_MAIN, CHANNELS.GIT_CHECKOUT,
   CHANNELS.GIT_MERGE, CHANNELS.LFS_MIGRATE, CHANNELS.LFS_RESTORE,
   CHANNELS.CLEANUP_GC,
@@ -174,6 +185,19 @@ async function requireWrite(repoPath: string): Promise<void> {
   if (perm === 'read') throw new Error('PERMISSION_DENIED: Write access required for this operation')
 }
 
+function assertPresenceAccount(accountId: string | null): void {
+  if (!accountId || authService.listAccounts().currentAccountId !== accountId) {
+    throw new Error('PERMISSION_DENIED: Account changed. Retry with the current repository admin.')
+  }
+}
+
+async function requirePresenceAdmin(repoPath: string): Promise<string | null> {
+  const accountId = authService.listAccounts().currentAccountId
+  await requireAdmin(repoPath)
+  assertPresenceAccount(accountId)
+  return accountId
+}
+
 export function registerHandlers(): void {
   const handle = <TArgs extends unknown[]>(channel: string, fn: IpcHandler<TArgs>): void => {
     ipcMain.handle(channel, async (event, ...args) => {
@@ -245,7 +269,7 @@ export function registerHandlers(): void {
     await undoService.recordCheckpoint(repoPath, op, label)
     try {
       const result = await fn()
-      undoService.markAvailable(repoPath)
+      await undoService.markAvailable(repoPath)
       return result
     } catch (error) {
       undoService.discard(repoPath)
@@ -258,11 +282,13 @@ export function registerHandlers(): void {
     await shell.openExternal(url)
   })
 
-  handle(CHANNELS.SHELL_SHOW_IN_FOLDER, async (_event, fullPath: string) => {
+  handle(CHANNELS.SHELL_SHOW_IN_FOLDER, async (_event, fullPath: string, relativePath?: string) => {
+    if (relativePath !== undefined) fullPath = path.join(fullPath, relativePath)
     shell.showItemInFolder(fullPath)
   })
 
-  handle(CHANNELS.SHELL_OPEN_PATH, async (_event, fullPath: string) => {
+  handle(CHANNELS.SHELL_OPEN_PATH, async (_event, fullPath: string, relativePath?: string) => {
+    if (relativePath !== undefined) fullPath = path.join(fullPath, relativePath)
     const message = await shell.openPath(fullPath)
     if (message) throw new Error(`Could not open path "${fullPath}": ${message}`)
   })
@@ -305,6 +331,15 @@ export function registerHandlers(): void {
     return gitService.status(repoPath)
   })
 
+  handle(CHANNELS.GIT_INDEX_DIAGNOSE, (_event, repoPath: string) => indexRecoveryService.diagnose(repoPath))
+  handle(CHANNELS.GIT_INDEX_REPAIR, (_event, repoPath: string, token: string) => indexRecoveryService.repair(repoPath, token))
+  handle(CHANNELS.GIT_INDEX_UNDO, (_event, repoPath: string, id: string) => indexRecoveryService.undo(repoPath, id))
+  // Keep process inspection/cancellation outside the gate they need to unblock.
+  // Lock recovery acquires its own exclusive slot after validating confirmation.
+  handle(CHANNELS.GIT_INDEX_BLOCKERS, (_event, repoPath: string) => indexRecoveryService.checkBlockers(repoPath))
+  handle(CHANNELS.GIT_INDEX_STOP_TASKS, (_event, repoPath: string, tasks: Array<Pick<RecoveryGitTask, 'pid' | 'startedAt'>>, confirmed: boolean) => indexRecoveryService.stopTasks(repoPath, tasks, confirmed))
+  handle(CHANNELS.GIT_INDEX_RECOVER_LOCK, (_event, repoPath: string, token: string, confirmed: boolean) => indexRecoveryService.recoverLock(repoPath, token, confirmed))
+
   handleRead(CHANNELS.GIT_CURRENT_BRANCH, async (_event, repoPath: string) => {
     return gitService.currentBranch(repoPath)
   })
@@ -318,6 +353,7 @@ export function registerHandlers(): void {
   })
 
   handle(CHANNELS.GIT_STAGE, async (event, repoPath: string, paths: string[]) => {
+    await lockService.assertStageAllowed(repoPath, paths)
     return gitService.stage(repoPath, paths, (step) => {
       if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
     })
@@ -333,33 +369,45 @@ export function registerHandlers(): void {
     return gitService.commit(repoPath, message, noVerify)
   })
 
-  handle(CHANNELS.GIT_PUSH, async (event, repoPath: string) => {
+  handle(CHANNELS.GIT_PUSH, async (event, repoPath: string, force?: boolean) => {
     if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, { id: 'push-prepare', label: 'Preparing push', status: 'running', progress: 3 })
     const { branch, filesAhead } = await gitService.push(repoPath, (step) => {
       if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
-    })
-
-    if (branch.trim().toLowerCase() === 'main' && filesAhead.length > 0) {
+    }, force === true)
+    const reportUnlockFailure = (detail: string) => {
+      if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, { id: 'push-unlock', label: 'Push succeeded; locks retained', status: 'error', detail })
       try {
-        const { accounts, currentAccountId } = authService.listAccounts()
-        const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login
-        if (currentLogin) {
-          const locks = await lockService.listLocks(repoPath)
-          const pushedFiles = new Set(filesAhead)
-          await lockService.unlockFiles(
-            repoPath,
-            locks
-              .filter(lock => lock.owner.login === currentLogin && pushedFiles.has(lock.path))
-              .map(lock => ({ filePath: lock.path, lockId: lock.id })),
-            currentLogin,
-            currentLogin,
-            step => {
-              if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
-            },
-          )
+        const notice = notificationService.push(repoPath, 'locks-retained', 'Push succeeded; review retained locks', detail)
+        if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_NOTIFICATION, notice)
+      } catch (error) { logService.error('push.unlock-notice', String(error)) }
+    }
+
+    if (filesAhead.length > 0) {
+      try {
+        const defaultBranch = await gitService.defaultBranch(repoPath)
+        if (branch.trim() === defaultBranch) {
+          const { accounts, currentAccountId } = authService.listAccounts()
+          const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login
+          if (currentLogin) {
+            const locks = await lockService.listLocks(repoPath)
+            const dirty = new Set((await gitService.status(repoPath)).map(file => file.path))
+            const pushedFiles = new Set(filesAhead)
+            const result = await lockService.unlockFiles(
+              repoPath,
+              locks
+                .filter(lock => lock.owner.login === currentLogin && pushedFiles.has(lock.path) && !dirty.has(lock.path))
+                .map(lock => ({ filePath: lock.path, lockId: lock.id })),
+              currentLogin,
+              currentLogin,
+              step => {
+                if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
+              },
+            )
+            if (result.failed.length) reportUnlockFailure(result.failed.map(item => item.filePath + ': ' + item.error).join('\n'))
+          }
         }
-      } catch {
-        // Best-effort lock cleanup — do not fail successful push
+      } catch (error) {
+        reportUnlockFailure(String(error))
       }
     }
 
@@ -378,9 +426,9 @@ export function registerHandlers(): void {
     return result
   })
 
-  handle(CHANNELS.GIT_FETCH, async (event, repoPath: string) => {
+  handle(CHANNELS.GIT_FETCH, async (event, repoPath: string, background = false) => {
     const result = await gitService.fetch(repoPath, (step) => {
-      if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
+      if (!background && !event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
     })
     prMonitorService.checkNow(repoPath).catch(() => {})
     prMonitorService.checkMainMerges(repoPath).catch(() => {})
@@ -400,8 +448,10 @@ export function registerHandlers(): void {
     return gitService.branchList(repoPath)
   })
 
-  handle(CHANNELS.GIT_BRANCH_CREATE, async (_event, repoPath: string, name: string, from?: string) => {
-    return gitService.createBranch(repoPath, name, from)
+  handle(CHANNELS.GIT_BRANCH_CREATE, async (event, repoPath: string, name: string, from?: string) => {
+    return gitService.createBranch(repoPath, name, from, step => {
+      if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
+    })
   })
 
   handle(CHANNELS.GIT_BRANCH_RENAME, async (_event, repoPath: string, oldName: string, newName: string) => {
@@ -519,10 +569,16 @@ export function registerHandlers(): void {
   })
 
   handle(CHANNELS.GIT_APPLY_PATCH, async (_event, repoPath: string, patch: string, reverse?: boolean) => {
+    if (!reverse) {
+      const parsed = await execWithStdin(['apply', '--numstat', '-z'], repoPath, patch)
+      await lockService.assertStageAllowed(repoPath, parseNumstat(parsed.stdout).map(file => file.path))
+    }
     return gitService.applyPatch(repoPath, patch, { reverse })
   })
 
   // ── Auth — Phase 3 ────────────────────────────────────────────────────────
+  handle(CHANNELS.AUTH_CANCEL_DEVICE_FLOW, async (_event, code?: string) => authService.cancelDeviceFlow(code))
+
   handle(CHANNELS.AUTH_START_DEVICE_FLOW, async () => {
     return authService.startDeviceFlow()
   })
@@ -557,16 +613,7 @@ export function registerHandlers(): void {
   })
 
   handle(CHANNELS.GIT_MERGE_PREVIEW, async (_event, repoPath: string, targetBranch: string, baseBranch?: string) => {
-    const conflicts = await gitService.mergePreview(repoPath, targetBranch, baseBranch)
-    const ourBranch = baseBranch ?? await gitService.currentBranch(repoPath)
-    for (const c of conflicts) {
-      heatmapService.recordConflictEvent({
-        repoPath, filePath: c.path,
-        ourBranch, theirBranch: targetBranch,
-        conflictType: c.conflictType,
-      })
-    }
-    return conflicts
+    return gitService.mergePreview(repoPath, targetBranch, baseBranch)
   })
 
   handle(CHANNELS.GIT_POTENTIAL_MERGE_CONFLICTS, async (_event, repoPath: string, mode: 'lightweight' | 'deep') => {
@@ -574,7 +621,24 @@ export function registerHandlers(): void {
   })
 
   handle(CHANNELS.GIT_MERGE, async (_event, repoPath: string, targetBranch: string) => {
-    await withUndo(repoPath, 'merge', 'Merge', () => runGitOp('Merge', () => gitService.merge(repoPath, targetBranch)))
+    try {
+      await withUndo(repoPath, 'merge', 'Merge', () => runGitOp('Merge', () => gitService.merge(repoPath, targetBranch)))
+    } catch (error) {
+      // Predictions never write history. Record only verified unmerged files
+      // after Git reports a conflict from an actual merge attempt.
+      if (/CONFLICT\s*\(|Automatic merge failed/i.test(String(error))) {
+        try {
+          const state = await gitService.mergeInProgress(repoPath)
+          if (state?.kind === 'merge') {
+            const ourBranch = await gitService.currentBranch(repoPath)
+            for (const filePath of state.unresolvedFiles) heatmapService.recordConflictEvent({
+              repoPath, filePath, ourBranch, theirBranch: targetBranch, conflictType: 'unmerged',
+            })
+          }
+        } catch (recordError) { logService.warn('heatmap.conflict', String(recordError)) }
+      }
+      throw error
+    }
     const ourBranch = await gitService.currentBranch(repoPath)
     heatmapService.markConflictsResolved(repoPath, ourBranch, targetBranch)
   })
@@ -605,8 +669,10 @@ export function registerHandlers(): void {
   })
 
 // ── Locks — Phase 5 ───────────────────────────────────────────────────────
-  handleRead(CHANNELS.LOCK_LIST, async (_event, repoPath: string) => {
-    return lockService.listLocks(repoPath)
+  handle(CHANNELS.LOCK_LIST, async (_event, repoPath: string) => {
+    // LockService owns the deadline inside its LFS queue. An outer deadline
+    // would abandon queued work and let it start after the caller timed out.
+    return withRepoSlot(repoPath, 'read', () => lockService.listLocks(repoPath))
   })
 
   handle(CHANNELS.LOCK_FILE, async (event, repoPath: string, filePath: string) => {
@@ -760,6 +826,7 @@ export function registerHandlers(): void {
   handle(CHANNELS.NOTIFICATION_MARK_READ, async (_event, id: number) => {
     notificationService.markRead(id)
   })
+  handle(CHANNELS.NOTIFICATION_CLEAR_ALL, async () => notificationService.clearAll())
 
   handle(CHANNELS.NOTIFICATION_DESKTOP_NOTIFY, async (_event, request: {
     event: 'appUpdate' | 'prResolved' | 'forceUnlock' | 'operationComplete' | 'fatalError' | 'conflictForecast' | 'lockOnDirtyFile'
@@ -914,13 +981,30 @@ export function registerHandlers(): void {
     settingsService.getAll()
   )
 
-  handle(CHANNELS.SETTINGS_SAVE, async (_event, settings: AppSettings) => {
-    settingsService.save(settings)
-    const defaultBranch = (settings.defaultBranchName ?? 'main').trim() || 'main'
-    await gitService.setGlobalDefaultBranch(defaultBranch)
+  let settingsWrites: Promise<unknown> = Promise.resolve()
+  handle(CHANNELS.SETTINGS_SAVE, (_event, patch: Partial<AppSettings>) => {
+    const pending = settingsWrites.then(async () => {
+      if (patch.defaultBranchName === undefined || patch.defaultBranchName === settingsService.getAll().defaultBranchName) return settingsService.save(patch)
+      const branch = patch.defaultBranchName.trim()
+      if (!branch || (await execSafe(['check-ref-format', '--branch', branch], app.getPath('home'))).exitCode !== 0) throw new Error('Invalid default branch name')
+      const previous = await execSafe(['config', '--global', '--get', 'init.defaultBranch'], app.getPath('home'))
+      if (previous.exitCode !== 0 && previous.exitCode !== 1) throw new Error(previous.stderr || 'Could not read the global Git default branch')
+      await exec(['config', '--global', 'init.defaultBranch', branch], app.getPath('home'))
+      try { await settingsService.save({ ...patch, defaultBranchName: branch }) }
+      catch (error) {
+        try {
+          if (previous.exitCode === 0) await exec(['config', '--global', 'init.defaultBranch', previous.stdout.trim()], app.getPath('home'))
+          else await exec(['config', '--global', '--unset', 'init.defaultBranch'], app.getPath('home'))
+        } catch (rollbackError) {
+          throw new Error(`Settings save failed: ${String(error)}. Restoring the global Git default branch also failed: ${String(rollbackError)}`)
+        }
+        throw error
+      }
+    })
+    settingsWrites = pending.catch(() => {})
+    return pending
   })
 
-  // ── Team Config — Phase 15 ────────────────────────────────────────────────
   handle(CHANNELS.TEAM_CONFIG_LOAD, (_event, repoPath: string) =>
     teamConfigService.load(repoPath)
   )
@@ -928,6 +1012,11 @@ export function registerHandlers(): void {
   handle(CHANNELS.TEAM_CONFIG_SAVE, async (_event, repoPath: string, config: TeamConfig) => {
     await requireAdmin(repoPath)
     return teamConfigService.save(repoPath, config)
+  })
+
+  handle(CHANNELS.TEAM_CONFIG_APPLY, async (_event, repoPath: string, config: TeamConfig) => {
+    await requireAdmin(repoPath)
+    return withRepoSlot(repoPath, 'write', () => teamConfigService.apply(repoPath, config))
   })
 
   // ── Git Tools ─────────────────────────────────────────────────────────────
@@ -974,9 +1063,9 @@ export function registerHandlers(): void {
     return gitService.aheadFilePaths(repoPath)
   })
 
-  handle(CHANNELS.GIT_RESET_TO, async (_event, repoPath: string, hash: string, mode: 'soft' | 'mixed' | 'hard') => {
+  handle(CHANNELS.GIT_RESET_TO, async (_event, repoPath: string, hash: string, mode: 'soft' | 'mixed' | 'hard', expectedHead?: string) => {
     if (mode === 'hard') await requireAdmin(repoPath)
-    return withUndo(repoPath, 'reset', 'Reset', () => runGitOp('Reset', () => gitService.resetTo(repoPath, hash, mode)))
+    return withUndo(repoPath, 'reset', 'Reset', () => runGitOp('Reset', () => gitService.resetTo(repoPath, hash, mode, expectedHead)))
   })
 
   handleRead(CHANNELS.GIT_FILE_LOG, (_event, repoPath: string, filePath: string, limit?: number) =>
@@ -1017,9 +1106,9 @@ export function registerHandlers(): void {
   )
 
   // ── File-system watcher ───────────────────────────────────────────────────
-  handle(CHANNELS.GIT_WATCH_STATUS, (event, repoPath: string) => {
+  handle(CHANNELS.GIT_WATCH_STATUS, async (event, repoPath: string) => {
     const sender = event.sender
-    watcherService.watch(repoPath, () => {
+    await watcherService.watch(repoPath, () => {
       if (sender.isDestroyed()) return
       const win = BrowserWindow.fromWebContents(sender)
       if (win && !win.isDestroyed()) {
@@ -1033,14 +1122,84 @@ export function registerHandlers(): void {
   })
 
   // ── Presence ─────────────────────────────────────────────────────────────
-  handle(CHANNELS.PRESENCE_READ, (_event, repoPath: string) => {
-    presenceService.removeStale(repoPath)
-    return presenceService.read(repoPath)
+  handle(CHANNELS.PRESENCE_READ, async (_event, repoPath: string) => {
+    const accountId = await requirePresenceAdmin(repoPath)
+    assertPresenceAccount(accountId)
+    const config = firebasePresenceService.load(repoPath)
+    if (config?.enabled) return firebasePresenceService.read(config)
+    return { ...presenceService.read(repoPath), source: 'local' }
   })
 
-  handle(CHANNELS.PRESENCE_UPDATE, (_event, repoPath: string, login: string, entry: PresenceEntry) =>
-    presenceService.update(repoPath, login, entry)
-  )
+  handle(CHANNELS.PRESENCE_CONFIG_LOAD, async (_event, repoPath: string) => {
+    const accountId = await requirePresenceAdmin(repoPath)
+    assertPresenceAccount(accountId)
+    return firebasePresenceService.load(repoPath)
+  })
+  handle(CHANNELS.PRESENCE_CONFIG_SAVE, async (_event, repoPath: string, config: FirebasePresenceConfig) => {
+    const accountId = await requirePresenceAdmin(repoPath)
+    assertPresenceAccount(accountId)
+    const normalized = validateFirebaseConfig(config)
+    // Finish writes for the old connection before replacing its routing.
+    presenceSession?.stop()
+    try {
+      await firebasePresenceService.drain()
+      assertPresenceAccount(accountId)
+      await requirePresenceAdmin(repoPath)
+      assertPresenceAccount(accountId)
+      firebasePresenceService.save(repoPath, normalized)
+    } finally {
+      // A failed save must not leave the previously working session stopped.
+      if (authService.listAccounts().currentAccountId === accountId) presenceSession?.start(repoPath)
+    }
+  })
+  handle(CHANNELS.PRESENCE_CONFIG_TEST, async (_event, repoPath: string, config: FirebasePresenceConfig) => {
+    const accountId = await requirePresenceAdmin(repoPath)
+    assertPresenceAccount(accountId)
+    return firebasePresenceService.test(config)
+  })
+
+  let presenceSession: PresenceSession | null = null
+  const startPresenceTracking = () => {
+    if (presenceSession) return presenceSession
+    const session = new PresenceSession(
+      () => {
+        const { accounts, currentAccountId } = authService.listAccounts()
+        return accounts.find(a => a.userId === currentAccountId) ?? null
+      },
+      () => powerMonitor.getSystemIdleState(60),
+      (repoPath, login, entry) => {
+        const config = firebasePresenceService.load(repoPath)
+        if (config?.enabled) {
+          void firebasePresenceService.publish(repoPath, entry).catch(() => {})
+        } else presenceService.update(repoPath, login, entry)
+      },
+    )
+    const tickPresence = () => { try { session.tick() } catch { /* Retry on the next heartbeat. */ } }
+    const heartbeat = setInterval(tickPresence, 60_000)
+    // State changes are sampled on the next heartbeat; closing still sends
+    // Offline immediately instead of waiting for the publishing interval.
+    powerMonitor.on('lock-screen', () => { session.setLocked(true) })
+    powerMonitor.on('unlock-screen', () => { session.setLocked(false) })
+    powerMonitor.on('suspend', () => { session.setLocked(true) })
+    powerMonitor.on('resume', () => { session.setLocked(false) })
+    let exiting = false
+    app.on('before-quit', event => {
+      if (exiting) return
+      exiting = true
+      clearInterval(heartbeat)
+      try { session.stop() } catch { /* Expiration handles failed final writes. */ }
+      event.preventDefault()
+      // Offline is best effort; never hold application exit on a lost network.
+      void Promise.race([firebasePresenceService.drain(), new Promise(resolve => setTimeout(resolve, 2_000))])
+        .finally(() => app.quit())
+    })
+    presenceSession = session
+    return session
+  }
+  handle(CHANNELS.PRESENCE_UPDATE, (_event, repoPath: string, _login: string, _entry: PresenceEntry) => {
+    if (!repoPath) { presenceSession?.stop(); return }
+    startPresenceTracking().start(repoPath)
+  })
 
   // ── Lock Heatmap & Conflict Forecasting — Phase 19 ───────────────────────
   handle(CHANNELS.HEATMAP_COMPUTE, (_event, repoPath: string, timeWindowDays: number, groupBy: 'folder' | 'type') =>
@@ -1102,6 +1261,7 @@ export function registerHandlers(): void {
   handle(CHANNELS.LOG_GET_TEXT, () =>
     logService.getFormattedText()
   )
+  handle(CHANNELS.LOG_CLEAR, () => logService.clear())
 
   handle(CHANNELS.LOG_GET_SUGGESTION, () =>
     logService.getSuggestion()
@@ -1127,6 +1287,16 @@ export function registerHandlers(): void {
     logService.error(source || 'renderer', `${message || 'Renderer error'}${suffix}`)
   })
   // ── GitHub API ─────────────────────────────────────────────────────────────
+  handle(CHANNELS.GIT_PUBLISH_PR_BRANCH, async (event, repoPath: string, branch: string, remoteUrl: string) => {
+    return gitService.publishPRBranch(repoPath, branch, remoteUrl, step => {
+      if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
+    })
+  })
+  handle(CHANNELS.GITHUB_COMPARE_PR, async (_event, args: PRCompareArgs) => {
+    const token = await authService.getCurrentToken()
+    if (!token) throw new Error('Not authenticated with GitHub')
+    return gitHubService.comparePRCommits(token, args)
+  })
   handle(CHANNELS.GITHUB_CREATE_PR, async (_event, args: PRCreateArgs) => {
     const token = await authService.getCurrentToken()
     if (!token) throw new Error('Not authenticated with GitHub')

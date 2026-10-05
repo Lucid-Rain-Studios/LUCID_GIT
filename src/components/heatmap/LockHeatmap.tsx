@@ -175,6 +175,10 @@ export function LockHeatmap({ repoPath }: Props) {
           </ActionBtn>
         </div>
 
+        <p style={{ margin: '0 0 10px', color: '#8b94b0', fontFamily: 'var(--lg-font-ui)', fontSize: 11 }}>
+          Observed activity only. Previews and legacy records are excluded; averages use completed lock intervals.
+        </p>
+
         {/* Drill breadcrumb */}
         {drillPath && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, flexShrink: 0 }}>
@@ -225,10 +229,10 @@ export function LockHeatmap({ repoPath }: Props) {
                       }}>
                         <div style={{ color: '#dde1f0', fontWeight: 600, marginBottom: 4 }}>{n.name}</div>
                         <div style={{ color: '#8b94b0' }}>Score: <span style={{ color: scoreToColor(n.score) === '#1a2a3a' ? '#4e5870' : '#f5a832' }}>{n.score}</span></div>
-                        <div style={{ color: '#8b94b0' }}>Locks: {n.lockCount}</div>
+                        <div style={{ color: '#8b94b0' }}>Lock acquisitions: {n.lockCount}</div>
                         <div style={{ color: '#8b94b0' }}>Conflicts: {n.conflictCount}</div>
                         <div style={{ color: '#8b94b0' }}>Contributors: {n.uniqueContributors}</div>
-                        <div style={{ color: '#8b94b0' }}>Avg duration: {fmtDuration(n.meanDurationMs)}</div>
+                        <div style={{ color: '#8b94b0' }}>Avg completed lock: {fmtDuration(n.meanDurationMs)}</div>
                       </div>
                     )
                   }}

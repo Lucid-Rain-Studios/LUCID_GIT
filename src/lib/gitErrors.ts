@@ -1,4 +1,4 @@
-// Git error parsing library — 20 error codes
+// Git error parsing library.
 // Each error is matched from raw git stderr output.
 
 export type ErrorSeverity = 'warning' | 'error' | 'fatal'
@@ -23,6 +23,7 @@ export interface FixStep {
 }
 
 export interface LucidGitError {
+  repoPath?: string | null
   code: string
   gitMessage: string
   title: string
@@ -49,6 +50,29 @@ interface ErrorDef {
 }
 
 const DEFS: ErrorDef[] = [
+  {
+    code: 'SHARED_INDEX_UNREADABLE',
+    test: /sharedindex\.[0-9a-f]+[^\r\n]*:\s*(?:index file (?:open failed|smaller than expected)|unable to map index file)|broken index, expect [^\r\n]*sharedindex\./i,
+    title: 'Git cannot read the shared staging index',
+    description: 'This repository uses a split index whose shared data is missing, damaged or inaccessible. Open Tools → Index Recovery and click Diagnose to check whether a backed-up rebuild is possible.',
+    causes: ['Missing or damaged sharedindex data', 'File access or storage problems affecting the shared index'],
+    fixes: [{ label: 'Open Tools → Index Recovery. Diagnose checks the cause and enables a reversible repair when safe. Existing sharedindex files are preserved.' }],
+    severity: 'fatal',
+    canAutoFix: false,
+  },
+  {
+    code: 'INDEX_UNREADABLE',
+    // Match staging-index diagnostics, not generic "bad signature", pack .idx
+    // failures, permission errors or index.lock contention.
+    test: /index file corrupt|index file smaller than expected|bad index version \d+|bad index file (?:sha1 |sha256 )?signature|unknown index entry format|index uses [^\r\n]*extension, which we do not understand/i,
+    title: 'Git cannot read the repository index',
+    description: 'The staging index is corrupt or uses an extension this Git version cannot read. Restarting or clearing the lock cache will not rebuild it. Open Tools → Index Recovery and click Diagnose for a backed-up, verified repair.',
+    causes: ['Damaged index data', 'An index extension unsupported by the Git version running this operation'],
+    fixes: [{ label: 'Open Tools → Index Recovery, then Diagnose. Review the detected issue and click Back up and repair. Undo is available while the repaired staging state and HEAD remain unchanged.' }],
+    docsUrl: 'https://git-scm.com/docs/git-reset',
+    severity: 'fatal',
+    canAutoFix: false,
+  },
   {
     // Git 2.35.2+ refuses a repository whose folder belongs to another user.
     // Studios hit this constantly — project drives, network shares, a clone
@@ -150,7 +174,7 @@ const DEFS: ErrorDef[] = [
     code: 'INDEX_LOCK',
     test: /Unable to create '.*index\.lock'.*File exists|index\.lock.*File exists/is,
     title: 'Git index is locked',
-    description: "A .git/index.lock is blocking every write to the index. Lucid Git clears locks its own git subprocesses orphan and waits for its own commands to finish before reporting this, so the lock is most likely held by another program — or by a Lucid Git operation that is still running unusually slowly. Retrying once the repository goes quiet is almost always enough.",
+    description: "Git's index.lock is blocking an index write. The lock contains no owner information. Wait for running Git commands to finish, then retry. Lucid Git automatically clears eligible stale locks and retries once, but preserves fresh locks and locks while its own Git tasks remain active. External ownership cannot be proven; stop other Git writers before retrying or recovering manually.",
     causes: [
       'A game editor with a source-control plugin (Unreal, Unity) is writing to the repo right now',
       'Another git client or terminal has a command in flight',
@@ -161,8 +185,8 @@ const DEFS: ErrorDef[] = [
     canAutoFix: false,
     fixes: [
       { label: 'Close Unreal Editor / other git clients, then retry — the lock clears itself when the writer finishes' },
-      { label: 'Check who is holding it', command: 'git status' },
-      { label: 'If nothing is running, remove the lock by hand (destructive during a real write)', command: 'git rm -f .git/index.lock' },
+      { label: 'Use Task Manager to check for git.exe and git-lfs.exe; git status cannot identify the lock owner' },
+      { label: 'After verifying all Git writers have stopped, run PowerShell in the repository (removes only the lock; unsafe during an active write)', command: '$indexLockPath = git rev-parse --path-format=absolute --git-path index.lock; if ($LASTEXITCODE -eq 0 -and $indexLockPath) { Remove-Item -LiteralPath $indexLockPath -ErrorAction Stop }' },
     ],
   },
   {
@@ -230,7 +254,7 @@ const DEFS: ErrorDef[] = [
   },
   {
     code: 'PUSH_REJECTED',
-    test: /rejected.*non-fast-forward|fetch first|Updates were rejected|push.*rejected|remote rejected/i,
+    test: /non-fast-forward|\[rejected\].*fetch first|tip of your current branch is behind/i,
     title: 'Push rejected',
     description: 'The remote has commits your local branch does not have. Pull first.',
     causes: ['Someone else pushed to this branch since your last pull', 'Force push is needed but not advised'],
@@ -285,11 +309,11 @@ const DEFS: ErrorDef[] = [
     test: /exceeded.*storage|LFS.*storage.*exceeded|bandwidth.*exceeded|LFS.*quota|storage quota/i,
     title: 'LFS quota exceeded',
     description: 'Your GitHub LFS storage or bandwidth quota has been exceeded.',
-    causes: ['Free tier limit reached (1 GB storage / 1 GB bandwidth)', 'Large assets pushed without a paid LFS plan'],
+    causes: ['Repository owner storage or bandwidth allowance is exhausted', 'Billing or spending limits prevent additional LFS use'],
     severity: 'fatal',
     canAutoFix: false,
     fixes: [
-      { label: 'Prune unreferenced LFS objects', action: { type: 'clean-pack-files' } },
+      { label: 'Ask the repository owner to check GitHub LFS billing and quota. Local cleanup does not change remote quota.' },
       { label: 'Upgrade LFS storage on GitHub', command: '# github.com → Settings → Billing → Git LFS Data' },
     ],
     docsUrl: 'https://docs.github.com/en/billing/managing-billing-for-git-large-file-storage',

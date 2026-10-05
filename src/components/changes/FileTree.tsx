@@ -1,3 +1,6 @@
+import { isModalOpen } from '@/lib/useDialogOverlayDismiss'
+import { useRepoStore } from '@/stores/repoStore'
+import { canStagePath } from '@/lib/staging'
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { FileStatus, Lock, ipc } from '@/ipc'
 import { useOperationStore } from '@/stores/operationStore'
@@ -163,9 +166,10 @@ export function FileTree({
   files, repoPath, selectedPath, locks, currentUserName, isLoading, onSelect, onRefresh,
   deferredStagePaths, onToggleDeferredStagePath, onSetDeferredStagePaths, onBlameDeps,
 }: FileTreeProps) {
+  const statusError = useRepoStore(s => s.error)
   const isDeferredStaging = Boolean(deferredStagePaths && onToggleDeferredStagePath && onSetDeferredStagePaths)
   const staged = useMemo(() => isDeferredStaging ? files : files.filter(f => f.staged), [files, isDeferredStaging])
-  const unstaged = useMemo(() => isDeferredStaging ? [] : files.filter(f => !f.staged), [files, isDeferredStaging])
+  const unstaged = useMemo(() => isDeferredStaging ? [] : files.filter(f => f.workingStatus !== ' ' && f.workingStatus !== '').map(f => ({ ...f, staged: false })), [files, isDeferredStaging])
   const [busy, setBusy] = useState(false)
   const dialog = useDialogStore()
   const [treeMode, setTreeMode] = useState(false)
@@ -192,7 +196,7 @@ export function FileTree({
   const { accounts, currentAccountId } = useAuthStore()
   const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login ?? null
   const canSelectAllDeferredStagePaths = isDeferredStaging
-    && files.some(file => !deferredStagePaths?.has(file.path))
+    && files.some(file => canStagePath(file.path, locks, currentLogin) && !deferredStagePaths?.has(file.path))
   // "Discard All" resets the index too, so staged rows count as candidates.
   // Only files that are purely untracked (never staged) are left alone.
   const discardCandidates = files.filter(file => file.indexStatus !== '?')
@@ -214,7 +218,9 @@ export function FileTree({
 
   useEffect(() => {
     if (multiPaths.size === 0) return
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setMultiPaths(new Set()) }
+    const handler = (e: KeyboardEvent) => {
+      if (isModalOpen()) return
+      if (e.key === 'Escape') setMultiPaths(new Set()) }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
   }, [multiPaths.size])
@@ -266,7 +272,7 @@ export function FileTree({
 
   const isCommitSelected = (file: FileStatus) => deferredStagePaths?.has(file.path) ?? file.staged
   const toggleCommitSelected = (file: FileStatus) => {
-    if (isDeferredStaging) onToggleDeferredStagePath?.(file.path)
+    if (isDeferredStaging && canStagePath(file.path, locks, currentLogin)) onToggleDeferredStagePath?.(file.path)
   }
 
   const toggleFolder = (path: string) =>
@@ -285,6 +291,8 @@ export function FileTree({
   // Bulk action helpers
   const multiSelected = allFlatFiles.filter(f => multiPaths.has(pathKey(f)))
   const multiUnstaged = multiSelected.filter(f => !f.staged)
+  const stageable = unstaged.filter(f => canStagePath(f.path, locks, currentLogin))
+  const multiStageable = multiUnstaged.filter(f => canStagePath(f.path, locks, currentLogin))
   const multiStaged   = multiSelected.filter(f => f.staged)
   const multiUntrackedPaths = multiUnstaged.filter(f => f.workingStatus === '?').map(f => f.path)
   const multiTrackedUnstagedPaths = multiUnstaged.filter(f => f.workingStatus !== '?').map(f => f.path)
@@ -292,7 +300,7 @@ export function FileTree({
   const handleMultiBulkStage = async () => {
     setMultiCtx(null)
     if (multiUnstaged.length === 0) return
-    await run(`Staging ${multiUnstaged.length} files…`, () => ipc.stage(repoPath, multiUnstaged.map(f => f.path)))
+    await run(`Staging ${multiUnstaged.length} files…`, () => ipc.stage(repoPath, multiStageable.map(f => f.path)))
     setMultiPaths(new Set())
   }
 
@@ -352,7 +360,7 @@ export function FileTree({
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
         <span style={{ fontSize: 20, color: '#2ec573' }}>✓</span>
-        <span style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 13, color: '#2ec573' }}>Working directory clean</span>
+        <span style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 13, color: statusError ? '#f5a832' : '#2ec573' }}>{statusError ? 'File status unavailable — refresh to retry' : 'Working directory clean'}</span>
         <span style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 12, color: '#4e5870' }}>No changes detected</span>
       </div>
     )
@@ -368,13 +376,13 @@ export function FileTree({
       }}>
         <ActionBtn
           label="Stage All"
-          disabled={busy || (isDeferredStaging ? !canSelectAllDeferredStagePaths : unstaged.length === 0)}
+          disabled={busy || (isDeferredStaging ? !canSelectAllDeferredStagePaths : stageable.length === 0)}
           onClick={() => {
             if (isDeferredStaging) {
-              onSetDeferredStagePaths?.(files.map(f => f.path))
+              onSetDeferredStagePaths?.(files.filter(f => canStagePath(f.path, locks, currentLogin)).map(f => f.path))
               return
             }
-            run('Staging all…', () => ipc.stage(repoPath, unstaged.map(f => f.path)))
+            run('Staging all…', () => ipc.stage(repoPath, stageable.map(f => f.path)))
           }}
         />
         <ActionBtn

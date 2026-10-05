@@ -6,6 +6,7 @@ import { execFile, type ChildProcess } from 'node:child_process'
 import { OperationStep } from '../types'
 import { logService } from '../services/LogService'
 import { isReadOnlyCommand } from './git-command'
+import type { RecoveryGitTask } from '../indexRecoveryTypes'
 
 export type ProgressCallback = (step: OperationStep) => void
 
@@ -37,7 +38,7 @@ const liveGitProcesses = new Map<number, LiveGitProcess>()
  * carries this across every `await` in the handler, so a timeout can kill the
  * processes that handler started without touching anyone else's.
  */
-const gitProcessScope = new AsyncLocalStorage<Set<number>>()
+const gitProcessScope = new AsyncLocalStorage<Set<number>[]>()
 
 /** Record a freshly spawned git process, and forget it once it exits. */
 function registerGitProcess(child: ChildProcess, args: string[], repoPath = ''): void {
@@ -49,7 +50,8 @@ function registerGitProcess(child: ChildProcess, args: string[], repoPath = ''):
     repoKey: repoPath ? path.resolve(repoPath).toLowerCase() : '',
     readOnly: isReadOnlyCommand(args),
   })
-  gitProcessScope.getStore()?.add(pid)
+  // A nested asset deadline must still be cancellable by its IPC deadline.
+  for (const scope of gitProcessScope.getStore() ?? []) scope.add(pid)
 
   const forget = () => { liveGitProcesses.delete(pid) }
   child.once('close', forget)
@@ -63,14 +65,54 @@ function registerGitProcess(child: ChildProcess, args: string[], repoPath = ''):
  * leaves it running, so the leak we are fixing would half-survive. Windows has
  * no process groups to signal, hence taskkill's /T.
  */
-function killProcessTree(pid: number, child: ChildProcess): void {
+function killProcessTree(pid: number, child: ChildProcess): Promise<void> {
   if (process.platform === 'win32') {
-    // Detached and fully ignored — we never wait on the result, and a failure
-    // here (process already gone, access denied) is not worth surfacing.
-    execFile('taskkill', ['/pid', String(pid), '/T', '/F'], () => { /* best effort */ })
-    return
+    return new Promise((resolve, reject) => {
+      execFile('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, timeout: 10_000 }, error => {
+        if (error && child.exitCode === null && child.signalCode === null) reject(new Error(`Could not stop Git task ${pid}. Check Task Manager and try again.`, { cause: error }))
+        else resolve()
+      })
+    })
   }
-  try { child.kill('SIGKILL') } catch { /* already gone */ }
+  try {
+    if (!child.kill('SIGKILL') && child.exitCode === null && child.signalCode === null) return Promise.reject(new Error(`Could not stop Git task ${pid}.`))
+    return Promise.resolve()
+  } catch (error) { return Promise.reject(error) }
+}
+
+/** Only processes this app owns; command labels never expose auth arguments. */
+export function repoGitTasks(repoPath: string): RecoveryGitTask[] {
+  const key = path.resolve(repoPath).toLowerCase()
+  return [...liveGitProcesses.entries()]
+    .filter(([, entry]) => entry.repoKey === key && entry.child.exitCode == null && entry.child.signalCode == null)
+    .map(([pid, entry]) => ({ pid, startedAt: entry.startedAt, command: `git ${detectGitSubcommand(entry.args)}`,
+      ageSeconds: Math.max(0, Math.floor((Date.now() - entry.startedAt) / 1000)), readOnly: entry.readOnly }))
+    .sort((a, b) => a.startedAt - b.startedAt)
+}
+
+/** Cancellation bypasses the repository gate so it can stop its stuck holder.
+ * Match both PID and start time; never stop tasks that arrived after review. */
+export async function stopRepoGitTasks(repoPath: string, reviewed: Array<{ pid: number; startedAt: number }>): Promise<number> {
+  if (!Array.isArray(reviewed) || reviewed.length > 100 || reviewed.some(task => !Number.isInteger(task?.pid)
+    || task.pid <= 0 || !Number.isFinite(task.startedAt))) throw new Error('Invalid reviewed Git task list.')
+  const key = path.resolve(repoPath).toLowerCase()
+  const targets = [...new Map(reviewed.map(task => [task.pid, task])).values()].flatMap(task => {
+    const entry = liveGitProcesses.get(task.pid)
+    return entry && entry.repoKey === key && entry.startedAt === task.startedAt
+      && entry.child.exitCode == null && entry.child.signalCode == null ? [{ pid: task.pid, entry }] : []
+  })
+  // Keep entries registered until actual exit. A failed taskkill must not make
+  // a running writer disappear from recovery's safety checks.
+  await Promise.all(targets.map(async ({ pid, entry }) => {
+    await killProcessTree(pid, entry.child)
+    const deadline = performance.now() + 5_000
+    while (entry.child.exitCode == null && entry.child.signalCode == null) {
+      if (performance.now() >= deadline) throw new Error(`Git task ${pid} has not exited. Recovery remains blocked.`)
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+  }))
+  if (targets.length) logService.warn('git.recovery-stop', `Stopped ${targets.length} reviewed Lucid Git task(s) for ${repoPath}. Index locks were left intact.`)
+  return targets.length
 }
 
 /**
@@ -141,7 +183,7 @@ export function killGitProcesses(pids: Iterable<number>): number {
     const entry = liveGitProcesses.get(pid)
     if (!entry) continue
     liveGitProcesses.delete(pid)
-    killProcessTree(pid, entry.child)
+    void killProcessTree(pid, entry.child).catch(() => { /* existing cancellation remains best effort */ })
     killed++
   }
   return killed
@@ -151,8 +193,8 @@ export function killGitProcesses(pids: Iterable<number>): number {
  * Kill every git process Lucid Git currently has running. Called on quit: an
  * abandoned `git`/`git-lfs` pair has no one left to read its output, and
  * leaving it behind is what accumulates across app restarts. An index write
- * interrupted this way leaves `.git/index.lock`, which the stale-lock recovery
- * already clears on the next run.
+ * interrupted this way may leave `.git/index.lock`; automatic recovery uses
+ * age/app-activity heuristics once app tasks have drained.
  */
 export function killAllGitProcesses(): number {
   const pids = [...liveGitProcesses.keys()]
@@ -173,13 +215,8 @@ const GIT_BASE_ENV = {
 
 // ── Git process bookkeeping ──────────────────────────────────────────────────
 //
-// Tracks, per repository, how many git processes Lucid Git currently has in
-// flight and when the oldest of them started. That is what distinguishes a
-// `.git/index.lock` left behind by one of our own crashed subprocesses — safe
-// to remove the moment the process exits — from one a live external writer
-// (an Unreal source-control plugin, another git client) genuinely owns. Age
-// alone cannot tell those apart: a lock our checkout orphaned one second ago
-// looks exactly like a lock Unreal created one second ago.
+// Per-repository activity is useful for diagnostics and draining app work.
+// Overlapping timestamps are not evidence of index-lock ownership.
 
 /** Clock-granularity slack when matching a file mtime against a run window. */
 const RUN_WINDOW_SLACK_MS = 1000
@@ -208,10 +245,8 @@ const opsKey = (repoPath: string): string => path.resolve(repoPath).toLowerCase(
  * Snapshot of git-process activity for a repo. Take it BEFORE running any
  * further git command, or `inFlight` describes your own probe.
  *
- * `ranDuring` answers the question age cannot: a `.git/index.lock` whose mtime
- * lands inside one of our own run windows was created by a git or git-lfs
- * subprocess we started, so once nothing of ours is in flight it is orphaned
- * and safe to delete — no matter how recent it is.
+ * `ranDuring` is diagnostic timing only. An external writer can create a lock
+ * during the same window, so this never proves ownership or safe deletion.
  */
 export function gitOpActivity(repoPath: string): GitOpActivity {
   const entry = repoGitOps.get(opsKey(repoPath))
@@ -423,8 +458,10 @@ async function execWithProgressInner(
 
     proc.on('close', (code: number | null) => {
       if (pendingProgress) emitProgress(pendingProgress, true)
-      if (code === 0 || code === null) {
+      if (code === 0) {
         resolve({ stdout, stderr })
+      } else if (code === null) {
+        reject(new Error(`git ${detectGitSubcommand(args)} was interrupted before completing.`))
       } else {
         const errText = (stderr || stdout).slice(0, 1000)
         const subCmd  = detectGitSubcommand(args)
@@ -465,9 +502,10 @@ export async function execWithStdin(
   args: string[],
   repoPath: string,
   stdin: string,
+  environment: Record<string, string> = {},
 ): Promise<{ stdout: string; stderr: string }> {
   const result = await trackGitOp(repoPath, () => GitProcess.exec(args, repoPath, {
-    env: { ...process.env, ...GIT_BASE_ENV },
+    env: { ...process.env, ...GIT_BASE_ENV, ...environment },
     processCallback: child => registerGitProcess(child, args, repoPath),
     stdin,
     stdinEncoding: 'utf8',
@@ -477,6 +515,34 @@ export async function execWithStdin(
     throw new Error(`git ${detectGitSubcommand(args)} failed (exit ${result.exitCode}):\n${combined}`)
   }
   return { stdout: result.stdout, stderr: result.stderr }
+}
+
+/** Shell-free binary output, with the same process tracking as text commands. */
+export async function execBinary(args: string[], repoPath: string, stdin?: Buffer): Promise<Buffer> {
+  return withGitTimeout(() => trackGitOp(repoPath, () => new Promise<Buffer>((resolve, reject) => {
+    const proc = GitProcess.spawn(args, repoPath, { env: { ...process.env, ...GIT_BASE_ENV } })
+    registerGitProcess(proc, args, repoPath)
+    const chunks: Buffer[] = []
+    let size = 0
+    let stderr = ''
+    let exceeded = false
+    proc.stdout?.on('data', (chunk: Buffer) => {
+      size += chunk.length
+      if (size > 256 * 1024 * 1024) {
+        exceeded = true
+        if (proc.pid !== undefined) void killProcessTree(proc.pid, proc).catch(() => {})
+      } else chunks.push(chunk)
+    })
+    proc.stderr?.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-8192) })
+    proc.on('error', reject)
+    proc.stdin?.on('error', () => { /* command exit reports failed input */ })
+    proc.stdin?.end(stdin)
+    proc.on('close', code => {
+      if (exceeded) reject(new Error('Asset exceeds the 256 MB preview limit.'))
+      else if (code !== 0) reject(new Error(`git ${detectGitSubcommand(args)} failed: ${stderr}`))
+      else resolve(Buffer.concat(chunks))
+    })
+  })), 120_000, 'Asset extraction')
 }
 
 // ── withTimeout — races a promise against a deadline ─────────────────────────
@@ -538,7 +604,7 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): 
  */
 export async function withGitTimeout<T>(fn: () => Promise<T>, ms: number, label: string): Promise<T> {
   const scope = new Set<number>()
-  return gitProcessScope.run(scope, async () => {
+  return gitProcessScope.run([...(gitProcessScope.getStore() ?? []), scope], async () => {
     try {
       return await withTimeout(Promise.resolve(fn()), ms, label)
     } catch (error) {
@@ -589,27 +655,29 @@ export function gitAuthArgs(token: string | null, remoteUrl?: string | null): st
 
   // Scope auth header to the git remote host so it is not forwarded to signed
   // LFS storage URLs (for example github-cloud.s3.amazonaws.com).
-  if (remoteUrl && /^https?:\/\//i.test(remoteUrl)) {
+  if (remoteUrl) {
     try {
       const u = new URL(remoteUrl)
+      if (u.protocol !== 'https:' || u.hostname !== 'github.com' || (u.port && u.port !== '443') || u.username || u.password) return noCredentialHelper
       const origin = `${u.protocol}//${u.host}/`
       return [...noCredentialHelper, '-c', `http.${origin}.extraheader=AUTHORIZATION: basic ${b64}`]
     } catch {
-      // fall through to global header as compatibility fallback
+      // Invalid or non-HTTP remotes never receive this token.
     }
   }
 
-  return [...noCredentialHelper, '-c', `http.extraheader=AUTHORIZATION: basic ${b64}`]
+  return noCredentialHelper
 }
 
 // ── execSafe (never throws — returns exitCode instead) ────────────────────────
 
 export async function execSafe(
   args: string[],
-  repoPath: string
+  repoPath: string,
+  environment: Record<string, string> = {}
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const result = await trackGitOp(repoPath, () => GitProcess.exec(args, repoPath, {
-    env: { ...process.env, ...GIT_BASE_ENV },
+    env: { ...process.env, ...GIT_BASE_ENV, ...environment },
     processCallback: child => registerGitProcess(child, args, repoPath),
   }))
   return {

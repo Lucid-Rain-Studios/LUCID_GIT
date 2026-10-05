@@ -1,3 +1,4 @@
+import { useDialogOverlayDismiss } from '@/lib/useDialogOverlayDismiss'
 import React, { useEffect, useMemo, useState } from 'react'
 import { ipc } from '@/ipc'
 import { ActionBtn } from '@/components/ui/ActionBtn'
@@ -116,12 +117,13 @@ export function HunkStagingDialog({ repoPath, filePath, reverse = false, onClose
     }
   }
 
+  const modal = useDialogOverlayDismiss(onClose, !applying, 'Stage hunks')
   const verb       = reverse ? 'Unstage' : 'Stage'
   const verbActive = reverse ? 'Unstaging' : 'Staging'
 
   return (
     <div
-      onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}
+      {...modal}
       style={{
         position: 'fixed', inset: 0, zIndex: 200,
         background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(2px)',

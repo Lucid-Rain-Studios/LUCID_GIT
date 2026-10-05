@@ -1,3 +1,5 @@
+import { timelineBranches } from '@/lib/timelineBranches'
+import { isBinaryPath } from '@/lib/binaryFormats'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ipc, CommitEntry, CommitFileChange, BranchInfo, BlameEntry, FileStatus, DiffContent } from '@/ipc'
@@ -37,15 +39,8 @@ const CENTER_WIDTH_MIN = 240
 const CENTER_WIDTH_MAX = 520
 const DEFAULT_LEFT_WIDTH = 360
 
-const ASSET_EXTS = new Set([
-  'uasset', 'umap', 'upk', 'udk',
-  'png', 'jpg', 'jpeg', 'tga', 'bmp', 'tiff', 'tif', 'dds', 'exr', 'hdr',
-  'wav', 'mp3', 'ogg', 'flac',
-  'mp4', 'mov', 'avi', 'mkv',
-])
-
 function isAsset(filePath: string): boolean {
-  return ASSET_EXTS.has(filePath.split('.').pop()?.toLowerCase() ?? '')
+  return isBinaryPath(filePath)
 }
 
 function parseGHSlug(url: string): string | null {
@@ -837,10 +832,6 @@ function WorkingTreeGraphRow({ selected, changeCount, graphColW, lane = 0, onCli
 
 // ── Branch filter components ──────────────────────────────────────────────────
 
-function isLiveOriginBranch(branch: BranchInfo): boolean {
-  return branch.isRemote && (branch.remoteName === 'origin' || branch.name.startsWith('origin/'))
-}
-
 function mergeBranchLists(...lists: BranchInfo[][]): BranchInfo[] {
   const merged = new Map<string, BranchInfo>()
   for (const list of lists) {
@@ -1194,6 +1185,7 @@ function LeftCommitRow({ node, selected, repoPath, remoteUrl, onRefresh, onClick
   const shortHash  = commit.hash.slice(0, 7)
   const ghSlug     = remoteUrl ? parseGHSlug(remoteUrl) : null
   const tipBranches = branchTips.get(commit.hash) ?? []
+  const isHead = tipBranches.some(branch => branch.current && !branch.isRemote)
 
   useEffect(() => {
     if (!ctx) return
@@ -1279,6 +1271,7 @@ function LeftCommitRow({ node, selected, repoPath, remoteUrl, onRefresh, onClick
   }
 
   const handleUndoCommit = async () => {
+    if (!isHead) return
     close()
     if (commit.parentHashes.length === 0) {
       await dialog.alert({ title: 'Cannot undo', message: 'This is the initial commit and has no parent to reset to.' })
@@ -1291,7 +1284,7 @@ function LeftCommitRow({ node, selected, repoPath, remoteUrl, onRefresh, onClick
     })
     if (!ok) return
     try {
-      await opRun('Undoing commit…', () => ipc.gitResetTo(repoPath, commit.parentHashes[0], 'soft'))
+      await opRun('Undoing commit…', () => ipc.gitResetTo(repoPath, commit.parentHashes[0], 'soft', commit.hash))
       bumpSyncTick(); onRefresh()
     } catch (e) { await dialog.alert({ title: 'Undo failed', message: String(e) }) }
   }
@@ -1369,7 +1362,7 @@ function LeftCommitRow({ node, selected, repoPath, remoteUrl, onRefresh, onClick
 
       {ctx && (
         <div ref={ctxRef} style={{ ...CTX_MENU_STYLE, top: ctx.y, left: ctx.x }}>
-          <CtxItem label="Undo commit (soft reset)"     onClick={handleUndoCommit} />
+          <CtxItem label="Undo commit (soft reset)" disabled={!isHead || commit.parentHashes.length === 0} onClick={handleUndoCommit} />
           <CtxItem label="Reset to commit…"             onClick={handleResetTo} danger />
           <CtxItem label="Checkout commit"              onClick={handleCheckout} />
           <CtxSep />
@@ -1616,8 +1609,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   const autoLoadingRef = useRef(false)
 
   const filterBranches = React.useMemo(() => {
-    const originBranches = branches.filter(isLiveOriginBranch)
-    const remoteBranches = originBranches.length > 0 ? originBranches : branches.filter(b => b.isRemote)
+    const remoteBranches = timelineBranches(branches)
     return [...remoteBranches].sort((a, b) => {
       const aDefault = a.displayName === defaultBranch || a.name === defaultBranch
       const bDefault = b.displayName === defaultBranch || b.name === defaultBranch
@@ -1863,8 +1855,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     Promise.all([ipc.branchList(repoPath), ipc.gitDefaultBranch(repoPath)]).then(async ([bl, def]) => {
       setBranches(bl)
       setDefaultBranch(def)
-      const originBranches = bl.filter(isLiveOriginBranch)
-      const liveBranches = originBranches.length > 0 ? originBranches : bl.filter(b => b.isRemote)
+      const liveBranches = timelineBranches(bl)
       const nextSel = new Set(liveBranches.map(b => b.name))
       fetchBranchTips(selectedGraphBranches(nextSel, bl, liveBranches))
       setSelBranches(nextSel)
@@ -1883,8 +1874,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     ipc.branchList(repoPath)
       .then(bl => {
         setBranches(bl)
-        const originBranches = bl.filter(isLiveOriginBranch)
-        const liveBranches = originBranches.length > 0 ? originBranches : bl.filter(b => b.isRemote)
+        const liveBranches = timelineBranches(bl)
         fetchBranchTips(selectedGraphBranches(selBranches, bl, liveBranches))
         loadHistoryRef.current(limitRef.current, selBranches, defaultBranch, liveBranches, bl)
       })

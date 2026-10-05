@@ -4,6 +4,7 @@ import { useOperationStore } from '@/stores/operationStore'
 import { useDialogStore } from '@/stores/dialogStore'
 import { useRepoStore } from '@/stores/repoStore'
 import { FilePathText } from '@/components/ui/FilePathText'
+import { IndexRecoveryTool } from './IndexRecoveryTool'
 
 interface ToolsPanelProps {
   repoPath: string
@@ -12,13 +13,14 @@ interface ToolsPanelProps {
   onCherryPickConflict?: () => void
 }
 
-type ToolId = 'restore' | 'revert' | 'cherrypick' | 'reset'
+type ToolId = 'restore' | 'revert' | 'cherrypick' | 'reset' | 'help'
 
 const TOOLS: { id: ToolId; label: string; icon: string; desc: string }[] = [
   { id: 'restore',    label: 'Restore File',    icon: '↩', desc: 'Bring a file back to its state at any past commit' },
   { id: 'revert',     label: 'Revert Commit',   icon: '⎌', desc: 'Create a new commit that undoes a specific commit' },
   { id: 'cherrypick', label: 'Cherry-pick',      icon: '🍒', desc: 'Apply changes from a single commit to HEAD' },
   { id: 'reset',      label: 'Reset to Commit',  icon: '⏮', desc: 'Move HEAD and optionally the index / working tree' },
+  { id: 'help',       label: 'Index Recovery',   icon: '⚕', desc: 'Diagnose, repair and undo index repairs' },
 ]
 
 export function ToolsPanel({ repoPath, onRefresh, onCherryPickConflict }: ToolsPanelProps) {
@@ -53,6 +55,7 @@ export function ToolsPanel({ repoPath, onRefresh, onCherryPickConflict }: ToolsP
         {activeTool === 'revert'     && <RevertTool     repoPath={repoPath} run={run} />}
         {activeTool === 'cherrypick' && <CherryPickTool repoPath={repoPath} onRefresh={onRefresh} onConflict={onCherryPickConflict} />}
         {activeTool === 'reset'      && <ResetTool      repoPath={repoPath} run={run} />}
+        {activeTool === 'help'       && <IndexRecoveryTool key={repoPath} repoPath={repoPath} onRefresh={onRefresh} />}
       </div>
     </div>
   )

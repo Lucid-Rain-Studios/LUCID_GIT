@@ -1,3 +1,4 @@
+import { isBinaryPath } from '@/lib/binaryFormats'
 import React, { useEffect, useState } from 'react'
 import { ipc, BlameEntry, CommitEntry, DiffContent } from '@/ipc'
 import { TextDiff } from '@/components/diff/TextDiff'
@@ -5,15 +6,8 @@ import { FilePathText } from '@/components/ui/FilePathText'
 import { CommitContextMenu } from '@/components/shared/CommitContextMenu'
 import { CommitFilesModal } from '@/components/shared/CommitFilesModal'
 
-const ASSET_EXTS = new Set([
-  'uasset', 'umap', 'upk', 'udk',
-  'png', 'jpg', 'jpeg', 'tga', 'bmp', 'tiff', 'tif', 'dds', 'exr', 'hdr',
-  'wav', 'mp3', 'ogg', 'flac',
-  'mp4', 'mov', 'avi', 'mkv',
-])
-
 export function isPreviewAsset(filePath: string): boolean {
-  return ASSET_EXTS.has(filePath.split('.').pop()?.toLowerCase() ?? '')
+  return isBinaryPath(filePath)
 }
 
 function timeAgo(ts: number): string {
@@ -285,12 +279,14 @@ function AssetPanel({ repoPath, filePath, hash, remoteUrl }: { repoPath: string;
   const [thumbLoading, setThumbLoading] = useState(true)
 
   useEffect(() => {
+    let cancelled = false
     setThumbSrc(null)
     setThumbLoading(true)
     ipc.assetRenderThumbnail(repoPath, filePath, hash)
-      .then(p => setThumbSrc(p))
-      .catch(() => setThumbSrc(null))
-      .finally(() => setThumbLoading(false))
+      .then(p => { if (!cancelled) setThumbSrc(p) })
+      .catch(() => { if (!cancelled) setThumbSrc(null) })
+      .finally(() => { if (!cancelled) setThumbLoading(false) })
+    return () => { cancelled = true }
   }, [repoPath, filePath, hash])
 
   const fileName = filePath.split(/[/\\]/).pop() ?? filePath

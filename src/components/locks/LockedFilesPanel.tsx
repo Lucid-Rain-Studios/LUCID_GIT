@@ -38,7 +38,7 @@ function initials(name: string): string {
 }
 
 export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }: LockedFilesPanelProps) {
-  const { locks, loadLocks, unlockFile, unlockFiles } = useLockStore()
+  const { locks, loadLocks, unlockFile, unlockFiles, error } = useLockStore()
   const { accounts, currentAccountId } = useAuthStore()
   const isAdmin = useAuthStore(s => s.isAdmin(repoPath))
   const dialog  = useDialogStore()
@@ -268,6 +268,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#0d0f15', overflow: 'hidden', fontFamily: 'var(--lg-font-ui)' }}>
 
+      {error && <div role="alert" className="p-2 text-xs text-lg-warning">{error} <button onClick={() => loadLocks(repoPath)}>Retry</button></div>}
       {/* ── Header ── */}
       {mergedResolution && (
         <div style={{ margin: '12px 24px 0', border: '1px solid #2f3a54', borderRadius: 8, padding: 12, background: '#131720' }}>

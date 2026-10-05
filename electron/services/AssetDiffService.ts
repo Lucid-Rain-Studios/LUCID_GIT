@@ -2,8 +2,9 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import * as crypto from 'crypto'
-import { execSync } from 'child_process'
-import { execSafe } from '../util/dugite-exec'
+import { execBinary, execSafe, gitAuthArgs } from '../util/dugite-exec'
+import { authService } from './AuthService'
+import { gitService } from './GitService'
 import { ueHeadlessService } from './UEHeadlessService'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -86,6 +87,7 @@ async function withThumbnailSlot<T>(fn: () => Promise<T>): Promise<T> {
     waitingThumbnails.shift()?.()
   }
 }
+const PREVIEW_MAX_BYTES = 256 * 1024 * 1024
 const CACHE_MAX_BYTES = 5 * 1024 * 1024 * 1024 // 5 GB
 
 // ── Sharp (optional native dep) ───────────────────────────────────────────────
@@ -124,6 +126,18 @@ async function dirSizeBytes(dir: string): Promise<number> {
 // ── Service ───────────────────────────────────────────────────────────────────
 
 class AssetDiffService {
+  private async identity(repoPath: string, filePath: string, ref: string): Promise<{ key: string; ref: string }> {
+    if (ref === 'WORKING') {
+      const stat = await fs.promises.stat(path.join(repoPath, filePath), { bigint: true }).catch(() => null)
+      if (!stat) return { key: 'working:missing', ref }
+      return { key: 'working:' + stat.size + ':' + stat.mtimeNs + ':' + stat.ctimeNs, ref }
+    }
+    const blob = await execSafe(['rev-parse', '--verify', ref === 'INDEX' ? ':' + filePath : ref + ':' + filePath], repoPath)
+    if (blob.exitCode !== 0) return { key: 'missing:' + ref, ref }
+    const sha = blob.stdout.trim()
+    return { key: sha, ref: 'BLOB:' + sha }
+  }
+
   classify(filePath: string): AssetType {
     const ext = path.extname(filePath).toLowerCase()
     if (TEXTURE_EXTS.has(ext)) return 'texture'
@@ -144,7 +158,7 @@ class AssetDiffService {
     ref: string,
     destDir: string,
     side: 'left' | 'right',
-  ): Promise<{ blobPath: string | null; sizeBytes: number }> {
+  ): Promise<{ blobPath: string | null; sizeBytes: number; reason?: string }> {
     const ext      = path.extname(filePath)
     const destFile = path.join(destDir, `${side}${ext}`)
 
@@ -153,51 +167,42 @@ class AssetDiffService {
       const src = path.join(repoPath, filePath)
       try {
         const stat = await fs.promises.stat(src)
+        if (stat.size > PREVIEW_MAX_BYTES) return { blobPath: null, sizeBytes: stat.size, reason: 'Asset exceeds the 256 MB preview limit' }
         await fs.promises.copyFile(src, destFile)
         return { blobPath: destFile, sizeBytes: stat.size }
-      } catch {
-        return { blobPath: null, sizeBytes: 0 }
+      } catch (error) {
+        return { blobPath: null, sizeBytes: 0, reason: 'Working file unavailable: ' + String(error) }
       }
     }
 
     // Git blob extraction
-    const gitRef = ref === 'INDEX' ? `:${filePath}` : `${ref}:${filePath}`
-    const { exitCode, stdout } = await execSafe(['cat-file', '-p', gitRef], repoPath)
-
-    if (exitCode !== 0) return { blobPath: null, sizeBytes: 0 }
-
-    // LFS pointer? Attempt smudge.
-    if (stdout.startsWith(LFS_POINTER)) {
-      // Write pointer to a temp file, smudge it
-      const ptrFile = path.join(destDir, `${side}.lfsptr`)
+    const gitRef = ref.startsWith('BLOB:') ? ref.slice(5) : ref === 'INDEX' ? `:${filePath}` : `${ref}:${filePath}`
+    let binary: Buffer
+    try {
+      binary = await execBinary(['cat-file', '-p', gitRef], repoPath)
+    } catch (error) {
+      return { blobPath: null, sizeBytes: 0, reason: 'Git asset unavailable: ' + String(error) }
+    }
+    if (binary.subarray(0, LFS_POINTER.length).toString() === LFS_POINTER) {
+      const pointer = binary.toString('utf8')
       try {
-        await fs.promises.writeFile(ptrFile, stdout, 'utf8')
-        // git lfs smudge reads from stdin; use execSafe to pipe
-          const binary = execSync(
-          `git lfs smudge -- "${filePath}"`,
-          { cwd: repoPath, input: stdout, maxBuffer: 256 * 1024 * 1024 }
-        ) as Buffer
-        await fs.promises.writeFile(destFile, binary)
-        await fs.promises.unlink(ptrFile).catch(() => {})
-        return { blobPath: destFile, sizeBytes: binary.length }
-      } catch {
-        // LFS server unavailable — return null but extract size from pointer
-        const sizeMatch = stdout.match(/size (\d+)/)
-        await fs.promises.unlink(ptrFile).catch(() => {})
-        return { blobPath: null, sizeBytes: sizeMatch ? parseInt(sizeMatch[1]) : 0 }
+        const declared = Number(pointer.match(/size (\d+)/)?.[1] ?? 0)
+        if (declared > PREVIEW_MAX_BYTES) return { blobPath: null, sizeBytes: declared, reason: 'LFS asset exceeds the 256 MB preview limit' }
+        const [token, remoteUrl] = await Promise.all([
+          authService.getCurrentToken(), gitService.getRemoteUrl(repoPath),
+        ])
+        binary = await execBinary([...gitAuthArgs(token, remoteUrl), 'lfs', 'smudge', '--', filePath], repoPath, binary)
+        if (binary.subarray(0, LFS_POINTER.length).toString() === LFS_POINTER) throw new Error('LFS content unavailable')
+      } catch (error) {
+        const sizeMatch = pointer.match(/size (\d+)/)
+        return { blobPath: null, sizeBytes: sizeMatch ? parseInt(sizeMatch[1]) : 0, reason: 'LFS content unavailable: ' + String(error) }
       }
     }
-
-    // Plain binary blob
     try {
-      const binary = execSync(
-        `git cat-file -p ${gitRef}`,
-        { cwd: repoPath, maxBuffer: 256 * 1024 * 1024 }
-      ) as Buffer
       await fs.promises.writeFile(destFile, binary)
       return { blobPath: destFile, sizeBytes: binary.length }
-    } catch {
-      return { blobPath: null, sizeBytes: 0 }
+    } catch (error) {
+      return { blobPath: null, sizeBytes: binary.length, reason: 'Unable to write asset preview: ' + String(error) }
     }
   }
 
@@ -310,7 +315,8 @@ class AssetDiffService {
   /** Main entry point: diff two refs of one file. Results are cached. */
   async diff(req: AssetDiffRequest): Promise<AssetDiffResult> {
     const assetType = this.classify(req.filePath)
-    const dir = cacheDir(req)
+    const [leftIdentity, rightIdentity] = await Promise.all([this.identity(req.repoPath, req.filePath, req.leftRef), this.identity(req.repoPath, req.filePath, req.rightRef)])
+    const dir = cacheDir({ ...req, leftRef: leftIdentity.key, rightRef: rightIdentity.key })
     const resultFile = path.join(dir, 'result.json')
     const key = `${hash8(req.repoPath)}-${hash8(req.filePath)}-${hash8(req.leftRef)}-${hash8(req.rightRef)}`
 
@@ -328,8 +334,8 @@ class AssetDiffService {
 
     // Extract both blobs
     const [leftBlob, rightBlob] = await Promise.all([
-      this.extractBlob(req.repoPath, req.filePath, req.leftRef,  dir, 'left'),
-      this.extractBlob(req.repoPath, req.filePath, req.rightRef, dir, 'right'),
+      this.extractBlob(req.repoPath, req.filePath, leftIdentity.ref, dir, 'left'),
+      this.extractBlob(req.repoPath, req.filePath, rightIdentity.ref, dir, 'right'),
     ])
 
     let left:  PreviewData = { previewPath: null, sizeBytes: leftBlob.sizeBytes }
@@ -441,11 +447,13 @@ class AssetDiffService {
       }
     }
 
+    const unavailable = [leftBlob.reason, rightBlob.reason].filter(Boolean).join('; ')
+    if (unavailable) { delta = { kind: 'unavailable', reason: unavailable }; fallbackReason = unavailable }
     const result: AssetDiffResult = {
       assetType, left, right, delta, cacheKey: key, ueAvailable, fallbackReason,
     }
 
-    fs.writeFileSync(resultFile, JSON.stringify(result, null, 2), 'utf8')
+    if (!unavailable) await fs.promises.writeFile(resultFile, JSON.stringify(result, null, 2), 'utf8')
     this.evictCache().catch(() => {})
 
     return result
@@ -453,7 +461,9 @@ class AssetDiffService {
 
   /** Single-ref thumbnail — used by file row, BinaryDiff, and history panel. */
   async renderThumbnail(repoPath: string, filePath: string, ref: string): Promise<string | null> {
-    const dir = path.join(CACHE_BASE, hash8(repoPath), `thumb-${hash8(filePath)}-${hash8(ref)}`)
+    const identity = await this.identity(repoPath, filePath, ref).catch(() => null)
+    if (!identity) return null
+    const dir = path.join(CACHE_BASE, hash8(repoPath), `thumb-${hash8(filePath)}-${hash8(identity.key)}`)
     fs.mkdirSync(dir, { recursive: true })
 
     // A cache hit costs nothing, so it answers without taking a slot — a
@@ -465,7 +475,7 @@ class AssetDiffService {
     return withThumbnailSlot(async () => {
       // Another request may have rendered this while we waited for the slot.
       if (fs.existsSync(outPng)) return outPng
-      return this.renderThumbnailUncapped(repoPath, filePath, ref, dir, outPng)
+      return this.renderThumbnailUncapped(repoPath, filePath, identity.ref, dir, outPng)
     })
   }
 

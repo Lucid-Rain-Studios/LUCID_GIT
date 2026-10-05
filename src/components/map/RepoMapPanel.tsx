@@ -673,7 +673,7 @@ export function RepoMapPanel({ repoPath }: RepoMapPanelProps) {
       const [commits, locksResult, presResult] = await Promise.all([
         ipc.log(repoPath, { limit: COMMIT_LIMIT }),
         ipc.listLocks(repoPath),
-        ipc.presenceRead(repoPath),
+        Promise.resolve<PresenceFile>({ version: 1, entries: {} }),
       ])
       if (!mounted.current) return
 

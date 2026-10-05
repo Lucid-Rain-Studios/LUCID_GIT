@@ -6,7 +6,6 @@ import { useAuthStore } from '@/stores/authStore'
 import { useDialogStore } from '@/stores/dialogStore'
 import { useAssetViewerStore } from '@/stores/assetViewerStore'
 import { AppCheckbox } from '@/components/ui/AppCheckbox'
-import { AppTooltip } from '@/components/ui/AppTooltip'
 import { FilePathText } from '@/components/ui/FilePathText'
 import { AppRightSelectionItem, AppRightSelectionOptions, AppRightSelectionSeparator } from '@/components/ui/AppRightSelectionOptions'
 import { HunkStagingDialog } from './HunkStagingDialog'
@@ -55,15 +54,6 @@ export function FileRow({
   const isPreviewable = isUEAsset || isImgAsset
   const forecastConflicts = useForecastStore(s => s.conflicts)
   const openViewer = useAssetViewerStore(s => s.open)
-  const [thumbnail, setThumbnail] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!isPreviewable) return
-    const ref = file.staged ? 'INDEX' : 'WORKING'
-    ipc.assetRenderThumbnail(repoPath, file.path, ref)
-      .then(p => setThumbnail(p))
-      .catch(() => {})
-  }, [repoPath, file.path, isPreviewable, file.staged])
   const fileConflicts = forecastConflicts.filter(c => c.filePath === file.path || c.filePath.endsWith('/' + file.path))
   const { lockFile, unlockFile, watchFile } = useLockStore()
   const isAdmin = useAuthStore(s => s.isAdmin(repoPath))
@@ -91,7 +81,7 @@ export function FileRow({
   // Hunk-level staging makes sense only for tracked text files with content
   // changes. Untracked, deleted, renamed, or binary changes have no hunks to
   // pick from.
-  const canStageHunks = !isUntracked && effectiveStatus !== 'D' && effectiveStatus !== 'R'
+  const canStageHunks = !isLockedByOther && !isUntracked && effectiveStatus !== 'D' && effectiveStatus !== 'R'
 
   useEffect(() => {
     if (!ctx) return
@@ -131,11 +121,11 @@ export function FileRow({
   }
   const doIgnoreFile   = async () => { close(); try { await ipc.addToGitignore(repoPath, file.path); onRefresh() } catch (e) { await dialog.alert({ title: 'Error', message: String(e) }) } }
   const doIgnoreFolder = async () => { close(); if (!dir) return; try { await ipc.addToGitignore(repoPath, dir + '/'); onRefresh() } catch (e) { await dialog.alert({ title: 'Error', message: String(e) }) } }
-  const doCopyFullPath = () => { close(); navigator.clipboard.writeText(fullPath.replace(/\//g, '\\')) }
-  const doCopyRelPath  = () => { close(); navigator.clipboard.writeText(file.path.replace(/\//g, '\\')) }
-  const doShowInExplorer = () => { close(); ipc.showInFolder(fullPath.replace(/\//g, '\\')) }
+  const doCopyFullPath = () => { close(); navigator.clipboard.writeText(fullPath) }
+  const doCopyRelPath  = () => { close(); navigator.clipboard.writeText(file.path) }
+  const doShowInExplorer = () => { close(); ipc.showInFolder(repoPath, file.path) }
   const doOpenVSCode     = () => { close(); ipc.openExternal(`vscode://file/${fullPath}`) }
-  const doOpenDefault    = () => { close(); ipc.openPath(fullPath.replace(/\//g, '\\')) }
+  const doOpenDefault    = () => { close(); ipc.openPath(repoPath, file.path) }
   const doLock    = async () => { close(); try { await lockFile(repoPath, file.path) } catch (e) { await dialog.alert({ title: 'Error', message: String(e) }) } }
   const doUnlock  = async (force = false) => {
     close()
@@ -180,29 +170,6 @@ export function FileRow({
           background: statusBg, color: statusColor,
           fontFamily: 'var(--lg-font-mono)', fontSize: 11, fontWeight: 700,
         }}>{effectiveStatus}</span>
-
-        {/* Asset thumbnail — clickable to open viewer */}
-        {isPreviewable && thumbnail && (
-          <AppTooltip content="Preview file" side="top" delay={250}><button
-            className="lg-compact-icon-button"
-            onClick={e => { e.stopPropagation(); openViewer(repoPath, file.path) }}
-            style={{
-              width: 24, height: 24, borderRadius: 4, overflow: 'hidden', flexShrink: 0,
-              border: '1px solid rgba(255,255,255,0.07)',
-              backgroundImage: 'repeating-conic-gradient(#1a2030 0% 25%, transparent 0% 50%)',
-              backgroundSize: '6px 6px',
-              padding: 0, cursor: 'pointer', transition: 'border-color 0.1s',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(232,98,47,0.5)' }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)' }}
-          >
-            <img
-              src={`file:///${thumbnail.replace(/\\/g, '/').replace(/^\/+/, '')}`}
-              alt=""
-              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-            />
-          </button></AppTooltip>
-        )}
 
         {/* Name + dir */}
         <div style={{ flex: 1, minWidth: 0 }}>

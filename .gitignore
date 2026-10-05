@@ -14,3 +14,7 @@ Thumbs.db
 
 # Playwright run output
 test-results/
+/audit
+
+# Local activity and its atomic-write backups/recovery files
+/.lucid-git/lucid-presence.json*

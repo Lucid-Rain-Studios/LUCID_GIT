@@ -34,6 +34,15 @@ let snapshot: TopBarSyncSnapshot = {
 
 let handlers: TopBarSyncHandlers | null = null
 const listeners = new Set<() => void>()
+const integratedBranches = new Set<string>()
+const integrationKey = (repoPath: string, branch: string) => JSON.stringify([repoPath, branch])
+export const hasBranchIntegrated = (repoPath: string, branch: string): boolean => integratedBranches.has(integrationKey(repoPath, branch))
+export function markBranchIntegrated(repoPath: string, branch: string, integrated = true): void {
+  const key = integrationKey(repoPath, branch)
+  if (integrated) integratedBranches.add(key)
+  else integratedBranches.delete(key)
+  emit()
+}
 
 function emit() { listeners.forEach(l => l()) }
 

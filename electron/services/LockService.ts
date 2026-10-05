@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { BrowserWindow } from 'electron'
-import { execSafe, exec, gitAuthArgs } from '../util/dugite-exec'
+import { exec, execWithStdin, gitAuthArgs, withGitTimeout } from '../util/dugite-exec'
 import { authService } from './AuthService'
 import { CHANNELS } from '../ipc/channels'
 import type { Lock, OperationStep } from '../types'
@@ -41,8 +41,8 @@ class LockService {
   private pollTimers  = new Map<string, ReturnType<typeof setInterval>>()
   private prevLocks   = new Map<string, Lock[]>()
   private watchedFiles: Array<{ repoPath: string; filePath: string }> = []
-  // Track when each file was locked so we can compute duration on unlock
-  private lockTimestamps = new Map<string, number>()  // `${repoPath}::${filePath}` → timestamp
+  // Server IDs distinguish separate lock intervals on the same file.
+  private lockTimestamps = new Map<string, number>()  // `${repoPath}::${lockId}` → timestamp
   // Track recent self-initiated unlocks so the poller can tell external
   // unlocks (force-unlocks by an admin / teammate) apart from your own.
   private recentSelfUnlocks = new Map<string, number>()  // key → unlock timestamp
@@ -81,14 +81,48 @@ class LockService {
 
   // ── Core LFS commands ───────────────────────────────────────────────────────
 
+  private authoritative = new Map<string, { locks: Lock[]; at: number; accountId: string | null }>()
+  private pendingLists = new Map<string, { accountId: string | null; promise: Promise<Lock[]> }>()
+
+  async assertStageAllowed(repoPath: string, paths: string[]): Promise<void> {
+    if (!paths.length) return
+    // One literal, NUL-delimited attribute check covers the entire selection.
+    const attrs = await execWithStdin(['check-attr', '-z', '--stdin', 'filter'], repoPath, paths.join('\0') + '\0')
+    const fields = attrs.stdout.split('\0')
+    const lfsPaths = new Set<string>()
+    for (let i = 0; i + 2 < fields.length; i += 3) if (fields[i + 2] === 'lfs') lfsPaths.add(fields[i])
+    if (!lfsPaths.size) return
+    const accountId = authService.listAccounts().currentAccountId
+    const cached = this.authoritative.get(repoPath)
+    const locks = cached && cached.accountId === accountId && Date.now() - cached.at < 30_000 ? cached.locks : await this.listLocks(repoPath)
+    const login = this.currentUserLogin()
+    const blocked = locks.filter(lock => lfsPaths.has(lock.path) && lock.owner.login !== login)
+    if (blocked.length) throw new Error('Cannot stage files locked by another owner: ' + blocked.map(lock => lock.path + ' (' + lock.owner.name + ')').join(', '))
+  }
+
   async listLocks(repoPath: string): Promise<Lock[]> {
-    return this.withLfsLock(repoPath, () => this.listLocksUnguarded(repoPath))
+    const accountId = authService.listAccounts().currentAccountId
+    const pending = this.pendingLists.get(repoPath)
+    if (pending && pending.accountId === accountId) return pending.promise
+    // The deadline belongs to the listing, not time spent waiting for an
+    // existing LFS operation. Share refreshes without reusing stale results.
+    const promise = this.withLfsLock(repoPath, () => withGitTimeout(
+      () => this.listLocksUnguarded(repoPath), 30_000, 'lock:list',
+    ))
+    const entry = { accountId, promise }
+    this.pendingLists.set(repoPath, entry)
+    try {
+      return await promise
+    } finally {
+      if (this.pendingLists.get(repoPath) === entry) this.pendingLists.delete(repoPath)
+    }
   }
 
   private async listLocksUnguarded(repoPath: string): Promise<Lock[]> {
     const token = await authService.getCurrentToken()
-    const { exitCode, stdout } = await execSafe([...gitAuthArgs(token), 'lfs', 'locks', '--json'], repoPath)
-    if (exitCode !== 0 || !stdout.trim()) return []
+    const remoteUrl = await gitService.getRemoteUrl(repoPath)
+    const accountId = authService.listAccounts().currentAccountId
+    const { stdout } = await exec([...gitAuthArgs(token, remoteUrl), 'lfs', 'locks', '--json'], repoPath)
     try {
       const raw = JSON.parse(stdout) as Array<{
         id: string
@@ -96,7 +130,8 @@ class LockService {
         owner: { name: string }
         locked_at: string
       }>
-      return raw.map(l => {
+      if (!Array.isArray(raw) || raw.some(l => !l || typeof l.id !== 'string' || typeof l.path !== 'string' || typeof l.owner?.name !== 'string')) throw new Error('Invalid Git LFS lock response')
+      const locks = raw.map(l => {
         const normalizedPath = l.path.replace(/\\/g, '/')
         const fullPath = path.join(repoPath, normalizedPath)
         return {
@@ -107,8 +142,10 @@ class LockService {
           isGhost:  !fs.existsSync(fullPath),
         }
       })
-    } catch {
-      return []
+      this.authoritative.set(repoPath, { locks, at: Date.now(), accountId })
+      return locks
+    } catch (error) {
+      throw new Error('Unable to read authoritative locks: ' + String(error))
     }
   }
 
@@ -120,16 +157,17 @@ class LockService {
     const normalized = filePath.replace(/\\/g, '/')
     onProgress?.({ id: 'lock-auth', label: 'Preparing lock', status: 'running', progress: 10, detail: normalized })
     const token = await authService.getCurrentToken()
+    const remoteUrl = await gitService.getRemoteUrl(repoPath)
     onProgress?.({ id: 'lock-file', label: 'Locking file', status: 'running', progress: 40, detail: normalized })
-    await exec([...gitAuthArgs(token), 'lfs', 'lock', normalized], repoPath)
+    await exec([...gitAuthArgs(token, remoteUrl), 'lfs', 'lock', normalized], repoPath)
     onProgress?.({ id: 'lock-refresh', label: 'Confirming lock', status: 'running', progress: 80, detail: normalized })
     const locks = await this.listLocksUnguarded(repoPath)
     const lock  = locks.find(l => l.path === normalized)
     if (!lock) throw new Error(`Lock not found for "${normalized}" after locking`)
     const now = Date.now()
-    this.lockTimestamps.set(`${repoPath}::${normalized}`, now)
+    this.lockTimestamps.set(`${repoPath}::${lock.id}`, now)
     heatmapService.recordLockEvent({
-      repoPath, filePath: normalized, eventType: 'locked',
+      repoPath, filePath: normalized, eventType: 'locked', lockId: lock.id,
       actorLogin: actorLogin || lock.owner.login,
       actorName:  actorName  || lock.owner.name,
       timestamp: now, durationMs: 0,
@@ -142,9 +180,10 @@ class LockService {
     const normalized = filePath.replace(/\\/g, '/')
     onProgress?.({ id: 'unlock-auth', label: 'Preparing unlock', status: 'running', progress: 10, detail: normalized })
     const token = await authService.getCurrentToken()
+    const remoteUrl = await gitService.getRemoteUrl(repoPath)
     onProgress?.({ id: 'unlock-file', label: 'Unlocking file', status: 'running', progress: 40, detail: normalized })
     await this.withLfsLock(repoPath, () =>
-      this.unlockFileWithToken(repoPath, filePath, force, lockId, token, actorLogin, actorName))
+      this.unlockFileWithToken(repoPath, filePath, force, lockId, token, actorLogin, actorName, { attempted: false }, remoteUrl))
     onProgress?.({ id: 'unlock-file', label: 'File unlocked', status: 'done', progress: 100, detail: normalized })
   }
 
@@ -157,6 +196,7 @@ class LockService {
     // and git-lfs offers no way to make it safe.
     onProgress?.({ id: 'unlock-batch', label: 'Preparing unlocks', status: 'running', progress: 5, current: 0, total: targets.length })
     const token = await authService.getCurrentToken()
+    const remoteUrl = await gitService.getRemoteUrl(repoPath)
     const unlocked: string[] = []
     const failed: BulkUnlockResult['failed'] = []
     // One repair allowance for the whole batch, shared by every file in it.
@@ -166,7 +206,7 @@ class LockService {
       for (let index = 0; index < targets.length; index++) {
         const target = targets[index]
         try {
-          await this.unlockFileWithToken(repoPath, target.filePath, target.force ?? false, target.lockId, token, actorLogin, actorName, cacheRepair)
+          await this.unlockFileWithToken(repoPath, target.filePath, target.force ?? false, target.lockId, token, actorLogin, actorName, cacheRepair, remoteUrl)
           unlocked.push(target.filePath.replace(/\\/g, '/'))
         } catch (error) {
           const message = String(error)
@@ -203,6 +243,7 @@ class LockService {
     actorLogin = '', actorName = '',
     // Defaults to a fresh allowance so a single unlock still gets one repair.
     cacheRepair: CacheRepairState = { attempted: false },
+    remoteUrl?: string | null,
   ): Promise<void> {
     // Deleting every local lockcache.db and re-verifying against the server is
     // the only recovery from a corrupt cache, and it fixes the repo, not the
@@ -235,7 +276,7 @@ class LockService {
     const unlockOpts: string[] = []
     if (force) unlockOpts.push('--force')
     const makeArgs = (id?: string) => [
-      ...gitAuthArgs(token),
+      ...gitAuthArgs(token, remoteUrl),
       'lfs',
       'unlock',
       ...unlockOpts,
@@ -257,16 +298,17 @@ class LockService {
         const refreshedLocks = await this.listLocksUnguarded(repoPath)
         const refreshedLockId = refreshedLocks.find(l => l.path === normalized)?.id ?? resolvedLockId
         await exec(makeArgs(refreshedLockId), repoPath)
+        resolvedLockId = refreshedLockId
       } else {
         throw error
       }
     }
     const now = Date.now()
-    const lockedAt = this.lockTimestamps.get(`${repoPath}::${normalized}`) ?? now
-    this.lockTimestamps.delete(`${repoPath}::${normalized}`)
+    const lockedAt = this.lockTimestamps.get(`${repoPath}::${resolvedLockId}`) ?? now
+    this.lockTimestamps.delete(`${repoPath}::${resolvedLockId}`)
     this.recentSelfUnlocks.set(`${repoPath}::${normalized}`, now)
     heatmapService.recordLockEvent({
-      repoPath, filePath: normalized, eventType: force ? 'force-unlocked' : 'unlocked',
+      repoPath, filePath: normalized, eventType: force ? 'force-unlocked' : 'unlocked', lockId: resolvedLockId,
       actorLogin, actorName, timestamp: now, durationMs: now - lockedAt,
     })
   }
@@ -280,18 +322,24 @@ class LockService {
 
   // ── Polling ─────────────────────────────────────────────────────────────────
 
+  private pollTokens = new Map<string, object>()
+
   startPolling(repoPath: string, intervalMs = 30_000): void {
     if (this.pollTimers.has(repoPath)) return
+    for (const previous of this.pollTimers.keys()) this.stopPolling(previous)
+    const token = {}
+    this.pollTokens.set(repoPath, token)
     // Seed the previous-lock snapshot immediately so the first real poll
     // doesn't fire spurious "new lock" events for existing locks
     this.listLocks(repoPath).then(locks => {
-      this.prevLocks.set(repoPath, locks)
-    })
-    const id = setInterval(() => this.poll(repoPath), intervalMs)
+      if (this.pollTokens.get(repoPath) === token) this.prevLocks.set(repoPath, locks)
+    }).catch(() => {})
+    const id = setInterval(() => { void this.poll(repoPath).catch(() => {}) }, intervalMs)
     this.pollTimers.set(repoPath, id)
   }
 
   stopPolling(repoPath: string): void {
+    this.pollTokens.delete(repoPath)
     const id = this.pollTimers.get(repoPath)
     if (id !== undefined) {
       clearInterval(id)
@@ -421,21 +469,29 @@ class LockService {
     // would queue up behind it and then all run back to back against identical
     // state; skip instead and pick the change up on the next tick.
     if (this.isLfsBusy(repoPath)) return
-    const current  = await this.listLocks(repoPath)
+    const token = this.pollTokens.get(repoPath)
+    if (!token) return
+    let current: Lock[]
+    try { current = await this.listLocks(repoPath) }
+    catch (error) {
+      if (this.pollTokens.get(repoPath) === token) this.broadcastLocks(repoPath, this.prevLocks.get(repoPath) ?? [], String(error))
+      return
+    }
+    if (this.pollTokens.get(repoPath) !== token) return
     const previous = this.prevLocks.get(repoPath) ?? []
 
     // New locks since last poll
     for (const lock of current) {
-      if (!previous.find(l => l.path === lock.path)) {
+      if (!previous.find(l => l.id === lock.id)) {
         const title = `${lock.owner.name} locked a file`
         const body  = lock.path
         const n = notificationService.push(repoPath, 'lock', title, body, { ownerLogin: lock.owner.login })
         this.emitNotification(n)
         webhookService.send(repoPath, 'fileLocked', title, body).catch(() => {})
         const now = Date.now()
-        this.lockTimestamps.set(`${repoPath}::${lock.path}`, now)
+        this.lockTimestamps.set(`${repoPath}::${lock.id}`, now)
         heatmapService.recordLockEvent({
-          repoPath, filePath: lock.path, eventType: 'locked',
+          repoPath, filePath: lock.path, eventType: 'locked', lockId: lock.id,
           actorLogin: lock.owner.login, actorName: lock.owner.name,
           timestamp: now, durationMs: 0,
         })
@@ -446,17 +502,17 @@ class LockService {
     const currentUserLogin = this.currentUserLogin()
     const externalUnlocksOfMine: string[] = []
     for (const lock of previous) {
-      if (!current.find(l => l.path === lock.path)) {
+      if (!current.find(l => l.id === lock.id)) {
         const title = 'File unlocked'
         const body  = `${lock.path} released by ${lock.owner.name}`
         const n = notificationService.push(repoPath, 'unlock', title, body)
         this.emitNotification(n)
         webhookService.send(repoPath, 'fileUnlocked', title, body).catch(() => {})
         const now = Date.now()
-        const lockedAt = this.lockTimestamps.get(`${repoPath}::${lock.path}`) ?? now
-        this.lockTimestamps.delete(`${repoPath}::${lock.path}`)
+        const lockedAt = this.lockTimestamps.get(`${repoPath}::${lock.id}`) ?? now
+        this.lockTimestamps.delete(`${repoPath}::${lock.id}`)
         heatmapService.recordLockEvent({
-          repoPath, filePath: lock.path, eventType: 'unlocked',
+          repoPath, filePath: lock.path, eventType: 'unlocked', lockId: lock.id,
           actorLogin: lock.owner.login, actorName: lock.owner.name,
           timestamp: now, durationMs: now - lockedAt,
         })
@@ -529,10 +585,10 @@ class LockService {
     })
   }
 
-  private broadcastLocks(repoPath: string, locks: Lock[]): void {
+  private broadcastLocks(repoPath: string, locks: Lock[], error?: string): void {
     BrowserWindow.getAllWindows().forEach(win => {
       if (!win.webContents.isDestroyed()) {
-        win.webContents.send(CHANNELS.EVT_LOCK_CHANGED, locks)
+        win.webContents.send(CHANNELS.EVT_LOCK_CHANGED, { repoPath, locks, error })
       }
     })
   }

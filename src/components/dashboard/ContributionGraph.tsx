@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useState, useMemo } from 'react'
-import { ipc, CommitEntry } from '@/ipc'
+import { CommitEntry } from '@/ipc'
+import { useRepoStore } from '@/stores/repoStore'
+import { contributionData } from '@/lib/contributionData'
 import { Tooltip } from '@/components/ui/Tooltip'
 import {
   computeActivity,
@@ -26,6 +28,7 @@ const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 export function ContributionGraph({ repoPath }: ContributionGraphProps) {
+  const historyTick = useRepoStore(s => s.historyTick)
   const [commits, setCommits] = useState<CommitEntry[]>([])
   const [identity, setIdentity] = useState<{ name: string; email: string }>({ name: '', email: '' })
   const [view, setView] = useState<'you' | 'team'>('you')
@@ -37,11 +40,8 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
     let mounted = true
     setLoading(true)
 
-    Promise.all([
-      ipc.log(repoPath, { all: true, limit: 10000 }),
-      ipc.gitGetIdentity(repoPath).catch(() => ({ name: '', email: '' })),
-    ])
-      .then(([data, gitIdentity]) => {
+    const timer = setTimeout(() => contributionData(repoPath, historyTick)
+      .then(({ commits: data, identity: gitIdentity }) => {
         if (mounted) {
           setCommits(data)
           setIdentity(gitIdentity)
@@ -53,10 +53,10 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
       })
       .finally(() => {
         if (mounted) setLoading(false)
-      })
+      }), 150)
 
-    return () => { mounted = false }
-  }, [repoPath])
+    return () => { mounted = false; clearTimeout(timer) }
+  }, [repoPath, historyTick])
 
   const visibleCommits = useMemo(() => {
     if (view === 'team') return commits
@@ -71,9 +71,14 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
 
   // Compute activity data for the last 1825 days
   const activity = useMemo(() => computeActivity(visibleCommits, 1825), [visibleCommits])
+  const coveredDates = [...activity.keys()].sort()
+  const firstDate = coveredDates[0] ?? toDateKey(Date.now())
+  const lastDate = coveredDates[coveredDates.length - 1] ?? firstDate
+  const firstYear = Number(firstDate.slice(0, 4))
+  const lastYear = Number(lastDate.slice(0, 4))
 
-  const goToPreviousYear = useCallback(() => setCurrentYear(y => y - 1), [])
-  const goToNextYear     = useCallback(() => setCurrentYear(y => y + 1), [])
+  const goToPreviousYear = useCallback(() => setCurrentYear(y => Math.max(firstYear, y - 1)), [firstYear])
+  const goToNextYear     = useCallback(() => setCurrentYear(y => Math.min(lastYear, y + 1)), [lastYear])
   const goToThisYear     = useCallback(() => setCurrentYear(new Date().getFullYear()), [])
 
   const todayKey = toDateKey(Date.now())
@@ -170,6 +175,10 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
           </div>
         </div>
 
+        <div style={{ fontSize: 10, color: '#4a566a' }}>
+          Coverage: {firstDate} to {lastDate} · latest {commits.length.toLocaleString()} loaded commits (limit 10,000)
+          {commits.length >= 10000 && ' · older history may be incomplete'}
+        </div>
         {/* Graph container */}
         <div style={{ overflowX: 'auto', paddingTop: 4 }}>
           <svg

@@ -1,3 +1,4 @@
+import { useDialogOverlayDismiss } from '@/lib/useDialogOverlayDismiss'
 import React, { useEffect, useRef, useState } from 'react'
 import { useAuthStore } from '@/stores/authStore'
 import { ipc } from '@/ipc'
@@ -80,9 +81,10 @@ export function DeviceFlowLogin({ onClose }: DeviceFlowLoginProps) {
   const secs = timeLeft !== null ? String(timeLeft % 60).padStart(2, '0') : '00'
 
   const isActive = isLoading || !!deviceFlow
+  const modal = useDialogOverlayDismiss(handleCloseRequest, true, 'Sign in with GitHub')
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+    <div {...modal} className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <style>{`
         @keyframes lg-indeterminate {
           0%   { transform: translateX(-100%); }

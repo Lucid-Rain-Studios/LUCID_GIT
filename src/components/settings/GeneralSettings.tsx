@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { ipc, AppSettings, UpdateInfo, TerminalProfile } from '@/ipc'
 import { ActionBtn } from '@/components/ui/ActionBtn'
+import { SettingsError } from './SettingsError'
 
 const CONFIRM_BRANCH_KEY = 'lucid-git:confirm-branch-switch'
 
@@ -71,10 +72,18 @@ export function GeneralSettings() {
   const [updateReady, setUpdateReady] = useState(false)
   const [updateStatus, setUpdateStatus] = useState<string>('')
 
+  const pendingPatch = useRef<Partial<AppSettings>>({})
   const [terminals, setTerminals] = useState<TerminalProfile[]>([])
+  const [loaded, setLoaded] = useState(false)
+  const [settingsError, setSettingsError] = useState<string | null>(null)
+  const load = () => {
+    setSettingsError(null)
+    return ipc.settingsGet().then(s => { setSettings(s); setLoaded(true) })
+      .catch(e => setSettingsError(`Could not load settings: ${String(e)}`))
+  }
 
   useEffect(() => {
-    ipc.settingsGet().then(setSettings).catch(() => {})
+    load()
     ipc.listTerminals().then(setTerminals).catch(() => setTerminals([]))
   }, [])
 
@@ -89,7 +98,8 @@ export function GeneralSettings() {
       setDownloadingUpdate(false)
       setUpdateStatus(`Update ${updateInfo?.version ?? ''} is downloaded and ready to install.`.trim())
     })
-    return () => { unsubAvail(); unsubReady() }
+    const unsubError = ipc.onUpdateError(message => { setDownloadingUpdate(false); setCheckingUpdates(false); setUpdateStatus('Update failed: ' + message + '. Retry the check or download.') })
+    return () => { unsubAvail(); unsubReady(); unsubError() }
   }, [updateInfo?.version])
 
   const handleConfirmBranchToggle = (checked: boolean) => {
@@ -99,16 +109,13 @@ export function GeneralSettings() {
   }
 
   const update = (patch: Partial<AppSettings>) => {
+    pendingPatch.current = { ...pendingPatch.current, ...patch }
     setSettings(s => ({ ...s, ...patch }))
     setSaved(false)
   }
 
-  const updateCleanup = (patch: Partial<AppSettings['scheduledCleanup']>) => {
-    setSettings(s => ({ ...s, scheduledCleanup: { ...s.scheduledCleanup, ...patch } }))
-    setSaved(false)
-  }
-
   const updateFeatureVisibility = (patch: Partial<NonNullable<AppSettings['featureVisibility']>>) => {
+    pendingPatch.current.featureVisibility = { ...pendingPatch.current.featureVisibility, ...patch } as AppSettings['featureVisibility']
     setSettings(s => ({
       ...s,
       featureVisibility: { ...(s.featureVisibility ?? DEFAULTS.featureVisibility!), ...patch },
@@ -117,12 +124,16 @@ export function GeneralSettings() {
   }
 
   const handleSave = async () => {
+    if (!loaded) return
     setSaving(true)
+    setSaved(false)
+    setSettingsError(null)
     try {
-      await ipc.settingsSave(settings)
+      await ipc.settingsSave(pendingPatch.current)
+      pendingPatch.current = {}
       setSaved(true)
       window.dispatchEvent(new Event(SETTINGS_CHANGED_EVENT))
-    } catch {}
+    } catch (e) { setSettingsError(`Could not save settings: ${String(e)}. Retry Save.`) }
     finally { setSaving(false) }
   }
 
@@ -132,14 +143,16 @@ export function GeneralSettings() {
     try {
       const result = await ipc.updateCheck()
       if (result.source === 'unavailable') {
-        setUpdateStatus('No updates found.')
+        setUpdateStatus('Update source is unavailable. Retry when the release feed is reachable.')
+      } else if (result.source === 'dev') {
+        setUpdateStatus('Update checks are unavailable in development builds.')
       } else if (!result.available) {
         setUpdateStatus('You are already on the latest version.')
       } else if (result.version) {
         setUpdateStatus(`Update ${result.version} is available.`)
       }
-    } catch {
-      setUpdateStatus('No updates found.')
+    } catch (error) {
+      setUpdateStatus('Update check failed: ' + String(error) + '. Retry the check.')
     } finally {
       setCheckingUpdates(false)
     }
@@ -156,8 +169,10 @@ export function GeneralSettings() {
     }
   }
 
+  if (!loaded) return settingsError ? <SettingsError error={settingsError} onRetry={load} /> : <div className="p-3">Loading settings…</div>
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
+      {settingsError && <SettingsError error={settingsError} />}
       <div className="flex-1 overflow-y-auto">
 
         <Section title="Sync">
@@ -227,77 +242,6 @@ export function GeneralSettings() {
               ))}
             </select>
           </Row>
-        </Section>
-
-        <Section title="Clone">
-          <Row label="Default clone depth" hint="Number of commits to fetch. 0 = full history">
-            <input
-              type="number"
-              min={0}
-              max={10000}
-              value={settings.defaultCloneDepth}
-              onChange={e => update({ defaultCloneDepth: Number(e.target.value) })}
-              className="w-20 bg-lg-bg-primary border border-lg-border rounded px-2 py-1 text-[11px] font-mono text-lg-text-primary focus:outline-none focus:border-lg-accent text-right"
-            />
-          </Row>
-        </Section>
-
-        <Section title="Large file warnings">
-          <Row label="Warn threshold" hint="Show a warning when a staged file exceeds this size">
-            <div className="flex items-center gap-1.5">
-              <input
-                type="number"
-                min={1}
-                max={10000}
-                value={settings.largeFileWarnMB}
-                onChange={e => update({ largeFileWarnMB: Number(e.target.value) })}
-                className="w-20 bg-lg-bg-primary border border-lg-border rounded px-2 py-1 text-[11px] font-mono text-lg-text-primary focus:outline-none focus:border-lg-accent text-right"
-              />
-              <span className="text-[10px] font-mono text-lg-text-secondary">MB</span>
-            </div>
-          </Row>
-        </Section>
-
-        <Section title="Scheduled cleanup">
-          <Row label="Enable scheduled cleanup" hint="Run maintenance tasks automatically">
-            <input
-              type="checkbox"
-              checked={settings.scheduledCleanup.enabled}
-              onChange={e => updateCleanup({ enabled: e.target.checked })}
-              className="accent-lg-accent"
-            />
-          </Row>
-          {settings.scheduledCleanup.enabled && (
-            <>
-              <Row label="Run every">
-                <select
-                  value={settings.scheduledCleanup.frequencyDays}
-                  onChange={e => updateCleanup({ frequencyDays: Number(e.target.value) })}
-                  className="bg-lg-bg-primary border border-lg-border rounded px-2 py-1 text-[11px] font-mono text-lg-text-primary focus:outline-none focus:border-lg-accent"
-                >
-                  <option value={7}>Weekly</option>
-                  <option value={14}>Every 2 weeks</option>
-                  <option value={30}>Monthly</option>
-                </select>
-              </Row>
-              <Row label="Run git gc">
-                <input
-                  type="checkbox"
-                  checked={settings.scheduledCleanup.includeGc}
-                  onChange={e => updateCleanup({ includeGc: e.target.checked })}
-                  className="accent-lg-accent"
-                />
-              </Row>
-              <Row label="Prune LFS cache">
-                <input
-                  type="checkbox"
-                  checked={settings.scheduledCleanup.includePruneLfs}
-                  onChange={e => updateCleanup({ includePruneLfs: e.target.checked })}
-                  className="accent-lg-accent"
-                />
-              </Row>
-            </>
-          )}
         </Section>
 
         <Section title="Workflow">

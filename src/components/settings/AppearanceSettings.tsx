@@ -5,6 +5,7 @@ import {
   THEMES, UI_FONTS, CODE_FONTS, FONT_WEIGHTS, BORDER_RADII, ACCENT_PRESETS,
 } from '@/lib/appearance'
 import { ActionBtn } from '@/components/ui/ActionBtn'
+import { SettingsError } from './SettingsError'
 
 const DEFAULTS: Partial<AppSettings> = {
   fontFamily:     'system-ui',
@@ -24,19 +25,25 @@ const DENSITIES: { id: AppSettings['uiDensity']; label: string; desc: string }[]
 ]
 
 export function AppearanceSettings() {
+  const pendingPatch = useRef<Partial<AppSettings>>({})
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [saved,    setSaved]    = useState(false)
   const [saving,   setSaving]   = useState(false)
   const [customAccent, setCustomAccent] = useState('')
   const colorInputRef = useRef<HTMLInputElement>(null)
+  const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    ipc.settingsGet().then(s => {
+  const load = () => {
+    setError(null)
+    return ipc.settingsGet().then(s => {
       const merged = { ...DEFAULTS as AppSettings, ...s }
       setSettings(merged)
       setCustomAccent(merged.accentColor ?? '')
-    }).catch(() => {})
-  }, [])
+    }).catch(e => setError(`Could not load appearance settings: ${String(e)}`))
+  }
+  useEffect(() => { load() }, [])
+
+  if (!settings && error) return <SettingsError error={error} onRetry={load} />
 
   if (!settings) return (
     <div style={{ padding: 24, fontFamily: 'var(--lg-font-ui)', fontSize: 12, color: 'var(--lg-text-secondary)' }}>
@@ -45,6 +52,7 @@ export function AppearanceSettings() {
   )
 
   const update = (patch: Partial<AppSettings>) => {
+    pendingPatch.current = { ...pendingPatch.current, ...patch }
     setSettings(s => {
       if (!s) return s
       const next = { ...s, ...patch }
@@ -57,11 +65,15 @@ export function AppearanceSettings() {
   const handleSave = async () => {
     if (!settings) return
     setSaving(true)
-    try { await ipc.settingsSave(settings); setSaved(true) } catch { /* ignore */ }
+    setSaved(false)
+    setError(null)
+    try { await ipc.settingsSave(pendingPatch.current); pendingPatch.current = {}; setSaved(true) }
+    catch (e) { setError(`Could not save appearance settings: ${String(e)}. Retry Save.`) }
     finally { setSaving(false) }
   }
 
   const handleRestoreDefaults = () => {
+    pendingPatch.current = { ...pendingPatch.current, ...DEFAULTS }
     setSettings(s => {
       if (!s) return s
       const next = { ...s, ...DEFAULTS } as AppSettings
@@ -76,6 +88,7 @@ export function AppearanceSettings() {
 
   return (
     <div style={{ maxWidth: 600, padding: '20px 24px 32px' }}>
+      {error && <SettingsError error={error} />}
 
       {/* ── Theme ── */}
       <Section title="Theme">

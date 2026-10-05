@@ -74,11 +74,6 @@ function simpleHash(s: string): string {
   return h.toString(16).padStart(8, '0')
 }
 
-async function headSha(repoPath: string): Promise<string> {
-  const r = await execSafe(['rev-parse', 'HEAD'], repoPath)
-  return r.exitCode === 0 ? r.stdout.trim() : 'none'
-}
-
 function makeCacheKey(repoPath: string, sha: string): string {
   return `${simpleHash(repoPath)}-${sha.slice(0, 12)}`
 }
@@ -134,28 +129,53 @@ const LOG_FMT = '%H%x00%an%x00%ae%x00%at%x00%s'
 
 class DependencyService {
 
+  private inFlight = new Map<string, Promise<DepGraphStatus>>()
+
   async buildGraph(repoPath: string, onProgress: ProgressCallback): Promise<DepGraphStatus> {
-    const sha = await headSha(repoPath)
-    const key = makeCacheKey(repoPath, sha)
+    const previous = this.inFlight.get(repoPath)
+    if (previous) return previous
+    const pending = this.buildGraphCurrent(repoPath, onProgress).finally(() => this.inFlight.delete(repoPath))
+    this.inFlight.set(repoPath, pending)
+    return pending
+  }
+
+  private async buildGraphCurrent(repoPath: string, onProgress: ProgressCallback): Promise<DepGraphStatus> {
+    const key = makeCacheKey(repoPath, 'working-v2')
     const db = getDb()
 
-    const existing = db.prepare('SELECT COUNT(*) as cnt FROM dep_nodes WHERE cache_key = ?').get(key) as { cnt: number }
-    if (existing.cnt > 0) {
-      return { cacheKey: key, nodeCount: existing.cnt, edgeCount: this.countEdges(key), builtAt: Date.now() }
-    }
-
+    db.exec('CREATE TABLE IF NOT EXISTS dep_scans (cache_key TEXT PRIMARY KEY, fingerprints TEXT NOT NULL, complete INTEGER NOT NULL, built_at INTEGER NOT NULL)')
+    const previous = db.prepare('SELECT fingerprints, complete, built_at FROM dep_scans WHERE cache_key = ?').get(key) as { fingerprints: string; complete: number; built_at: number } | undefined
+    const oldFingerprints: Record<string, string> = previous ? JSON.parse(previous.fingerprints) : {}
+    const fingerprints: Record<string, string> = {}
     onProgress({ id: 'dep-ls', label: 'Listing asset files', status: 'running' })
 
     const lsRes = await execSafe(
-      ['ls-files', '--cached', '--', '*.uasset', '*.umap', '*.udk'],
+      ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', '*.uasset', '*.umap', '*.udk'],
       repoPath
     )
-    if (lsRes.exitCode !== 0 || !lsRes.stdout.trim()) {
+    if (lsRes.exitCode !== 0) throw new Error('Unable to list dependency assets')
+    if (!lsRes.stdout) {
+      db.prepare('DELETE FROM dep_nodes WHERE cache_key = ?').run(key)
+      db.prepare('INSERT OR REPLACE INTO dep_scans (cache_key, fingerprints, complete, built_at) VALUES (?, ?, ?, ?)').run(key, '{}', 1, Date.now())
       onProgress({ id: 'dep-ls', label: 'Listing asset files', status: 'done', detail: 'No assets found' })
       return { cacheKey: key, nodeCount: 0, edgeCount: 0, builtAt: Date.now() }
     }
 
-    const files = lsRes.stdout.trim().split('\n').filter(Boolean)
+    const files = [...new Set(lsRes.stdout.split('\0').filter(Boolean))]
+    for (let i = 0; i < files.length; i += 50) await Promise.all(files.slice(i, i + 50).map(async file => {
+      const stat = await fs.promises.stat(path.join(repoPath, file), { bigint: true }).catch(() => null)
+      fingerprints[file] = stat ? String(stat.size) + ':' + stat.mtimeNs + ':' + stat.ctimeNs : 'unavailable'
+    }))
+    if (previous?.complete && JSON.stringify(oldFingerprints) === JSON.stringify(fingerprints)) {
+      return { cacheKey: key, nodeCount: files.length, edgeCount: this.countEdges(key), builtAt: previous.built_at }
+    }
+    const stamp = db.prepare('INSERT OR REPLACE INTO dep_scans (cache_key, fingerprints, complete, built_at) VALUES (?, ?, ?, ?)')
+    stamp.run(key, JSON.stringify(oldFingerprints), 0, Date.now())
+    const removed = db.prepare('DELETE FROM dep_nodes WHERE cache_key = ? AND file_path = ?')
+    const paths = new Set(files)
+    for (const file of Object.keys(oldFingerprints)) if (!paths.has(file)) removed.run(key, file)
+    const changedFiles = files.filter(file => fingerprints[file] !== oldFingerprints[file] || fingerprints[file] === 'unavailable')
+    let failed = 0
     const total = files.length
     onProgress({ id: 'dep-ls', label: 'Listing asset files', status: 'done', detail: `${total} assets found` })
 
@@ -170,10 +190,10 @@ class DependencyService {
     })
 
     const BATCH = 50
-    let processed = 0
+    let processed = total - changedFiles.length
 
-    for (let i = 0; i < files.length; i += BATCH) {
-      const chunk = files.slice(i, i + BATCH)
+    for (let i = 0; i < changedFiles.length; i += BATCH) {
+      const chunk = changedFiles.slice(i, i + BATCH)
       const nodes: DepNodeInfo[] = []
 
       for (const relPath of chunk) {
@@ -190,12 +210,15 @@ class DependencyService {
 
         const absPath = path.join(repoPath, relPath)
         try {
-          const stat = fs.statSync(absPath)
+          const stat = await fs.promises.stat(absPath)
           const readSize = Math.min(stat.size, MAX_SCAN_BYTES)
-          const buf = Buffer.allocUnsafe(readSize)
-          const fd = fs.openSync(absPath, 'r')
-          fs.readSync(fd, buf, 0, readSize, 0)
-          fs.closeSync(fd)
+          const buf = Buffer.alloc(readSize)
+          const fd = await fs.promises.open(absPath, 'r')
+          try {
+            const { bytesRead } = await fd.read(buf, 0, readSize, 0)
+            const after = await fd.stat({ bigint: true })
+            if (bytesRead !== readSize || String(after.size) + ':' + after.mtimeNs + ':' + after.ctimeNs !== fingerprints[relPath]) throw new Error('Asset changed during scan')
+          } finally { await fd.close() }
           nodes.push({
             packageName: filePathToPackageName(relPath),
             filePath: relPath,
@@ -204,6 +227,8 @@ class DependencyService {
             softRefs: [],
           })
         } catch {
+          failed++
+          delete fingerprints[relPath]
           nodes.push({
             packageName: filePathToPackageName(relPath),
             filePath: relPath,
@@ -226,6 +251,8 @@ class DependencyService {
       })
     }
 
+    stamp.run(key, JSON.stringify(fingerprints), failed ? 0 : 1, Date.now())
+    if (failed) throw new Error(failed + ' dependency assets could not be scanned; cached graph is incomplete. Retry after files become available.')
     const nodeCount = files.length
     return { cacheKey: key, nodeCount, edgeCount: this.countEdges(key), builtAt: Date.now() }
   }
@@ -242,8 +269,7 @@ class DependencyService {
   }
 
   async graphStatus(repoPath: string): Promise<DepGraphStatus | null> {
-    const sha = await headSha(repoPath)
-    const key = makeCacheKey(repoPath, sha)
+    const { cacheKey: key } = await this.buildGraph(repoPath, () => {})
     const db = getDb()
     const row = db.prepare('SELECT COUNT(*) as cnt FROM dep_nodes WHERE cache_key = ?').get(key) as { cnt: number }
     if (row.cnt === 0) return null
@@ -254,6 +280,8 @@ class DependencyService {
     const db = getDb()
     const prefix = simpleHash(repoPath)
     db.prepare("DELETE FROM dep_nodes WHERE cache_key LIKE ?").run(`${prefix}-%`)
+    db.exec('CREATE TABLE IF NOT EXISTS dep_scans (cache_key TEXT PRIMARY KEY, fingerprints TEXT NOT NULL, complete INTEGER NOT NULL, built_at INTEGER NOT NULL)')
+    db.prepare("DELETE FROM dep_scans WHERE cache_key LIKE ?").run(`${prefix}-%`)
   }
 
   private getNodeByPath(key: string, filePath: string): DepNodeInfo | null {
@@ -305,8 +333,7 @@ class DependencyService {
   }
 
   async blameWithDependencies(repoPath: string, filePath: string): Promise<DepBlameResult> {
-    const sha = await headSha(repoPath)
-    const key = makeCacheKey(repoPath, sha)
+    const { cacheKey: key } = await this.buildGraph(repoPath, () => {})
 
     const node = this.getNodeByPath(key, filePath)
     const packageName = node?.packageName ?? filePathToPackageName(filePath)
@@ -392,8 +419,7 @@ class DependencyService {
   }
 
   async findReferences(repoPath: string, packageName: string): Promise<DepRefResult> {
-    const sha = await headSha(repoPath)
-    const key = makeCacheKey(repoPath, sha)
+    const { cacheKey: key } = await this.buildGraph(repoPath, () => {})
     const db = getDb()
 
     const rows = db.prepare(

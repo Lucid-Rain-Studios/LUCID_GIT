@@ -1,3 +1,4 @@
+import { useDialogOverlayDismiss } from '@/lib/useDialogOverlayDismiss'
 import React, { useState, useEffect, useCallback } from 'react'
 import lucidGitIcon from '@/lib/icons/lucid_git.svg'
 import { ipc, SyncStatus, UpdateInfo, PresenceEntry } from '@/ipc'
@@ -22,7 +23,7 @@ import {
 } from '@/lib/syncButtonLogic'
 import { useStatusToastStore } from '@/stores/statusToastStore'
 import { useDialogStore } from '@/stores/dialogStore'
-import { setTopBarSyncHandlers, updateTopBarSyncSnapshot } from '@/lib/topBarSyncBridge'
+import { setTopBarSyncHandlers, updateTopBarSyncSnapshot, hasBranchIntegrated, markBranchIntegrated } from '@/lib/topBarSyncBridge'
 import { ActionBtn } from '@/components/ui/ActionBtn'
 
 interface TopBarProps {
@@ -166,13 +167,30 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
   useEffect(() => {
     const unsubAvail = ipc.onUpdateAvailable((info: UpdateInfo) => { setUpdateInfo(info); setUpdateDismissed(false) })
     const unsubReady = ipc.onUpdateReady(() => { setUpdateReady(true); setDownloading(false) })
-    return () => { unsubAvail(); unsubReady() }
+    const unsubError = ipc.onUpdateError(message => { setDownloading(false); useStatusToastStore.getState().show('Update failed: ' + message + '. Retry the download or check Settings.') })
+    return () => { unsubAvail(); unsubReady(); unsubError() }
   }, [])
 
-  const doPush = async () => {
-    if (!repoPath || syncOp !== 'idle') return
+  const doPush = async (force = false) => {
+    if (!repoPath || syncOp !== 'idle' || updatingFromMain) return
+    if (!force && !canPushNow) return
+    if (force) {
+      const approved = await useDialogStore.getState().confirm({
+        title: 'Force push?',
+        message: `Replace the remote history of ${currentBranch} with your local branch?`,
+        detail: 'This can remove commits from the remote branch. Force with lease will reject the push if the remote has changed since your last fetch.',
+        confirmLabel: 'Force push',
+        danger: true,
+      })
+      const current = useRepoStore.getState()
+      if (!approved || current.repoPath !== repoPath || current.currentBranch !== currentBranch) return
+    }
     setSyncOp('pushing'); setSyncErr(null)
-    try { await opRun('Pushing…', () => ipc.push(repoPath)); await refreshRevisionState(); showStatusToast('Push successful.') }
+    try {
+      await opRun(force ? 'Force pushing…' : 'Pushing…', () => ipc.push(repoPath, force))
+      if (!hasPublishedBranch) markBranchIntegrated(repoPath, currentBranch, false)
+      await refreshRevisionState(); showStatusToast('Push successful.')
+    }
     catch (e) {
       const s = String(e)
       if (s.toLowerCase().includes('everything up-to-date') || s.toLowerCase().includes('up to date')) {
@@ -187,7 +205,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
         return
       }
       showStatusToast('Push failed.')
-      setSyncErr(s); pushErr(s)
+      setSyncErr(s); pushErr(s, repoPath)
     }
     finally { setSyncOp('idle') }
   }
@@ -232,6 +250,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
         stashed = true
       }
       await opRun(`Updating from ${defaultBranch}…`, () => ipc.updateFromMain(repoPath))
+      markBranchIntegrated(repoPath, currentBranch)
       markFetchPerformed(repoPath)
       sessionTopBarFetched.add(repoPath)
       setHasFetched(true)
@@ -257,7 +276,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
       } else {
         showStatusToast(`Update from ${defaultBranch} failed.`)
       }
-      pushErr(s)
+      pushErr(s, repoPath)
       if (inProgressBranch && onMergeConflict) {
         onMergeConflict(inProgressBranch)
       }
@@ -271,9 +290,11 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
   const ghSlug = remoteUrl ? parseGitHubSlug(remoteUrl) : null
   const busyState = syncOp === 'idle' ? 'idle' : syncOp === 'fetching' ? 'fetch' : syncOp === 'pulling' ? 'pull' : 'push'
   const hasUpstream = sync?.hasUpstream ?? true
-  const canPushNow = canPush(hasFetched, sync?.behind ?? 0, sync?.ahead ?? 0, busyState, hasUpstream)
+  const hasPublishedBranch = sync?.hasPublishedBranch ?? hasUpstream
+  const hasIntegrated = !!repoPath && hasBranchIntegrated(repoPath, currentBranch)
+  const canPushNow = !updatingFromMain && canPush(hasFetched, sync?.behind ?? 0, sync?.ahead ?? 0, busyState, hasPublishedBranch, hasIntegrated)
   const canCreatePRNow = canCreatePR(!!ghSlug, currentBranch, busyState)
-  const pushReason = pushDisabledReason(hasFetched, sync?.behind ?? 0, sync?.ahead ?? 0, busyState, hasUpstream)
+  const pushReason = updatingFromMain ? 'Update in progress' : pushDisabledReason(hasFetched, sync?.behind ?? 0, sync?.ahead ?? 0, busyState, hasPublishedBranch, hasIntegrated)
   const createPRReason = createPRDisabledReason(!!ghSlug, currentBranch, busyState)
 
   const doFetch = async () => {
@@ -289,7 +310,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
     } catch (e) {
       const s = String(e)
       showStatusToast('Fetch failed.')
-      setSyncErr(s); pushErr(s)
+      setSyncErr(s); pushErr(s, repoPath)
     }
     finally { setSyncOp('idle') }
   }
@@ -327,6 +348,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
         await opRun('Stashing local changes…', () => ipc.stashSave(repoPath, 'Auto-stash before pull'))
       }
       await opRun('Pulling…', () => ipc.pull(repoPath))
+      markBranchIntegrated(repoPath, currentBranch)
       markFetchPerformed(repoPath)
       sessionTopBarFetched.add(repoPath)
       setHasFetched(true)
@@ -346,7 +368,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
         return
       }
       showStatusToast('Pull failed.')
-      setSyncErr(s); pushErr(s)
+      setSyncErr(s); pushErr(s, repoPath)
     }
     finally { setSyncOp('idle') }
   }
@@ -385,22 +407,8 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
 
   const currentAccount = accounts.find(a => a.userId === currentAccountId)
 
-  const [branchPresence, setBranchPresence] = useState<Record<string, PresenceEntry[]>>({})
-
-  useEffect(() => {
-    if (!branchMenuOpen || !repoPath) return
-    ipc.presenceRead(repoPath).then(file => {
-      const cutoff = Date.now() - 30 * 60 * 1000
-      const byBranch: Record<string, PresenceEntry[]> = {}
-      Object.values(file.entries)
-        .filter(e => new Date(e.lastSeen).getTime() > cutoff)
-        .forEach(e => {
-          if (!byBranch[e.branch]) byBranch[e.branch] = []
-          byBranch[e.branch].push(e)
-        })
-      setBranchPresence(byBranch)
-    }).catch(() => {})
-  }, [branchMenuOpen, repoPath])
+  // Presence is private to the Admin Team view.
+  const branchPresence: Record<string, PresenceEntry[]> = {}
 
   const showBanner = !updateDismissed && (updateReady || !!updateInfo)
   const [permWarnDismissed, setPermWarnDismissed] = useState(false)
@@ -728,10 +736,11 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
                 behindCount={hasBehind && isIdle ? (sync?.behind ?? 0) : 0}
                 aheadCount={isIdle && hasUpstream ? (sync?.ahead ?? 0) : 0}
                 hasFetched={hasFetched}
+                allowUpToDatePull={hasPublishedBranch && !hasIntegrated}
                 error={!!syncErr}
                 disabled={!isIdle}
                 fetchDisabledReason={fetchDisabledReason(busyState)}
-                pullDisabledReason={pullDisabledReason(hasFetched, sync?.behind ?? 0, busyState)}
+                pullDisabledReason={pullDisabledReason(hasFetched, sync?.behind ?? 0, busyState, hasPublishedBranch && !hasIntegrated)}
                 onFetch={doFetch}
                 onPull={doTopBarPull}
               />
@@ -748,8 +757,9 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
 
               <FlowArrow />
 
+              <PushDropdown disabled={!isIdle || updatingFromMain} onForcePush={() => doPush(true)} contextKey={`${repoPath}:${currentBranch}`}>
               <SyncBtn
-                label={pushButtonLabel(busyState, hasUpstream)}
+                label={pushButtonLabel(busyState, hasPublishedBranch)}
                 icon={<ArrowUp />}
                 count={canPushNow && hasUpstream ? (sync?.ahead ?? 0) : 0}
                 countColor="#2dbd6e"
@@ -757,8 +767,9 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
                 error={false}
                 disabled={!canPushNow}
                 disabledReason={pushReason}
-                onClick={doPush}
+                onClick={() => doPush()}
               />
+              </PushDropdown>
 
               <FlowArrow />
 
@@ -997,8 +1008,9 @@ function BranchConfirmDialog({ from, to, hasChanges, onConfirm, onCancel }: {
 }) {
   const [dontAsk, setDontAsk] = React.useState(false)
   const [stash, setStash]     = React.useState(false)
+  const modal = useDialogOverlayDismiss(onCancel, true, 'Switch branch')
   return (
-    <div style={{
+    <div {...modal} style={{
       position: 'fixed', inset: 0, zIndex: 500,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(2px)',
@@ -1310,6 +1322,50 @@ function MergeDownIcon({ color = 'currentColor' }: { color?: string }) {
 // ── Small inline components ─────────────────────────────────────────────────────
 
 // ── Sync button (Fetch & Pull / Push) ─────────────────────────────────────────
+
+function PushDropdown({ children, disabled, onForcePush, contextKey }: {
+  children: React.ReactNode; disabled: boolean; onForcePush: () => void; contextKey: string
+}) {
+  const [open, setOpen] = useState(false)
+  const menuRef = React.useRef<HTMLDivElement>(null)
+  const triggerRef = React.useRef<HTMLButtonElement>(null)
+  const itemRef = React.useRef<HTMLButtonElement>(null)
+  useEffect(() => { setOpen(false) }, [contextKey, disabled])
+  useEffect(() => {
+    if (!open) return
+    itemRef.current?.focus()
+    const dismiss = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', dismiss)
+    return () => document.removeEventListener('mousedown', dismiss)
+  }, [open])
+  return (
+    <div ref={menuRef} style={{ position: 'relative', display: 'flex', gap: 2 }}
+      onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false) }}
+      onKeyDown={event => {
+        if (event.key === 'Escape') { setOpen(false); triggerRef.current?.focus() }
+        if (event.key === 'ArrowDown' && !disabled) { event.preventDefault(); setOpen(true); itemRef.current?.focus() }
+      }}>
+      {children}
+      <button ref={triggerRef} className="lg-toolbar-control" aria-label="Push options"
+        aria-haspopup="menu" aria-expanded={open} disabled={disabled}
+        onClick={() => setOpen(value => !value)}
+        style={{ height: 28, width: 23, borderRadius: 5, border: '1px solid var(--lg-border)', background: 'transparent', color: 'var(--lg-text-primary)', cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1 }}>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="m2 3.5 3 3 3-3" stroke="currentColor" strokeWidth="1.4" /></svg>
+      </button>
+      {open && !disabled && (
+        <div role="menu" aria-label="Push options" style={{ position: 'absolute', top: 33, right: 0, zIndex: 100, minWidth: 150, padding: 4, borderRadius: 6, border: '1px solid var(--lg-border)', background: 'var(--lg-bg-secondary)', boxShadow: '0 8px 24px #0006' }}>
+          <button ref={itemRef} role="menuitem" className="lg-toolbar-control"
+            onClick={() => { setOpen(false); triggerRef.current?.focus(); onForcePush() }}
+            style={{ width: '100%', padding: '8px 10px', textAlign: 'left', border: 0, borderRadius: 4, background: 'transparent', color: '#e84040', fontSize: 12.5, cursor: 'pointer' }}>
+            Force push…
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
 
 function SyncBtn({
   label, icon, count, countColor, active, error, disabled, disabledReason, onClick,
@@ -1633,16 +1689,17 @@ function CloneIcon() {
 // ── Split Fetch | Pull button ─────────────────────────────────────────────────
 
 function FetchPullSplitBtn({
-  fetchLabel, pullLabel, behindCount, aheadCount, hasFetched, error, disabled, fetchDisabledReason, pullDisabledReason, onFetch, onPull,
+  fetchLabel, pullLabel, behindCount, aheadCount, hasFetched, allowUpToDatePull = false, error, disabled, fetchDisabledReason, pullDisabledReason, onFetch, onPull,
 }: {
   fetchLabel: string; pullLabel: string; behindCount: number; aheadCount: number
   hasFetched: boolean; error: boolean; disabled: boolean
   fetchDisabledReason?: string | null; pullDisabledReason?: string | null
   onFetch: () => void; onPull: () => void
+  allowUpToDatePull?: boolean
 }) {
   const [hoverFetch, setHoverFetch] = React.useState(false)
   const [hoverPull,  setHoverPull]  = React.useState(false)
-  const pullDisabled = disabled || !hasFetched || behindCount === 0
+  const pullDisabled = disabled || !hasFetched || (behindCount === 0 && !allowUpToDatePull)
   const hasBehind   = behindCount > 0
   const fetchActive = !disabled
   const borderColor = error

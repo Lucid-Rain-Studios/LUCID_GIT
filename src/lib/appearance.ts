@@ -1,4 +1,5 @@
 import type { AppSettings } from '@/ipc'
+import { useAppearanceStore } from '@/stores/appearanceStore'
 
 // ── Theme definitions ─────────────────────────────────────────────────────────
 
@@ -288,6 +289,7 @@ export const ACCENT_PRESETS = [
 // ── Apply function ─────────────────────────────────────────────────────────────
 
 export function applyAppearanceSettings(settings: Partial<AppSettings>): void {
+  useAppearanceStore.getState().apply(settings)
   const root = document.documentElement
   root.classList.add('lg-appearance-applied')
 

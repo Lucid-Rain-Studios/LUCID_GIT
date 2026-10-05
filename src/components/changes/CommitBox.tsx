@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useRepoStore } from '@/stores/repoStore'
 import { useOperationStore } from '@/stores/operationStore'
 import { ipc } from '@/ipc'
@@ -9,51 +9,78 @@ import { markFetchPerformed } from '@/lib/fetchState'
 import { ActionBtn } from '@/components/ui/ActionBtn'
 import { AppCheckbox } from '@/components/ui/AppCheckbox'
 
-type HookState = 'idle' | 'running' | 'passed' | 'failed'
+const drafts = new Map<string, { title: string; message: string }>()
 
 interface CommitBoxProps {
   deferredStagePaths?: string[]
 }
 
 export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
-  const { repoPath, fileStatus, refreshStatus, bumpSyncTick } = useRepoStore()
+  const { repoPath, fileStatus, refreshStatus, bumpSyncTick, historyTick, syncTick } = useRepoStore()
   const opRun = useOperationStore(s => s.run)
   const dialog = useDialogStore()
 
-  const [title, setTitle]               = useState('')
-  const [message, setMessage]           = useState('')
+  const [title, setTitle]               = useState(() => repoPath ? drafts.get(repoPath)?.title ?? '' : '')
+  const [message, setMessage]           = useState(() => repoPath ? drafts.get(repoPath)?.message ?? '' : '')
   const [isCommitting, setIsCommitting] = useState(false)
   const [error, setError]               = useState<string | null>(null)
+  const [commitFailed, setCommitFailed] = useState(false)
 
   const [amend, setAmend]               = useState(false)
   const [lastMessage, setLastMessage]   = useState<string | null>(null)
-  const [headPushed, setHeadPushed]     = useState(false)
-  const [originalTitle, setOriginalTitle]     = useState('')
-  const [originalMessage, setOriginalMessage] = useState('')
+  const [headPushed, setHeadPushed]     = useState<boolean | null>(null)
+  const headInfoRepo = useRef(repoPath)
+  const [originalTitle, setOriginalTitle]     = useState(title)
+  const [originalMessage, setOriginalMessage] = useState(message)
 
   const pushError = useErrorStore(s => s.pushRaw)
-  const [hookState, setHookState]       = useState<HookState>('idle')
-  const [hookOutput, setHookOutput]     = useState('')
-  const [hookDuration, setHookDuration] = useState(0)
+  const workflowBusy = useRef(false)
+  const draftRepo = useRef(repoPath)
+  const draft = useRef({ title: '', message: '' })
+  // Save only the original draft while amend temporarily displays HEAD's message.
+  draft.current = amend ? { title: originalTitle, message: originalMessage } : { title, message }
+  useEffect(() => {
+    if (draftRepo.current !== repoPath) {
+      const next = repoPath ? drafts.get(repoPath) : null
+      setTitle(next?.title ?? '')
+      setMessage(next?.message ?? '')
+      setOriginalTitle(next?.title ?? '')
+      setOriginalMessage(next?.message ?? '')
+      setAmend(false)
+      setError(null)
+      setCommitFailed(false)
+      draftRepo.current = repoPath
+    }
+    return () => {
+      if (repoPath) drafts.set(repoPath, draft.current)
+    }
+  }, [repoPath])
 
   // Load HEAD info so the amend toggle can pre-fill the message and warn
   // when the commit is already pushed.
   useEffect(() => {
-    if (!repoPath) { setLastMessage(null); setHeadPushed(false); return }
+    // Keep the last result visible during same-repository background checks.
+    // A different repository must never inherit the previous HEAD's status.
+    if (headInfoRepo.current !== repoPath || !repoPath) {
+      headInfoRepo.current = repoPath
+      setLastMessage(null)
+      setHeadPushed(null)
+    }
+    if (!repoPath) return
     let cancelled = false
     Promise.all([
       ipc.lastCommitMessage(repoPath).catch(() => null),
-      ipc.isHeadPushed(repoPath).catch(() => false),
+      ipc.isHeadPushed(repoPath).catch(() => null),
     ]).then(([msg, pushed]) => {
       if (cancelled) return
       setLastMessage(msg)
       setHeadPushed(pushed)
       // Amending a pushed commit would rewrite already-shared history, so the
       // option is only available for local commits — clear any stale toggle.
-      if (pushed) setAmend(false)
+      if (pushed !== false) setAmend(false)
     })
     return () => { cancelled = true }
-  }, [repoPath, fileStatus.length])
+  }, [repoPath, fileStatus, historyTick, syncTick])
 
   // When the user toggles amend, swap the title/body content but preserve
   // what they had typed before, so toggling back restores it.
@@ -109,6 +136,7 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
     if (!repoPath) return
     setIsCommitting(true)
     setError(null)
+    setCommitFailed(false)
 
     try {
       const finalMessage = buildCommitMessage()
@@ -117,13 +145,13 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
       } else {
         await opRun('Committing…', () => ipc.commit(repoPath, finalMessage, noVerify))
       }
+      drafts.delete(repoPath)
+      if (useRepoStore.getState().repoPath !== repoPath) return
       setTitle('')
       setMessage('')
       setOriginalTitle('')
       setOriginalMessage('')
       setAmend(false)
-      setHookState('idle')
-      setHookOutput('')
       await refreshStatus()
 
       // Keep upstream sync counts accurate for Pull/Push badges
@@ -132,8 +160,11 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
 
     } catch (e) {
       const s = String(e)
-      setError(s)
-      pushError(s)
+      if (useRepoStore.getState().repoPath === repoPath) {
+        setError(s)
+        setCommitFailed(true)
+      }
+      pushError(s, repoPath)
       // The failure may stem from files that changed on disk since the last
       // refresh — reconcile the list so stale rows don't linger.
       refreshStatus()
@@ -143,59 +174,50 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
   }
 
   const handleCommit = async () => {
-    if (!canCommit || !repoPath) return
+    if (!canCommit || !repoPath || workflowBusy.current) return
+    workflowBusy.current = true
+    setIsCommitting(true)
 
-    // Run pre-commit hook inline first
-    setHookState('running')
-    setHookOutput('')
+    // Native Git owns hook ordering and validation.
     setError(null)
 
     try {
       await prepareDeferredStage()
-      const result = await ipc.hookRunPreCommit(repoPath)
-
-      if (!result.exists || result.exitCode === 0) {
-        setHookState(result.exists ? 'passed' : 'idle')
-        setHookDuration(result.durationMs)
-        // Hook passed (or no hook) — proceed with --no-verify to avoid double-run
-        await runCommit(result.exists)
-        if (result.exists) setHookState('idle')
-      } else {
-        setHookState('failed')
-        setHookOutput(result.output)
-        setHookDuration(result.durationMs)
-      }
+      // Git runs its complete native hook sequence once, including commit-msg.
+      await runCommit(false)
     } catch (e) {
-      setHookState('idle')
       setError(String(e))
       refreshStatus()
+    } finally {
+      workflowBusy.current = false
+      setIsCommitting(false)
     }
   }
 
   const handleBypass = async () => {
-    const confirmed = await dialog.confirm({
-      title: 'Bypass pre-commit hook',
-      message: 'The hook reported a failure. Bypassing means it will not run.',
-      detail: 'Only proceed if you know the hook failure is not blocking.',
-      confirmLabel: 'Bypass & Commit',
-      danger: true,
-    })
-    if (!confirmed) return
-    setHookState('idle')
-    setHookOutput('')
+    if (!canCommit || !repoPath || !commitFailed || workflowBusy.current) return
+    workflowBusy.current = true
+    setIsCommitting(true)
     try {
+      const confirmed = await dialog.confirm({
+        title: 'Bypass commit hooks',
+        message: 'Retry the failed commit while skipping pre-commit and commit-msg checks?',
+        detail: 'This bypasses repository commit policy. Review the failure before continuing.',
+        confirmLabel: 'Bypass & Commit', danger: true,
+      })
+      if (!confirmed || useRepoStore.getState().repoPath !== repoPath) return
       await prepareDeferredStage()
+      await runCommit(true)
     } catch (e) {
       setError(String(e))
-      refreshStatus()
-      return
+    } finally {
+      workflowBusy.current = false
+      setIsCommitting(false)
     }
-    await runCommit(true)
   }
 
   const commitLabel = (() => {
     if (isCommitting)            return amend ? 'Amending…' : 'Committing…'
-    if (hookState === 'running') return 'Running hook…'
     if (amend) {
       return selectedCount > 0
         ? `Amend (+${selectedCount} file${selectedCount !== 1 ? 's' : ''})`
@@ -213,10 +235,10 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
         <label
           className={cn(
             'flex items-center gap-2 select-none min-w-0',
-            headPushed ? 'cursor-not-allowed' : 'cursor-pointer',
+            headPushed !== false ? 'cursor-not-allowed' : 'cursor-pointer',
           )}
           title={
-            headPushed
+            headPushed === null ? 'Unable to verify pushed status — refresh before amending' : headPushed
               ? 'The last commit is already pushed — amending it would rewrite shared history. Make a new commit instead.'
               : lastMessage
           }
@@ -224,7 +246,7 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
           <AppCheckbox
             checked={amend}
             onChange={() => setAmend(a => !a)}
-            disabled={headPushed}
+            disabled={headPushed !== false}
             color="#4a9eff"
           />
           <span className={cn(
@@ -237,14 +259,16 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
               {lastMessage.split('\n')[0]}
             </span>
           </span>
-          {headPushed && (
-            <span
-              className="text-[9px] font-mono text-lg-text-secondary/70 font-semibold shrink-0"
-              title="The last commit is already on the remote."
-            >
-              PUSHED
-            </span>
-          )}
+          <span
+            className={cn(
+              'text-[9px] font-mono text-lg-text-secondary/70 font-semibold shrink-0',
+              !headPushed && 'invisible',
+            )}
+            aria-hidden={!headPushed}
+            title={headPushed ? 'The last commit is already on the remote.' : undefined}
+          >
+            PUSHED
+          </span>
         </label>
       )}
 
@@ -284,44 +308,6 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
         className="w-full bg-lg-bg-primary border border-lg-border rounded px-2 py-1.5 text-xs font-mono text-lg-text-primary placeholder:text-lg-text-secondary resize-none focus:outline-none focus:border-lg-accent disabled:opacity-40 transition-colors"
       />
 
-      {hookState === 'running' && (
-        <div className="flex items-center gap-1.5 text-[10px] font-mono text-lg-text-secondary animate-pulse">
-          <span className="w-1.5 h-1.5 rounded-full bg-lg-accent-secondary animate-pulse" />
-          Running pre-commit hook…
-        </div>
-      )}
-
-      {hookState === 'passed' && (
-        <div className="text-[10px] font-mono text-lg-success">
-          ✓ Hook passed ({hookDuration}ms)
-        </div>
-      )}
-
-      {hookState === 'failed' && (
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-1.5 text-[10px] font-mono text-lg-error">
-            <span>✗ Pre-commit hook failed ({hookDuration}ms)</span>
-          </div>
-          {hookOutput && (
-            <pre className={cn(
-              'p-2 bg-lg-bg-primary border border-lg-error/40 rounded',
-              'text-[9px] font-mono text-lg-error/90 max-h-32 overflow-y-auto whitespace-pre-wrap'
-            )}>
-              {hookOutput}
-            </pre>
-          )}
-          <ActionBtn
-            onClick={handleBypass}
-            disabled={isCommitting}
-            color="#f5a832"
-            size="sm"
-            style={{ width: '100%', height: 24, fontSize: 10, fontFamily: 'var(--lg-font-mono)' }}
-          >
-            Bypass hook (confirm required)
-          </ActionBtn>
-        </div>
-      )}
-
       {error && (
         <div
           className="text-[10px] font-mono text-lg-error truncate"
@@ -331,17 +317,20 @@ export function CommitBox({ deferredStagePaths }: CommitBoxProps = {}) {
         </div>
       )}
 
-      {hookState !== 'failed' && (
-        <ActionBtn
-          onClick={handleCommit}
-          disabled={!canCommit || hookState === 'running'}
-          color={amend ? '#f5a832' : '#2dbd6e'}
-          size="sm"
-          style={{ width: '100%', height: 28, fontSize: 11, fontFamily: 'var(--lg-font-mono)', fontWeight: 600 }}
-        >
-          {commitLabel}
+      {commitFailed && (
+        <ActionBtn onClick={handleBypass} disabled={isCommitting} color="#f5a832" size="sm">
+          Bypass hooks & retry (confirm required)
         </ActionBtn>
       )}
+      <ActionBtn
+        onClick={handleCommit}
+        disabled={!canCommit}
+        color={amend ? '#f5a832' : '#2dbd6e'}
+        size="sm"
+        style={{ width: '100%', height: 28, fontSize: 11, fontFamily: 'var(--lg-font-mono)', fontWeight: 600 }}
+      >
+        {commitLabel}
+      </ActionBtn>
     </div>
   )
 }

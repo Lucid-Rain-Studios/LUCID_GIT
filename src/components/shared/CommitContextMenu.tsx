@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { ipc, CommitEntry } from '@/ipc'
 import { useOperationStore } from '@/stores/operationStore'
 import { useDialogStore } from '@/stores/dialogStore'
@@ -28,6 +28,15 @@ export function CommitContextMenu({ commit, repoPath, remoteUrl, x, y, onClose, 
   const menuRef   = useRef<HTMLDivElement>(null)
   const shortHash = commit.hash.slice(0, 7)
   const ghSlug    = remoteUrl ? parseGitHubSlug(remoteUrl) : null
+  const [isHead, setIsHead] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    setIsHead(false)
+    ipc.log(repoPath, { limit: 1 }).then(commits => {
+      if (!cancelled) setIsHead(commits[0]?.hash === commit.hash)
+    }).catch(() => { if (!cancelled) setIsHead(false) })
+    return () => { cancelled = true }
+  }, [repoPath, commit.hash])
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -123,6 +132,7 @@ export function CommitContextMenu({ commit, repoPath, remoteUrl, x, y, onClose, 
   }
 
   const handleUndoCommit = async () => {
+    if (!isHead) return
     onClose()
     if (commit.parentHashes.length === 0) {
       await dialog.alert({ title: 'Cannot undo', message: 'This is the initial commit and has no parent to reset to.' })
@@ -136,7 +146,7 @@ export function CommitContextMenu({ commit, repoPath, remoteUrl, x, y, onClose, 
     })
     if (!ok) return
     try {
-      await opRun('Undoing commit…', () => ipc.gitResetTo(repoPath, commit.parentHashes[0], 'soft'))
+      await opRun('Undoing commit…', () => ipc.gitResetTo(repoPath, commit.parentHashes[0], 'soft', commit.hash))
       bumpSyncTick()
       onRefresh()
     } catch (e) { await dialog.alert({ title: 'Undo failed', message: String(e) }) }
@@ -151,7 +161,8 @@ export function CommitContextMenu({ commit, repoPath, remoteUrl, x, y, onClose, 
 
   return (
     <AppRightSelectionOptions x={x} y={y} minWidth={230} menuRef={menuRef}>
-      <AppRightSelectionItem label="Undo commit (soft reset)"      onClick={handleUndoCommit} />
+      <AppRightSelectionItem label="Undo commit (soft reset)" onClick={handleUndoCommit}
+        disabled={!isHead || commit.parentHashes.length === 0} title="Only the current HEAD commit can be undone" />
       <AppRightSelectionItem label="Reset to commit…"            onClick={handleResetTo}    danger />
       <AppRightSelectionItem label="Checkout commit"             onClick={handleCheckout} />
       <AppRightSelectionSeparator />

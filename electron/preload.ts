@@ -1,18 +1,26 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { CHANNELS } from './ipc/channels'
+import type { RecoveryGitTask } from './indexRecoveryTypes'
 
 const api = {
+  diagnoseIndex: (repoPath: string) => ipcRenderer.invoke(CHANNELS.GIT_INDEX_DIAGNOSE, repoPath),
+  repairIndex: (repoPath: string, token: string) => ipcRenderer.invoke(CHANNELS.GIT_INDEX_REPAIR, repoPath, token),
+  undoIndexRepair: (repoPath: string, id: string) => ipcRenderer.invoke(CHANNELS.GIT_INDEX_UNDO, repoPath, id),
+  checkIndexBlockers: (repoPath: string) => ipcRenderer.invoke(CHANNELS.GIT_INDEX_BLOCKERS, repoPath),
+  stopIndexTasks: (repoPath: string, tasks: Array<Pick<RecoveryGitTask, 'pid' | 'startedAt'>>, confirmed: boolean) => ipcRenderer.invoke(CHANNELS.GIT_INDEX_STOP_TASKS, repoPath, tasks, confirmed),
+  recoverIndexLock: (repoPath: string, token: string, confirmed: boolean) => ipcRenderer.invoke(CHANNELS.GIT_INDEX_RECOVER_LOCK, repoPath, token, confirmed),
   // ── OS dialogs + shell ────────────────────────────────────────────────────
   openDirectory: (): Promise<string | null> =>
     ipcRenderer.invoke(CHANNELS.DIALOG_OPEN_DIRECTORY),
   openExternal: (url: string): Promise<void> =>
     ipcRenderer.invoke(CHANNELS.SHELL_OPEN_EXTERNAL, url),
-  showInFolder: (fullPath: string): Promise<void> =>
-    ipcRenderer.invoke(CHANNELS.SHELL_SHOW_IN_FOLDER, fullPath),
-  openPath: (fullPath: string): Promise<void> =>
-    ipcRenderer.invoke(CHANNELS.SHELL_OPEN_PATH, fullPath),
+  showInFolder: (fullPath: string, relativePath?: string): Promise<void> =>
+    ipcRenderer.invoke(CHANNELS.SHELL_SHOW_IN_FOLDER, fullPath, relativePath),
+  openPath: (fullPath: string, relativePath?: string): Promise<void> =>
+    ipcRenderer.invoke(CHANNELS.SHELL_OPEN_PATH, fullPath, relativePath),
 
   // ── Auth ──────────────────────────────────────────────────────────────────
+  cancelDeviceFlow: (code?: string) => ipcRenderer.invoke(CHANNELS.AUTH_CANCEL_DEVICE_FLOW, code),
   startDeviceFlow: () =>
     ipcRenderer.invoke(CHANNELS.AUTH_START_DEVICE_FLOW),
   pollDeviceFlow: (deviceCode: string) =>
@@ -45,12 +53,12 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GIT_UNSTAGE, repoPath, paths),
   commit: (repoPath: string, message: string, noVerify?: boolean) =>
     ipcRenderer.invoke(CHANNELS.GIT_COMMIT, repoPath, message, noVerify),
-  push: (repoPath: string) =>
-    ipcRenderer.invoke(CHANNELS.GIT_PUSH, repoPath),
+  push: (repoPath: string, force?: boolean) =>
+    ipcRenderer.invoke(CHANNELS.GIT_PUSH, repoPath, force),
   pull: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_PULL, repoPath),
-  fetch: (repoPath: string) =>
-    ipcRenderer.invoke(CHANNELS.GIT_FETCH, repoPath),
+  fetch: (repoPath: string, background?: boolean) =>
+    ipcRenderer.invoke(CHANNELS.GIT_FETCH, repoPath, background),
   log: (repoPath: string, args?: { limit?: number; all?: boolean; filePath?: string; refs?: string[] }) =>
     ipcRenderer.invoke(CHANNELS.GIT_LOG, repoPath, args),
   changelog: (repoPath: string, query: { fromDate?: string; toDate?: string; fromCommit?: string; toCommit?: string; ref?: string }) =>
@@ -187,6 +195,7 @@ const api = {
   // ── Notifications + webhooks ──────────────────────────────────────────────
   notificationList: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.NOTIFICATION_LIST, repoPath),
+  notificationClearAll: () => ipcRenderer.invoke(CHANNELS.NOTIFICATION_CLEAR_ALL),
   notificationMarkRead: (id: number) =>
     ipcRenderer.invoke(CHANNELS.NOTIFICATION_MARK_READ, id),
   notifyDesktop: (request: {
@@ -279,6 +288,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.TEAM_CONFIG_LOAD, repoPath),
   teamConfigSave: (repoPath: string, config: unknown) =>
     ipcRenderer.invoke(CHANNELS.TEAM_CONFIG_SAVE, repoPath, config),
+  teamConfigApply: (repoPath: string, config: unknown) =>
+    ipcRenderer.invoke(CHANNELS.TEAM_CONFIG_APPLY, repoPath, config),
 
   // ── Shell ─────────────────────────────────────────────────────────────────
   openTerminal: (cwd?: string, terminalId?: string) =>
@@ -307,8 +318,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GIT_INDEX_LOCK_REMOVE, repoPath),
   aheadFilePaths: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_AHEAD_FILE_PATHS, repoPath),
-  gitResetTo: (repoPath: string, hash: string, mode: 'soft' | 'mixed' | 'hard') =>
-    ipcRenderer.invoke(CHANNELS.GIT_RESET_TO, repoPath, hash, mode),
+  gitResetTo: (repoPath: string, hash: string, mode: 'soft' | 'mixed' | 'hard', expectedHead?: string) =>
+    ipcRenderer.invoke(CHANNELS.GIT_RESET_TO, repoPath, hash, mode, expectedHead),
   gitLsFiles: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_LS_FILES, repoPath),
   gitFileLog: (repoPath: string, filePath: string, limit?: number) =>
@@ -325,8 +336,8 @@ const api = {
   // ── Asset diff previews — Phase 17 ───────────────────────────────────────
   assetDiffPreview: (repoPath: string, filePath: string, leftRef: string, rightRef: string, editorBinaryOverride?: string) =>
     ipcRenderer.invoke(CHANNELS.ASSET_DIFF_PREVIEW, repoPath, filePath, leftRef, rightRef, editorBinaryOverride),
-  assetRenderThumbnail: (repoPath: string, filePath: string, ref: string) =>
-    ipcRenderer.invoke(CHANNELS.ASSET_RENDER_THUMBNAIL, repoPath, filePath, ref),
+  // Thumbnail generation is disabled: never enqueue Git/asset work from UI tiles.
+  assetRenderThumbnail: async (): Promise<string | null> => null,
   assetExtractMetadata: (repoPath: string, filePath: string, ref: string) =>
     ipcRenderer.invoke(CHANNELS.ASSET_EXTRACT_METADATA, repoPath, filePath, ref),
 
@@ -337,6 +348,9 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GIT_UNWATCH_STATUS, repoPath),
 
   // ── Presence ──────────────────────────────────────────────────────────────
+  presenceConfigLoad: (repoPath: string) => ipcRenderer.invoke(CHANNELS.PRESENCE_CONFIG_LOAD, repoPath),
+  presenceConfigSave: (repoPath: string, config: unknown) => ipcRenderer.invoke(CHANNELS.PRESENCE_CONFIG_SAVE, repoPath, config),
+  presenceConfigTest: (repoPath: string, config: unknown) => ipcRenderer.invoke(CHANNELS.PRESENCE_CONFIG_TEST, repoPath, config),
   presenceRead: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.PRESENCE_READ, repoPath),
   presenceUpdate: (repoPath: string, login: string, entry: unknown) =>
@@ -380,6 +394,10 @@ const api = {
   // ── GitHub API ────────────────────────────────────────────────────────────
   githubCreatePR: (args: { owner: string; repo: string; head: string; base: string; title: string; body: string; draft: boolean }) =>
     ipcRenderer.invoke(CHANNELS.GITHUB_CREATE_PR, args),
+  githubComparePR: (args: { owner: string; repo: string; head: string; base: string }) =>
+    ipcRenderer.invoke(CHANNELS.GITHUB_COMPARE_PR, args),
+  publishPRBranch: (repoPath: string, branch: string, remoteUrl: string) =>
+    ipcRenderer.invoke(CHANNELS.GIT_PUBLISH_PR_BRANCH, repoPath, branch, remoteUrl),
   githubListPRs: (args: { owner: string; repo: string }) =>
     ipcRenderer.invoke(CHANNELS.GITHUB_LIST_PRS, args),
   githubPrFiles: (args: { owner: string; repo: string; prNumber: number }) =>
@@ -421,6 +439,8 @@ const api = {
   // ── Bug logs ──────────────────────────────────────────────────────────────
   logGetText: () =>
     ipcRenderer.invoke(CHANNELS.LOG_GET_TEXT),
+  logClear: () =>
+    ipcRenderer.invoke(CHANNELS.LOG_CLEAR),
   logGetSuggestion: () =>
     ipcRenderer.invoke(CHANNELS.LOG_GET_SUGGESTION),
   logSaveDialog: () =>
@@ -463,6 +483,11 @@ const api = {
     const handler = () => cb()
     ipcRenderer.on(CHANNELS.EVT_UPDATE_READY, handler)
     return () => ipcRenderer.removeListener(CHANNELS.EVT_UPDATE_READY, handler)
+  },
+  onUpdateError: (cb: (message: string) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, message: string) => cb(message)
+    ipcRenderer.on(CHANNELS.EVT_UPDATE_ERROR, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.EVT_UPDATE_ERROR, handler)
   },
   onStatusChanged: (cb: () => void) => {
     const handler = () => cb()

@@ -29,7 +29,7 @@ function timeAgo(iso: string): string {
 }
 
 export function NotificationFeed({ onClose }: NotificationFeedProps) {
-  const { notifications, markRead, markAllRead, clearAll } = useNotificationStore()
+  const { notifications, markRead, markAllRead, clearAll, clearing, clearError } = useNotificationStore()
   const ref = useRef<HTMLDivElement>(null)
   const [tab, setTab] = useState<FeedTab>('activity')
 
@@ -70,6 +70,7 @@ export function NotificationFeed({ onClose }: NotificationFeedProps) {
       ref={ref}
       className="absolute right-0 top-9 z-50 w-96 bg-lg-bg-elevated border border-lg-border rounded-lg shadow-2xl overflow-hidden"
     >
+      {clearError && <div role="alert" className="p-3 text-xs text-lg-error">{clearError}</div>}
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-lg-border">
         <span className="text-[10px] font-mono uppercase tracking-widest text-lg-text-secondary">
@@ -87,6 +88,7 @@ export function NotificationFeed({ onClose }: NotificationFeedProps) {
           {notifications.length > 0 && (
             <button
               onClick={clearAll}
+              disabled={clearing}
               className="text-[10px] font-mono text-lg-text-secondary hover:text-lg-error transition-colors"
             >
               Clear

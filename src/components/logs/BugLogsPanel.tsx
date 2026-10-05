@@ -7,11 +7,15 @@ export function BugLogsPanel() {
   const [loading,    setLoading]    = useState(true)
   const [saving,     setSaving]     = useState(false)
   const [savedPath,  setSavedPath]  = useState<string | null>(null)
+  const [clearing, setClearing] = useState(false)
+  const [copying, setCopying] = useState(false)
+  const [feedback, setFeedback] = useState<string | null>(null)
   const preRef = useRef<HTMLPreElement>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     setSavedPath(null)
+    setFeedback(null)
     try {
       const [text, hint] = await Promise.all([
         ipc.logGetText(),
@@ -25,12 +29,42 @@ export function BugLogsPanel() {
           preRef.current.scrollTop = preRef.current.scrollHeight
         }
       })
+    } catch (error) {
+      setFeedback(`Could not load logs: ${String(error)}`)
     } finally {
       setLoading(false)
     }
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  const handleCopy = async () => {
+    setCopying(true)
+    setFeedback(null)
+    try {
+      await navigator.clipboard.writeText(logText)
+      setFeedback('Logs copied.')
+    } catch (error) {
+      setFeedback(`Could not copy logs: ${String(error)}`)
+    } finally {
+      setCopying(false)
+    }
+  }
+
+  const handleClear = async () => {
+    setClearing(true)
+    setFeedback(null)
+    setSavedPath(null)
+    try {
+      await ipc.logClear()
+      await load()
+      setFeedback('Logs cleared.')
+    } catch (error) {
+      setFeedback(`Could not clear logs: ${String(error)}`)
+    } finally {
+      setClearing(false)
+    }
+  }
 
   const handleSave = async () => {
     setSaving(true)
@@ -65,7 +99,7 @@ export function BugLogsPanel() {
         </span>
         <button
           onClick={load}
-          disabled={loading}
+          disabled={loading || clearing}
           title="Refresh log"
           style={{
             display: 'flex', alignItems: 'center', gap: 5,
@@ -142,10 +176,21 @@ export function BugLogsPanel() {
         )}
 
         {/* ── Footer actions ── */}
-        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ flexShrink: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+          {[
+            { label: copying ? 'Copying…' : 'Copy logs', action: handleCopy, disabled: loading || clearing || copying || !logText },
+            { label: clearing ? 'Clearing…' : 'Clear logs', action: handleClear, disabled: loading || clearing || saving || copying },
+          ].map(button => (
+            <button key={button.action === handleCopy ? 'copy' : 'clear'} onClick={button.action} disabled={button.disabled}
+              title={button.action === handleClear ? 'Clear all saved sessions and current log entries' : 'Copy the displayed log text'}
+              style={{ height: 30, padding: '0 14px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--lg-border)', borderRadius: 6,
+                color: 'var(--lg-text-secondary)', fontSize: 12, cursor: button.disabled ? 'default' : 'pointer', opacity: button.disabled ? 0.5 : 1 }}>
+              {button.label}
+            </button>
+          ))}
           <button
             onClick={handleSave}
-            disabled={saving || loading}
+            disabled={saving || loading || clearing}
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
               height: 30, padding: '0 14px',
@@ -168,6 +213,7 @@ export function BugLogsPanel() {
               Saved to {savedPath}
             </span>
           )}
+          {feedback && <span role="status" style={{ fontSize: 11, color: 'var(--lg-text-primary)' }}>{feedback}</span>}
         </div>
       </div>
     </div>

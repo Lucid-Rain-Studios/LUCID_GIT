@@ -1,5 +1,5 @@
+import { readJson, writeJson, isRecord } from '../util/json-store'
 import { app } from 'electron'
-import * as fs from 'fs'
 import * as path from 'path'
 import * as crypto from 'crypto'
 import * as https from 'https'
@@ -71,15 +71,11 @@ function postJson(url: string, body: unknown): Promise<void> {
 
 class WebhookService {
   loadConfig(repoPath: string): WebhookConfig | null {
-    try {
-      return JSON.parse(fs.readFileSync(configFile(repoPath), 'utf-8')) as WebhookConfig
-    } catch {
-      return null
-    }
+    return readJson<WebhookConfig | null>(configFile(repoPath), (value): value is WebhookConfig => isRecord(value) && typeof value.url === 'string' && typeof value.enabled === 'boolean' && isRecord(value.events), null)
   }
 
   saveConfig(repoPath: string, config: WebhookConfig): void {
-    fs.writeFileSync(configFile(repoPath), JSON.stringify(config, null, 2), 'utf-8')
+    writeJson(configFile(repoPath), config)
   }
 
   async test(url: string): Promise<boolean> {

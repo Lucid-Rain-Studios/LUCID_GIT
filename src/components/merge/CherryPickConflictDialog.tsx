@@ -2,16 +2,12 @@ import React, { useEffect, useState } from 'react'
 import { ipc, ConflictPreviewFile } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useOperationStore } from '@/stores/operationStore'
-import { useDialogStore } from '@/stores/dialogStore'
 import { cn } from '@/lib/utils'
 import { FilePathText } from '@/components/ui/FilePathText'
 import { ActionBtn } from '@/components/ui/ActionBtn'
 import { useDialogOverlayDismiss } from '@/lib/useDialogOverlayDismiss'
 
 const INDEX_LOCK_RE = /Unable to create '.*index\.lock'.*File exists/i
-// Locks older than this are virtually certain to be orphaned — git operations
-// finish in milliseconds, and even slow LFS filters complete inside a second.
-const STALE_LOCK_THRESHOLD_S = 5
 
 function formatAge(seconds: number): string {
   if (seconds < 60)    return `${seconds}s ago`
@@ -54,7 +50,6 @@ const TYPE_ICON: Record<ConflictPreviewFile['type'], string> = {
 export function CherryPickConflictDialog({ onClose, onResolved }: CherryPickConflictDialogProps) {
   const { repoPath, currentBranch, refreshStatus, bumpSyncTick } = useRepoStore()
   const opRun = useOperationStore(s => s.run)
-  const confirmDialog = useDialogStore(s => s.confirm)
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -89,21 +84,8 @@ export function CherryPickConflictDialog({ onClose, onResolved }: CherryPickConf
 
   const allChoicesMade = conflicts.length > 0 && conflicts.every(c => choices[c.path])
 
-  // If a stale lock from a crashed previous subprocess is sitting around,
-  // remove it silently before we start writing. We only auto-clear locks
-  // older than STALE_LOCK_THRESHOLD_S — anything fresher might belong to
-  // an active git process and removing it could corrupt the index.
-  const sweepStaleLock = async () => {
-    if (!repoPath) return
-    const info = await ipc.getIndexLockInfo(repoPath).catch(() => null)
-    if (info && info.ageSeconds >= STALE_LOCK_THRESHOLD_S) {
-      await ipc.removeIndexLock(repoPath).catch(() => false)
-    }
-  }
-
   const runFinalize = async () => {
     if (!repoPath) return
-    await sweepStaleLock()
     for (const c of conflicts) {
       const choice = choices[c.path]
       if (!choice) continue
@@ -151,22 +133,11 @@ export function CherryPickConflictDialog({ onClose, onResolved }: CherryPickConf
 
   const clearLockAndRetry = async () => {
     if (!repoPath || !lockInfo) return
-    // Only require confirmation when the lock is fresh enough that something
-    // might genuinely be writing it — for stale locks we just clear & retry.
-    if (lockInfo.ageSeconds < STALE_LOCK_THRESHOLD_S) {
-      const ok = await confirmDialog({
-        title: 'Clear active-looking git index lock?',
-        message: 'Remove .git/index.lock and retry the cherry-pick?',
-        detail: `The lock was last written ${formatAge(lockInfo.ageSeconds)}, which suggests another git process may still be writing. Only proceed if you're sure no game editor or other git client is actively touching this repository — clearing during a real write can corrupt the index.`,
-        confirmLabel: 'Force-clear & retry',
-        danger: true,
-      })
-      if (!ok) return
-    }
     setWorking(true)
     setError(null)
     try {
-      await ipc.removeIndexLock(repoPath)
+      const remaining = await ipc.getIndexLockInfo(repoPath)
+      if (remaining) throw new Error('The index lock still exists. Its age cannot prove that its owner stopped. Close other Git clients and verify no Git writer is running before manually removing ' + remaining.path)
       setLockInfo(null)
       await runFinalize()
     } catch (e) {
@@ -235,24 +206,15 @@ export function CherryPickConflictDialog({ onClose, onResolved }: CherryPickConf
                 {error}
               </div>
               {lockInfo && (() => {
-                const isStale = lockInfo.ageSeconds >= STALE_LOCK_THRESHOLD_S
                 const persistent = lockFailureCount >= 2
                 return (
                   <div className="rounded border border-lg-warning/40 bg-lg-warning/10 px-3 py-2 space-y-1">
                     <div className="text-[11px] font-mono font-semibold text-lg-warning">
-                      {persistent
-                        ? 'Index lock keeps reappearing — another process is writing'
-                        : isStale
-                          ? 'Stale git index lock detected'
-                          : 'Active git index lock detected'}
+                      {persistent ? 'Repeated index lock contention' : 'Git index lock detected'}
                     </div>
                     <div className="text-[10px] font-mono text-lg-text-secondary">
                       <code className="text-lg-text-primary">.git/index.lock</code> was last touched <span className="text-lg-text-primary">{formatAge(lockInfo.ageSeconds)}</span>.
-                      {persistent
-                        ? ' Lucid Git already removed this lock once and it came back, which means a separate process is actively writing the index. Common culprits: an open game editor with a git source-control plugin, another git client window, a watcher service, or antivirus rescanning .git. Close those, then retry.'
-                        : isStale
-                          ? ' A previous git or LFS subprocess almost certainly crashed mid-write. Click below to remove the lock and retry.'
-                          : ' This lock looks fresh — another git process may genuinely be writing right now. Make sure no game editor or git client is touching this repo before forcing.'}
+                      {' Its owner is unknown. Age does not prove it is abandoned. Close other Git clients and verify no Git writer is running before manual recovery. Lucid Git will leave the lock in place.'}
                     </div>
                     <div className="pt-1 flex gap-2">
                       <button
@@ -260,9 +222,7 @@ export function CherryPickConflictDialog({ onClose, onResolved }: CherryPickConf
                         disabled={working}
                         className="px-2 h-6 rounded text-[10px] font-mono bg-lg-warning/20 border border-lg-warning/60 text-lg-warning hover:bg-lg-warning/30 transition-colors disabled:opacity-40"
                       >
-                        {working
-                          ? 'Clearing…'
-                          : isStale ? 'Clear lock & retry' : 'Force-clear & retry'}
+                        {working ? 'Checking…' : 'Check lock & retry'}
                       </button>
                       <button
                         onClick={finalize}

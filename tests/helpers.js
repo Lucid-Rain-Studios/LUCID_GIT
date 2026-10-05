@@ -12,6 +12,16 @@ function git(cwd, ...args) {
 
 /** A throwaway directory, registered for removal by `cleanup`. */
 const created = []
+// Node exposes Electron's executable path, not app APIs. Give real-Git tests
+// isolated metadata storage so authenticated helpers can read an empty account store.
+if (typeof require('electron') === 'string') {
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'lg-test-userdata-'))
+  created.push(userData)
+  require.cache[require.resolve('electron')].exports = {
+    app: { getPath: name => name === 'home' ? os.homedir() : userData },
+    BrowserWindow: { getAllWindows: () => [] },
+  }
+}
 function tmpDir(prefix) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
   created.push(dir)

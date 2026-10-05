@@ -1,5 +1,6 @@
 export const CHANNELS = {
   // Auth
+  AUTH_CANCEL_DEVICE_FLOW: 'auth:cancel-device-flow',
   AUTH_START_DEVICE_FLOW:  'auth:start-device-flow',
   AUTH_POLL_DEVICE_FLOW:   'auth:poll-device-flow',
   AUTH_LIST_ACCOUNTS:          'auth:list-accounts',
@@ -10,6 +11,12 @@ export const CHANNELS = {
   GIT_IS_REPO:       'git:is-repo',
   GIT_CLONE:         'git:clone',
   GIT_STATUS:        'git:status',
+  GIT_INDEX_DIAGNOSE: 'git:index-diagnose',
+  GIT_INDEX_REPAIR:   'git:index-repair',
+  GIT_INDEX_UNDO:     'git:index-undo',
+  GIT_INDEX_BLOCKERS: 'git:index-blockers',
+  GIT_INDEX_STOP_TASKS: 'git:index-stop-tasks',
+  GIT_INDEX_RECOVER_LOCK: 'git:index-recover-lock',
   GIT_CURRENT_BRANCH:'git:current-branch',
   GIT_STAGE:         'git:stage',
   GIT_UNSTAGE:       'git:unstage',
@@ -89,6 +96,7 @@ export const CHANNELS = {
   // Notifications + webhooks
   NOTIFICATION_LIST:           'notification:list',
   NOTIFICATION_MARK_READ:      'notification:mark-read',
+  NOTIFICATION_CLEAR_ALL:      'notification:clear-all',
   NOTIFICATION_DESKTOP_NOTIFY: 'notification:desktop-notify',
   WEBHOOK_TEST:           'webhook:test',
   WEBHOOK_LOAD:           'webhook:load',
@@ -142,6 +150,8 @@ export const CHANNELS = {
   // Team config
   TEAM_CONFIG_LOAD: 'team-config:load',
   TEAM_CONFIG_SAVE: 'team-config:save',
+  TEAM_CONFIG_APPLY: 'team-config:apply',
+  EVT_UPDATE_ERROR: 'update:error',
 
   // Git tools
   GIT_LS_FILES:        'git:ls-files',
@@ -168,6 +178,9 @@ export const CHANNELS = {
   ASSET_EXTRACT_METADATA:  'asset:extract-metadata',
 
   // Presence
+  PRESENCE_CONFIG_LOAD: 'presence:config-load',
+  PRESENCE_CONFIG_SAVE: 'presence:config-save',
+  PRESENCE_CONFIG_TEST: 'presence:config-test',
   PRESENCE_READ:   'presence:read',
   PRESENCE_UPDATE: 'presence:update',
 
@@ -191,6 +204,8 @@ export const CHANNELS = {
 
   // GitHub API
   GITHUB_CREATE_PR: 'github:create-pr',
+  GITHUB_COMPARE_PR: 'github:compare-pr',
+  GIT_PUBLISH_PR_BRANCH: 'git:publish-pr-branch',
   GITHUB_LIST_PRS:  'github:list-prs',
   GITHUB_PR_FILES:  'github:pr-files',
   GITHUB_MERGE_PR:  'github:merge-pr',
@@ -231,6 +246,7 @@ export const CHANNELS = {
 
   // Bug logs
   LOG_GET_TEXT:      'log:get-text',
+  LOG_CLEAR:         'log:clear',
   LOG_GET_SUGGESTION:'log:get-suggestion',
   LOG_SAVE_DIALOG:   'log:save-dialog',
   LOG_RENDERER_EVENT:'log:renderer-event',

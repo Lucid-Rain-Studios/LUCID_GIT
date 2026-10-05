@@ -1,3 +1,4 @@
+import { BINARY_EXTENSIONS } from '../util/binary-formats'
 import * as fs   from 'fs'
 import * as path from 'path'
 import type { UEProject } from '../types'
@@ -396,14 +397,7 @@ class UnrealService {
    * Used to warn before committing a large batch of raw assets.
    */
   pakSizeEstimate(repoPath: string, stagedPaths: string[]): number {
-    const LFS_EXTS = new Set([
-      'uasset','umap','upk','udk','ubulk','uexp','ucas',
-      'png','jpg','jpeg','gif','bmp','tga','dds','exr','hdr','tiff','tif','psd',
-      'wav','mp3','ogg','flac','aif','aiff',
-      'mp4','avi','mov','wmv','mkv',
-      'fbx','obj','abc','ma','mb','blend',
-      'pak','zip','7z','rar','dll','exe','lib','so','dylib','pdf',
-    ])
+    const LFS_EXTS = BINARY_EXTENSIONS
     let total = 0
     for (const rel of stagedPaths) {
       const ext = rel.split('.').pop()?.toLowerCase() ?? ''

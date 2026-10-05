@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BranchDiffCommit, ipc } from '@/ipc'
 import { usePRStore } from '@/stores/prStore'
 import { useRepoStore } from '@/stores/repoStore'
@@ -155,6 +155,12 @@ export function PRDialog() {
   const [error, setError]   = useState<string | null>(null)
   const [result, setResult] = useState<{ number: number; htmlUrl: string; title: string } | null>(null)
   const [mergeCommits, setMergeCommits] = useState<BranchDiffCommit[]>([])
+  const [preview, setPreview] = useState<{ key: string; state: 'loading' | 'ready' | 'error'; error?: string }>({ key: '', state: 'loading' })
+  const [previewRetry, setPreviewRetry] = useState(0)
+  const [publishing, setPublishing] = useState(false)
+  const touched = useRef({ title: false, body: false, base: false })
+  const submitting = useRef(false)
+  const requestClose = useCallback(() => { if (!submitting.current) closeDialog() }, [closeDialog])
 
   const slug  = remoteUrl ? parseGitHubSlug(remoteUrl) : null
   const parts = slug ? slug.split('/') : []
@@ -162,6 +168,11 @@ export function PRDialog() {
   const repo  = parts[1] ?? ''
 
   const normalizedHead = headBranch ? normalizeBranchName(headBranch) : ''
+  const normalizedBase = normalizeBranchName(base)
+  const previewKey = JSON.stringify([repoPath, owner, repo, normalizedBase, normalizedHead, currentAccountId])
+  const previewReady = preview.key === previewKey && preview.state === 'ready'
+  const activePreviewKey = useRef(previewKey)
+  activePreviewKey.current = previewKey
   const selectableBranches = Array.from(new Set(
     branches
       .map(b => normalizeBranchName(b.displayName || b.name))
@@ -176,6 +187,8 @@ export function PRDialog() {
 
   useEffect(() => {
     if (!open || !repoPath || !headBranch) return
+    let cancelled = false
+    touched.current = { title: false, body: false, base: false }
     setTitle(branchToTitle(normalizeBranchName(headBranch)))
     setBody('')
     setDraft(false)
@@ -184,34 +197,41 @@ export function PRDialog() {
     setResult(null)
 
     ipc.gitDefaultBranch(repoPath)
-      .then(def => setBase(def))
-      .catch(() => setBase('main'))
+      .then(def => { if (!cancelled && !touched.current.base && !submitting.current) setBase(def) })
+      .catch(() => { if (!cancelled && !touched.current.base && !submitting.current) setBase('main') })
+    return () => { cancelled = true }
   }, [open, repoPath, headBranch])
 
   useEffect(() => {
-    if (!open || !repoPath || !headBranch || !base) {
+    if (!open || !repoPath || !headBranch || !base || !owner || !repo) {
       setMergeCommits([])
       return
     }
 
     let cancelled = false
-    ipc.branchDiff(repoPath, base, headBranch)
-      .then(diff => {
+    setMergeCommits([])
+    setPreview({ key: previewKey, state: 'loading' })
+    if (!touched.current.body && !submitting.current) setBody('')
+    ipc.githubComparePR({ owner, repo, base: normalizedBase, head: normalizedHead })
+      .then(commits => {
         if (cancelled) return
-        const commits = diff.aheadCommits
         setMergeCommits(commits)
+        setPreview({ key: previewKey, state: 'ready' })
         if (commits.length > 0) {
           const firstMeaningful = commits.find(c => !c.message.includes('Merge remote-tracking branch'))
-          setTitle((firstMeaningful ?? commits[0]).message)
-          setBody(commits.map(c => `- ${c.message}`).join('\n'))
+          if (!touched.current.title && !submitting.current) setTitle((firstMeaningful ?? commits[0]).message)
+          if (!touched.current.body && !submitting.current) setBody(commits.map(c => `- ${c.message}`).join('\n'))
         }
       })
-      .catch(() => {
-        if (!cancelled) setMergeCommits([])
+      .catch(error => {
+        if (!cancelled) {
+          setMergeCommits([])
+          setPreview({ key: previewKey, state: 'error', error: String(error) })
+        }
       })
 
     return () => { cancelled = true }
-  }, [open, repoPath, headBranch, base])
+  }, [open, repoPath, headBranch, base, owner, repo, normalizedBase, normalizedHead, previewKey, previewRetry])
 
   const commitCountLabel = useMemo(() => (
     mergeCommits.length === 1 ? '1 commit' : `${mergeCommits.length} commits`
@@ -220,19 +240,35 @@ export function PRDialog() {
   // Close on Escape
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeDialog() }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') requestClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, closeDialog])
+  }, [open, requestClose])
 
-  const overlayDismiss = useDialogOverlayDismiss(closeDialog)
+  const overlayDismiss = useDialogOverlayDismiss(requestClose)
+
+  const publishBranch = async () => {
+    if (!repoPath || !remoteUrl || !normalizedHead || submitting.current) return
+    submitting.current = true
+    setPublishing(true)
+    try {
+      await ipc.publishPRBranch(repoPath, normalizedHead, remoteUrl)
+      if (activePreviewKey.current === previewKey) setPreviewRetry(value => value + 1)
+    } catch (error) {
+      if (activePreviewKey.current === previewKey) setPreview({ key: previewKey, state: 'error', error: String(error) })
+    } finally {
+      submitting.current = false
+      setPublishing(false)
+    }
+  }
 
   if (!open) return null
 
-  const canSubmit = title.trim().length > 0 && owner && repo && base && phase === 'form'
+  const canSubmit = title.trim().length > 0 && owner && repo && base && phase === 'form' && !publishing && previewReady && mergeCommits.length > 0
 
   const submit = async () => {
-    if (!canSubmit || !headBranch) return
+    if (!canSubmit || !headBranch || submitting.current) return
+    submitting.current = true
     setPhase('submitting')
     setError(null)
     try {
@@ -260,10 +296,12 @@ export function PRDialog() {
       showStatusToast('PR creation failed.')
       setError(String(e).replace(/^Error:\s*/, ''))
       setPhase('error')
+    } finally {
+      submitting.current = false
     }
   }
 
-  const busy = phase === 'submitting'
+  const busy = phase === 'submitting' || publishing
 
   return (
     <div
@@ -302,7 +340,8 @@ export function PRDialog() {
             )}
             <button
               className="lg-compact-icon-button"
-              onClick={closeDialog}
+              onClick={requestClose}
+              disabled={busy}
               style={{
                 width: 22, height: 22, borderRadius: 5, border: 'none',
                 background: 'transparent', color: '#4a566a', cursor: 'pointer',
@@ -327,7 +366,7 @@ export function PRDialog() {
               <span style={{ color: '#283047', fontSize: 13 }}>→</span>
               <SelectInput
                 value={base}
-                onChange={setBase}
+                onChange={value => { touched.current.base = true; setBase(value) }}
                 options={baseOptions}
                 disabled={busy}
               />
@@ -338,7 +377,7 @@ export function PRDialog() {
               <Label>Title</Label>
               <TextInput
                 value={title}
-                onChange={setTitle}
+                onChange={value => { touched.current.title = true; setTitle(value) }}
                 placeholder="PR title"
                 disabled={busy}
                 autoFocus
@@ -350,7 +389,7 @@ export function PRDialog() {
               <Label>Description <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: '#283047' }}>— optional</span></Label>
               <TextArea
                 value={body}
-                onChange={setBody}
+                onChange={value => { touched.current.body = true; setBody(value) }}
                 placeholder="What does this PR do? Why is it needed?"
                 disabled={busy}
                 rows={4}
@@ -382,9 +421,9 @@ export function PRDialog() {
 
             {/* Actions */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <Btn label="Cancel" onClick={closeDialog} disabled={busy} />
+              <Btn label="Cancel" onClick={requestClose} disabled={busy} />
               <Btn
-                label={busy ? 'Creating…' : phase === 'error' ? 'Try Again' : 'Create Pull Request'}
+                label={publishing ? 'Pushing branch…' : busy ? 'Creating…' : phase === 'error' ? 'Try Again' : 'Create Pull Request'}
                 onClick={phase === 'error' ? () => { setPhase('form'); setError(null) } : submit}
                 disabled={busy || (!canSubmit && phase !== 'error')}
                 primary
@@ -398,10 +437,22 @@ export function PRDialog() {
               background: '#0f141d', padding: 12,
               alignSelf: 'stretch',
             }}>
-              <Label>Commits staged for merge</Label>
-              <div style={{ fontSize: 12, color: '#5a6880', marginBottom: 10 }}>{commitCountLabel}</div>
-              {mergeCommits.length === 0 ? (
-                <div style={{ fontSize: 12, color: '#4a566a' }}>No commits found between these branches.</div>
+              <Label>Commits proposed for merge</Label>
+              <div style={{ fontSize: 12, color: '#5a6880', marginBottom: 10 }}>
+                Published {normalizedHead} → {normalizedBase}{previewReady ? ` · ${commitCountLabel}` : ''}
+              </div>
+              {preview.key === previewKey && preview.state === 'error' ? (
+                <div role="alert" style={{ fontSize: 12, color: '#e84545' }}>
+                  Could not compare the published branches. {preview.error?.replace('PR_HEAD_NOT_PUBLISHED: ', '')}
+                  {preview.error?.includes('PR_HEAD_NOT_PUBLISHED:') && (
+                    <Btn label={publishing ? 'Pushing branch…' : 'Push branch and retry'} onClick={publishBranch} disabled={busy || publishing} />
+                  )}
+                  <Btn label="Retry preview" onClick={() => setPreviewRetry(value => value + 1)} disabled={busy || publishing} />
+                </div>
+              ) : !previewReady ? (
+                <div role="status" style={{ fontSize: 12, color: '#5a6880' }}>Loading published commits…</div>
+              ) : mergeCommits.length === 0 ? (
+                <div style={{ fontSize: 12, color: '#5a6880' }}>No published commits are missing from {normalizedBase}.</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 300, overflowY: 'auto', paddingRight: 2 }}>
                   {mergeCommits.map(commit => (

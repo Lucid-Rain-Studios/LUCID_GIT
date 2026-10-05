@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import { readJson, writeJson, writeJsonAsync, isRecord } from '../util/json-store'
 import { performance } from 'node:perf_hooks'
 import { setInterval as setNodeInterval, clearInterval as clearNodeInterval } from 'node:timers'
 
@@ -52,6 +53,7 @@ class LogService {
   private lagDueAt = 0
   private worstLagMs = 0
   private activityProbes: { name: string; describe: () => string[] }[] = []
+  private writes: Promise<void> = Promise.resolve()
 
   // ── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -173,12 +175,13 @@ class LogService {
     if (!this.storePath || !this.current) return
     const all     = [...this.pastSessions, this.current]
     const trimmed = all.slice(-MAX_SESSIONS)
-    const json    = JSON.stringify({ sessions: trimmed } as LogStore, null, 2)
+    const snapshot: LogStore = { sessions: trimmed }
     try {
       if (sync) {
-        fs.writeFileSync(this.storePath, json, 'utf8')
+        writeJson(this.storePath, snapshot)
       } else {
-        fs.writeFile(this.storePath, json, 'utf8', () => {})
+        const file = this.storePath
+        this.writes = this.writes.then(() => writeJsonAsync(file, snapshot)).catch(error => console.error('Log persistence failed:', error))
       }
     } catch { /* ignore — log write failure must never crash the app */ }
   }
@@ -186,15 +189,38 @@ class LogService {
   private load(): void {
     if (!this.storePath) return
     try {
-      const raw   = fs.readFileSync(this.storePath, 'utf8')
-      const store = JSON.parse(raw) as LogStore
+      const store = readJson(this.storePath, (value): value is LogStore => isRecord(value) && Array.isArray(value.sessions) && value.sessions.every(session => isRecord(session) && Array.isArray(session.entries)), { sessions: [] })
       this.pastSessions = (store.sessions ?? []).slice(-MAX_SESSIONS)
-    } catch {
+    } catch (error) {
+      console.error('Log history preserved for recovery:', error)
+      this.storePath = this.storePath + '.recovery-' + Date.now() + '.json'
       this.pastSessions = []
     }
   }
 
   // ── Formatted output ──────────────────────────────────────────────────────────
+
+  async clear(): Promise<void> {
+    if (!this.storePath || !this.current) throw new Error('Logging is not initialized')
+    if (this.flushTimer) clearTimeout(this.flushTimer)
+    this.flushTimer = null
+    const past = this.pastSessions
+    const entries = this.current.entries
+    this.pastSessions = []
+    this.current.entries = []
+    const file = this.storePath
+    const snapshot: LogStore = { sessions: [{ ...this.current, entries: [] }] }
+    const write = this.writes.then(() => writeJsonAsync(file, snapshot))
+    this.writes = write.catch(() => {})
+    try {
+      await write
+    } catch (error) {
+      this.pastSessions = past
+      this.current.entries = [...entries, ...this.current.entries]
+      this.schedulePersist()
+      throw error
+    }
+  }
 
   getFormattedText(): string {
     const all: LogSession[] = [...this.pastSessions]
@@ -261,9 +287,9 @@ class LogService {
       return 'Disk is full. Run Git GC from Admin → Cleanup to reclaim space from old pack files and LFS cache.'
 
     if (/lfs.*storage.*exceeded|lfs.*quota|bandwidth.*exceeded|storage quota/i.test(combined))
-      return 'GitHub LFS quota exceeded. Prune unreferenced objects via Admin → Cleanup → Prune LFS, or upgrade at: github.com → Settings → Billing → Git LFS Data.'
+      return 'GitHub LFS quota exceeded. Ask the repository owner to review Git LFS storage and bandwidth in GitHub billing settings. Local pruning does not restore the remote quota.'
 
-    if (/rejected.*non-fast-forward|fetch first|Updates were rejected/i.test(combined))
+    if (/rejected.*non-fast-forward|fetch first|tip of your current branch is behind/i.test(combined))
       return 'Push rejected — the remote has newer commits. Pull (with rebase) before pushing again.'
 
     if (/CONFLICT|Automatic merge failed/i.test(combined))
