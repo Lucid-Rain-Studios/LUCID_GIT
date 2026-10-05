@@ -663,6 +663,16 @@ class GitService {
 
   /** Push current branch to its upstream. Streams progress and returns the pre-push metadata. */
   async push(repoPath: string, onProgress?: ProgressCallback, force = false): Promise<{ branch: string; filesAhead: string[] }> {
+    if (!force) {
+      onProgress?.({ id: 'push-fetch', label: 'Fetching before push', status: 'running', progress: 4 })
+      await this.fetch(repoPath, onProgress)
+      const sync = await this.getSyncStatus(repoPath)
+      // An unpublished branch may inherit origin/main as its upstream; it is
+      // being published under its own name, not pushed to that inherited ref.
+      if (sync.hasPublishedBranch && sync.behind > 0) {
+        throw new Error('PUSH_REQUIRES_PULL: Remote updates were fetched. Pull the new updates or Update from main before pushing, then try Push again.')
+      }
+    }
     // These lookups are independent. Keeping them here means the push handler does
     // not repeat branch/upstream discovery before starting the real operation.
     const [token, remoteUrl, branch, upstreamRes] = await Promise.all([
@@ -1266,6 +1276,10 @@ class GitService {
       execSafe(['rev-list', '--count', `HEAD..${remoteBranch}`], repoPath),
     ])
 
+    if (aRes.exitCode !== 0 || bRes.exitCode !== 0 || !/^\d+$/.test(aRes.stdout.trim()) || !/^\d+$/.test(bRes.stdout.trim())) {
+      throw new Error(aRes.stderr || bRes.stderr || 'Unable to check incoming and outgoing commits. Try again before pushing.')
+    }
+
     return {
       ahead:        parseInt(aRes.stdout.trim())  || 0,
       behind:       parseInt(bRes.stdout.trim())  || 0,
@@ -1868,10 +1882,22 @@ class GitService {
       // through to the system credential manager and the batch API answers
       // "Bad credentials", so the file stays dirty. Same auth as checkout/merge.
       const auth = await this.authenticatedArgs(repoPath, [])
+      // Share one retry across both passes and all chunks. Retry only the
+      // failed command, preserving authentication, batching and progress.
+      let lockRetried = false
+      const restore = async (args: string[]) => {
+        try { return await exec(args, repoPath) }
+        catch (error) {
+          if (lockRetried || !this.isStaleIndexLockError(error)) throw error
+          lockRetried = true
+          if (!await this.clearStaleIndexLock(repoPath)) throw error
+          return exec(args, repoPath)
+        }
+      }
       // Unstage first (no-op if not staged), then restore working tree.
       // Two passes — each pass covers `total` files, so the bar fills in halves.
-      await runInPathChunks(paths, c => exec([...auth, 'restore', '--staged', '--', ...c], repoPath), (p) => report(Math.floor(p / 2)))
-      await runInPathChunks(paths, c => exec([...auth, 'restore', '--', ...c], repoPath), (p) => report(Math.floor(total / 2) + Math.floor(p / 2)))
+      await runInPathChunks(paths, c => restore([...auth, 'restore', '--staged', '--', ...c]), (p) => report(Math.floor(p / 2)))
+      await runInPathChunks(paths, c => restore([...auth, 'restore', '--', ...c]), (p) => report(Math.floor(total / 2) + Math.floor(p / 2)))
     }
     report(total, 'done')
   }

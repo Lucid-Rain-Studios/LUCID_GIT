@@ -36,7 +36,7 @@ const status = component('src/lib/presence.ts').exports.presenceStatus
   const timers = [], cleared = [], idleThresholds = [], writes = []
   let idleSeconds = 0, quits = 0, prevented = false
   const account = { userId: 'alice', login: 'alice', name: 'Alice' }
-  component('electron/ipc/handlers.ts', {
+  const api = component('electron/ipc/handlers.ts', {
     path, './channels': { CHANNELS },
     electron: {
       ipcMain: { handle: (name, fn) => handlers.set(name, fn) },
@@ -56,7 +56,8 @@ const status = component('src/lib/presence.ts').exports.presenceStatus
   }, {
     setInterval: (callback, delay) => { timers.push({ callback, delay }); return timers.length },
     clearInterval: id => cleared.push(id), setTimeout: () => 0,
-  }).exports.registerHandlers()
+  }).exports
+  api.registerHandlers()
   await handlers.get(CHANNELS.PRESENCE_UPDATE)({ sender: { isDestroyed: () => true } }, 'repo')
   expect(timers.map(timer => timer.delay)).toEqual([60000])
   expect(writes).toEqual(['active'])
@@ -67,10 +68,13 @@ const status = component('src/lib/presence.ts').exports.presenceStatus
   expect(writes).toHaveLength(count)
   idleSeconds = 0; timers[0].callback(); expect(writes.at(-1)).toBe('active')
   expect(idleThresholds.every(threshold => threshold === 60)).toBe(true)
-  appEvents.get('before-quit')({ preventDefault: () => { prevented = true } })
+  const quitDrain = api.stopPresenceForQuit()
   expect(writes.at(-1)).toBe('offline')
-  expect(cleared).toEqual([1]); expect(prevented).toBe(true)
-  await flush(); expect(quits).toBe(1)
+  expect(cleared).toEqual([1]); expect(prevented).toBe(false)
+  expect(appEvents.has('before-quit')).toBe(false)
+  expect(api.stopPresenceForQuit()).toBe(quitDrain)
+  await quitDrain; await flush(); expect(quits).toBe(0)
+  await expect(handlers.get(CHANNELS.PRESENCE_UPDATE)({}, 'repo')).rejects.toThrow('shutting down')
  })
 
  test('presence IPC requires admin before reading data, including cache miss', async () => {

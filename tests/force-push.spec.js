@@ -30,6 +30,8 @@ test('force push uses lease protection for upstream and unpublished branches wit
   const service = h.exports.gitService
   service.getRemoteUrl = async () => 'https://example.com/repo.git'
   service.currentBranch = async () => 'topic'
+  service.fetch = async () => {}
+  service.getSyncStatus = async () => ({ hasPublishedBranch: true, behind: 0 })
   await service.push('repo')
   await service.push('repo', undefined, true)
   upstream = false

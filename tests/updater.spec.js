@@ -6,8 +6,12 @@ const ts = require('typescript')
 
 const flush = () => new Promise(resolve => setImmediate(resolve))
 
-function launch({ response = 1, downloadError, packaged = true, checkError, version = '1.2.0', loadError, bootstrapError } = {}) {
+function launch({ response = 1, downloadError, packaged = true, checkError, version = '1.2.0', loadError, bootstrapError,
+  gitDrain = async () => {}, presenceDrain = async () => {} } = {}) {
   const listeners = {}, timers = [], dialogs = [], downloads = [], checks = []
+  const appListeners = {}, shutdownWarnings = []
+  let quits = 0, ended = 0, gateClosed = 0, watchersStopped = 0, gitStops = 0, presenceStops = 0
+  const quitEvent = () => { let prevented = false; appListeners['before-quit']({ preventDefault: () => { prevented = true } }); return prevented }
   let ready
   const handlers = {}, events = [], recoveries = [], windowEvents = {}
   const CHANNELS = { UPDATE_CHECK: 'check', UPDATE_DOWNLOAD: 'download', EVT_UPDATE_ERROR: 'update-error', EVT_OPERATION_PROGRESS: 'progress' }
@@ -27,7 +31,8 @@ function launch({ response = 1, downloadError, packaged = true, checkError, vers
   const electron = {
     app: {
       isPackaged: packaged, getVersion: () => '1.2.0', getPath: () => 'test',
-      whenReady: () => Promise.resolve(), on: noop, commandLine: { appendSwitch: noop },
+      whenReady: () => Promise.resolve(), on: (event, fn) => { appListeners[event] = fn }, commandLine: { appendSwitch: noop },
+      quit: () => { quits++; quitEvent() },
     },
     BrowserWindow: function () { return win }, Menu: { setApplicationMenu: noop },
     ipcMain: { handle: (name, fn) => { handlers[name] = fn } },
@@ -46,15 +51,42 @@ function launch({ response = 1, downloadError, packaged = true, checkError, vers
       if (name === 'electron-updater') return { autoUpdater: updater }
       if (name === './ipc/channels') return { CHANNELS }
       if (name === './services/RecoveryService') return { showRecovery: (...args) => recoveries.push(args) }
-      if (name === './ipc/handlers') return { registerHandlers: () => { if(bootstrapError) throw Error(bootstrapError) }, describeInFlightIpc: noop }
+      if (name === './ipc/handlers') return { registerHandlers: () => { if(bootstrapError) throw Error(bootstrapError) }, describeInFlightIpc: noop,
+        stopPresenceForQuit: () => { presenceStops++; return presenceDrain() } }
+      if (name === './util/dugite-exec') return { describeLiveGitProcesses: noop, shutdownGitProcesses: () => { gitStops++; return gitDrain() } }
+      if (name === './util/repo-gate') return { shutdownRepoGate: () => { gateClosed++ } }
+      if (name === './services/WatcherService') return { watcherService: { unwatchAll: () => { watchersStopped++ } } }
+      if (name === './services/LogService') return { logService: { init: noop, registerActivityProbe: noop, startEventLoopMonitor: noop, error: noop, info: noop,
+        endSession: () => { ended++ }, warn: (...args) => shutdownWarnings.push(args) } }
       if (name === './services/SettingsService') return {
         settingsService: { onChange: noop, getAll: () => ({ updateCheckIntervalMinutes: 0 }) },
       }
       return new Proxy({}, { get: (_, key) => key.endsWith('Service') ? service : noop })
     },
   })
-  return { listeners, timers, dialogs, downloads, checks, handlers, events, recoveries, windowEvents, show: () => ready() }
+  return { listeners, timers, dialogs, downloads, checks, handlers, events, recoveries, windowEvents, show: () => ready(), quitEvent,
+    quitStats: () => ({ quits, ended, gateClosed, watchersStopped, gitStops, presenceStops }), shutdownWarnings }
 }
+
+test('one quit owner waits for both Git termination and Offline publication despite repeated quit events', async () => {
+  let releaseGit, releasePresence
+  const gitDrain = () => new Promise(resolve => { releaseGit = resolve })
+  const presenceDrain = () => new Promise(resolve => { releasePresence = resolve })
+  const app = launch({ gitDrain, presenceDrain }); await flush()
+  expect(app.quitEvent()).toBe(true); expect(app.quitEvent()).toBe(true)
+  expect(app.quitStats()).toEqual({ quits: 0, ended: 0, gateClosed: 1, watchersStopped: 1, gitStops: 1, presenceStops: 1 })
+  releaseGit(); await flush(); expect(app.quitStats().ended).toBe(0)
+  releasePresence(); await flush()
+  expect(app.quitStats()).toEqual({ quits: 1, ended: 1, gateClosed: 1, watchersStopped: 1, gitStops: 1, presenceStops: 1 })
+  expect(app.quitEvent()).toBe(false); expect(app.quitStats().ended).toBe(1)
+})
+
+test('a failed Git shutdown is logged before ending the session without another termination sweep', async () => {
+  const app = launch({ gitDrain: async () => { throw Error('Could not stop Git task') } }); await flush()
+  app.quitEvent(); await flush()
+  expect(app.shutdownWarnings).toEqual([['app.shutdown', 'Error: Could not stop Git task']])
+  expect(app.quitStats().ended).toBe(1); expect(app.quitStats().gitStops).toBe(1); expect(app.quitStats().quits).toBe(1)
+})
 
 test('startup checks even with periodic checks disabled; Later repeats next launch', async () => {
   for (let launchNumber = 0; launchNumber < 2; launchNumber++) {

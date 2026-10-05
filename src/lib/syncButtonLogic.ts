@@ -24,12 +24,13 @@ export function canPull(hasFetched: boolean, behind: number, busy: SyncBusyState
   return busy === 'idle' && hasFetched && (behind > 0 || allowUpToDate)
 }
 
-export function canPush(hasFetched: boolean, behind: number, ahead: number, busy: SyncBusyState, hasPublishedBranch: boolean = true, hasIntegrated = true): boolean {
+export function canPush(_hasFetched: boolean, _behind: number, ahead: number, busy: SyncBusyState, hasPublishedBranch: boolean = true, _hasIntegrated = true): boolean {
   if (busy !== 'idle') return false
   // An unpublished branch can inherit another branch's upstream. Allow push regardless
   // of fetch state or ahead count; `git push --set-upstream` handles it.
   if (!hasPublishedBranch) return true
-  return hasIntegrated && hasFetched && behind === 0 && ahead > 0
+  // Fetch and incoming-update checks run when Push is clicked.
+  return ahead > 0
 }
 
 // "ahead" here is intentionally NOT taken as a gate. SyncStatus.ahead measures
@@ -53,12 +54,11 @@ export function pullDisabledReason(hasFetched: boolean, behind: number, busy: Sy
   return busyReason(busy) ?? (!hasFetched ? 'Please Fetch first' : behind === 0 && !allowUpToDate ? 'Nothing to merge' : null)
 }
 
-export function pushDisabledReason(hasFetched: boolean, behind: number, ahead: number, busy: SyncBusyState, hasPublishedBranch: boolean = true, hasIntegrated = true): string | null {
+export function pushDisabledReason(_hasFetched: boolean, _behind: number, ahead: number, busy: SyncBusyState, hasPublishedBranch: boolean = true, _hasIntegrated = true): string | null {
   const busy_ = busyReason(busy)
   if (busy_) return busy_
   if (!hasPublishedBranch) return null
-  if (!hasIntegrated) return 'Please Pull or Update from main first'
-  return !hasFetched ? 'Please Fetch first' : behind > 0 ? 'Please Pull first' : ahead === 0 ? 'Nothing to push' : null
+  return ahead === 0 ? 'Nothing to push' : null
 }
 
 export function createPRDisabledReason(hasRemote: boolean, branchName: string | null | undefined, busy: SyncBusyState): string | null {

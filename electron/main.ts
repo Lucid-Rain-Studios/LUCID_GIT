@@ -1,13 +1,14 @@
 import { app, BrowserWindow, Menu, shell, ipcMain, dialog } from 'electron'
 import path from 'path'
 import { autoUpdater } from 'electron-updater'
-import { registerHandlers, describeInFlightIpc } from './ipc/handlers'
+import { registerHandlers, describeInFlightIpc, stopPresenceForQuit } from './ipc/handlers'
 import { CHANNELS } from './ipc/channels'
 import { watcherService } from './services/WatcherService'
 import { logService } from './services/LogService'
 import { desktopNotificationService } from './services/DesktopNotificationService'
 import { settingsService } from './services/SettingsService'
-import { killAllGitProcesses, describeLiveGitProcesses } from './util/dugite-exec'
+import { shutdownGitProcesses, describeLiveGitProcesses } from './util/dugite-exec'
+import { shutdownRepoGate } from './util/repo-gate'
 import { showRecovery } from './services/RecoveryService'
 
 const isDev = !app.isPackaged
@@ -360,15 +361,26 @@ app.whenReady().then(() => {
   showRecovery(message, () => { app.relaunch(); app.exit(0) })
 })
 
-app.on('before-quit', () => {
-  // Git children are not in our job object on Windows, so anything still
-  // running outlives the app — and a `git.exe` waiting on a stalled transfer
-  // keeps its `git-lfs.exe` filter process alive with it. Nothing is left to
-  // read their output once we go, so end them here rather than letting them
-  // accumulate across restarts. An index write cut short this way leaves
-  // `.git/index.lock`, which the stale-lock recovery clears on next launch.
-  killAllGitProcesses()
-  logService.endSession()
+let quitting = false
+let quitReady = false
+app.on('before-quit', event => {
+  if (quitReady) return
+  event.preventDefault()
+  if (quitting) return
+  quitting = true
+  shutdownRepoGate()
+  watcherService.unwatchAll()
+  // One owner waits for Git children and the existing bounded Offline write.
+  // Repeated close/update requests cannot start another sweep or end the
+  // session early. Interrupted writes may still leave a recoverable lock.
+  void Promise.allSettled([shutdownGitProcesses(), stopPresenceForQuit()]).then(results => {
+    for (const result of results) {
+      if (result.status === 'rejected') logService.warn('app.shutdown', String(result.reason))
+    }
+    logService.endSession()
+    quitReady = true
+    app.quit()
+  })
 })
 
 app.on('window-all-closed', () => {

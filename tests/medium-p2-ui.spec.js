@@ -47,7 +47,7 @@ test('LG-059/061 PR acceptance waits for verified previews and push failure rest
 test('LG-069 modal focus traps Tab, isolates background, chooses Cancel, contains Escape and restores focus', async () => {
   const handlers = new Map(), document = { activeElement:null, addEventListener:noop, removeEventListener:noop }
   class Element {
-    constructor(name) { this.name=name; this.children=[]; this.parentElement=null; this.inert=false; this.tabIndex=0; this.isConnected=true }
+    constructor(name) { this.name=name; this.children=[]; this.parentElement=null; this.inert=false; this.tabIndex=0; this.isConnected=true; this.style={zIndex:''} }
     add(child) { child.parentElement=this; this.children.push(child); return child }
     focus() { document.activeElement=this }
     contains(target) { return target===this || this.children.some(c=>c.contains(target)) }

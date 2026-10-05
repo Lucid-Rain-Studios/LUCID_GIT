@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { ipc } from '@/ipc'
 import { useErrorStore } from '@/stores/errorStore'
 import { useRepoStore } from '@/stores/repoStore'
@@ -6,6 +7,7 @@ import { LucidGitError, FixStep, FixAction } from '@/lib/gitErrors'
 import { cn } from '@/lib/utils'
 import { ActionBtn } from '@/components/ui/ActionBtn'
 import { useDialogStore } from '@/stores/dialogStore'
+import { useDialogOverlayDismiss } from '@/lib/useDialogOverlayDismiss'
 
 interface ErrorPanelProps {
   onReauth: () => void
@@ -137,11 +139,11 @@ export function ErrorPanel({ onReauth, onNavigateTab, onOpenMergeResolver }: Err
   if (!current && !showHistory) return null
 
   return (
-    <>
+    <ErrorDialogFrame onDismiss={() => showHistory ? setShowHistory(false) : handleDismiss()}>
       {/* ── Overlay backdrop for history panel ── */}
       {showHistory && (
         <div
-          className="fixed inset-0 z-40"
+          className="fixed inset-0 z-40 pointer-events-auto"
           onClick={() => setShowHistory(false)}
         />
       )}
@@ -152,8 +154,9 @@ export function ErrorPanel({ onReauth, onNavigateTab, onOpenMergeResolver }: Err
         return (
         <div
           style={{
-            position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+            position: 'fixed', bottom: 24, left: '50%', translate: '-50% 0',
             zIndex: 50, width: 600, maxWidth: 'calc(100vw - 32px)',
+            pointerEvents: 'auto',
             background: '#12161f',                 // fully opaque surface
             border: `1px solid ${c}`,
             borderTop: `3px solid ${c}`,           // bold severity accent
@@ -272,7 +275,7 @@ export function ErrorPanel({ onReauth, onNavigateTab, onOpenMergeResolver }: Err
 
       {/* ── Error history panel ── */}
       {showHistory && (
-        <div className="fixed bottom-0 left-0 right-0 z-50 bg-lg-bg-elevated border-t border-lg-border max-h-64 overflow-y-auto font-mono text-[11px]">
+        <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-auto bg-lg-bg-elevated border-t border-lg-border max-h-64 overflow-y-auto font-mono text-[11px]">
           <div className="flex items-center justify-between px-4 py-2 border-b border-lg-border sticky top-0 bg-lg-bg-elevated">
             <span className="text-[10px] uppercase tracking-widest text-lg-text-secondary">
               Error history ({history.length})
@@ -319,7 +322,17 @@ export function ErrorPanel({ onReauth, onNavigateTab, onOpenMergeResolver }: Err
           ))}
         </div>
       )}
-    </>
+    </ErrorDialogFrame>
+  )
+}
+
+function ErrorDialogFrame({ children, onDismiss }: { children: React.ReactNode; onDismiss: () => void }) {
+  const modal = useDialogOverlayDismiss(onDismiss, true, 'Error notification')
+  return createPortal(
+    <div {...modal} style={{ position: 'fixed', inset: 0, pointerEvents: 'none' }}>
+      {children}
+    </div>,
+    document.body,
   )
 }
 
@@ -340,6 +353,8 @@ function HeaderBtn({ label, title, onClick }: { label: string; title: string; on
     <button
       onClick={onClick}
       title={title}
+      aria-label={title}
+      data-dialog-cancel={title === 'Dismiss' || undefined}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{

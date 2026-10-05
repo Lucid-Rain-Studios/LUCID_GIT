@@ -6,8 +6,25 @@ import type { MouseEvent } from 'react'
 // prevents accidental closes when a drag (e.g. text selection inside an input)
 // starts inside the dialog and ends outside, or vice versa.
 const dialogs: HTMLElement[] = []
-const inertOwners = new Map<HTMLElement, { count: number; previous: boolean }>()
+const inertOwners = new Map<HTMLElement, boolean>()
 export const isModalOpen = () => dialogs.length > 0
+
+function isolateTopDialog() {
+  // Rebuild isolation for the top dialog. Keeping each dialog's old sibling
+  // list would leave a newly opened sibling (such as an error) inert.
+  for (const [element, previous] of inertOwners) element.inert = previous
+  inertOwners.clear()
+  dialogs.forEach((dialog, index) => { dialog.style.zIndex = String(2000 + index) })
+  const root = dialogs.at(-1)
+  if (!root) return
+  for (let child: HTMLElement = root; child.parentElement; child = child.parentElement) {
+    for (const sibling of Array.from(child.parentElement.children)) {
+      if (sibling === child || !(sibling instanceof HTMLElement)) continue
+      inertOwners.set(sibling, sibling.inert)
+      sibling.inert = true
+    }
+  }
+}
 
 export function useDialogOverlayDismiss(onDismiss: () => void, enabled = true, label = 'Dialog') {
   const ref = useRef<HTMLDivElement>(null)
@@ -17,22 +34,16 @@ export function useDialogOverlayDismiss(onDismiss: () => void, enabled = true, l
     const root = ref.current
     if (!root) return
     const previous = document.activeElement as HTMLElement | null
-    const isolated: HTMLElement[] = []
-    for (let child: HTMLElement = root; child.parentElement; child = child.parentElement) {
-      for (const sibling of Array.from(child.parentElement.children)) {
-        if (sibling === child || !(sibling instanceof HTMLElement)) continue
-        const owner = inertOwners.get(sibling) ?? { count: 0, previous: sibling.inert }
-        owner.count++; inertOwners.set(sibling, owner); sibling.inert = true; isolated.push(sibling)
-      }
-    }
+    const previousZIndex = root.style.zIndex
     dialogs.push(root)
+    isolateTopDialog()
     const controls = () => Array.from(root.querySelectorAll<HTMLElement>('button, input, textarea, select, a[href], [tabindex]'))
       .filter(el => !el.hasAttribute('disabled') && el.tabIndex >= 0 && !el.closest('[inert]') && el.getClientRects().length > 0)
     const focusFirst = () => {
       const safe = root.querySelector<HTMLElement>('[data-dialog-cancel], input, textarea')
       ;(safe && controls().includes(safe) ? safe : controls()[0] ?? root).focus()
     }
-    const timer = setTimeout(focusFirst, 0)
+    const timer = setTimeout(() => { if (dialogs.at(-1) === root) focusFirst() }, 0)
     const keydown = (event: KeyboardEvent) => {
       if (dialogs.at(-1) !== root) return
       if (event.key === 'Escape') {
@@ -52,12 +63,11 @@ export function useDialogOverlayDismiss(onDismiss: () => void, enabled = true, l
     return () => {
       clearTimeout(timer)
       window.removeEventListener('keydown', keydown, true); document.removeEventListener('focusin', focusin)
+      const wasTop = dialogs.at(-1) === root
       dialogs.splice(dialogs.indexOf(root), 1)
-      for (const element of isolated) {
-        const owner = inertOwners.get(element)!
-        if (--owner.count === 0) { element.inert = owner.previous; inertOwners.delete(element) }
-      }
-      if (previous?.isConnected && !previous.closest('[inert]')) previous.focus()
+      root.style.zIndex = previousZIndex
+      isolateTopDialog()
+      if (wasTop && previous?.isConnected && !previous.closest('[inert]')) previous.focus()
     }
   }, [])
   const downOnOverlay = useRef(false)

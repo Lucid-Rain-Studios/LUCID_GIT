@@ -29,9 +29,12 @@ interface LiveGitProcess {
   startedAt: number
   repoKey: string
   readOnly: boolean
+  stopping?: Promise<void>
 }
 
 const liveGitProcesses = new Map<number, LiveGitProcess>()
+let gitShuttingDown = false
+let shutdownPromise: Promise<void> | null = null
 
 /**
  * PIDs started inside the current `withGitTimeout` scope. AsyncLocalStorage
@@ -57,6 +60,9 @@ function registerGitProcess(child: ChildProcess, args: string[], repoPath = ''):
   child.once('close', forget)
   child.once('exit', forget)
   child.once('error', forget)
+  // dugite may finish locating its executable after shutdown has started.
+  // Keep that late child tracked and terminate it as part of the same drain.
+  if (gitShuttingDown) void stopGitProcess(pid, liveGitProcesses.get(pid)!).catch(() => {})
 }
 
 /**
@@ -78,6 +84,23 @@ function killProcessTree(pid: number, child: ChildProcess): Promise<void> {
     if (!child.kill('SIGKILL') && child.exitCode === null && child.signalCode === null) return Promise.reject(new Error(`Could not stop Git task ${pid}.`))
     return Promise.resolve()
   } catch (error) { return Promise.reject(error) }
+}
+
+/** Keep a task visible until it exits; repeated cancellation shares one kill. */
+function stopGitProcess(pid: number, entry: LiveGitProcess): Promise<void> {
+  if (entry.stopping) return entry.stopping
+  const stopping = (async () => {
+    await killProcessTree(pid, entry.child)
+    const deadline = performance.now() + 5_000
+    while (entry.child.exitCode == null && entry.child.signalCode == null) {
+      if (performance.now() >= deadline) throw new Error(`Git task ${pid} has not exited. Recovery remains blocked.`)
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+  })()
+  entry.stopping = stopping
+  // A deliberate later recovery action may retry a failed termination.
+  void stopping.catch(() => { if (entry.stopping === stopping) entry.stopping = undefined })
+  return stopping
 }
 
 /** Only processes this app owns; command labels never expose auth arguments. */
@@ -103,14 +126,7 @@ export async function stopRepoGitTasks(repoPath: string, reviewed: Array<{ pid: 
   })
   // Keep entries registered until actual exit. A failed taskkill must not make
   // a running writer disappear from recovery's safety checks.
-  await Promise.all(targets.map(async ({ pid, entry }) => {
-    await killProcessTree(pid, entry.child)
-    const deadline = performance.now() + 5_000
-    while (entry.child.exitCode == null && entry.child.signalCode == null) {
-      if (performance.now() >= deadline) throw new Error(`Git task ${pid} has not exited. Recovery remains blocked.`)
-      await new Promise(resolve => setTimeout(resolve, 50))
-    }
-  }))
+  await Promise.all(targets.map(({ pid, entry }) => stopGitProcess(pid, entry)))
   if (targets.length) logService.warn('git.recovery-stop', `Stopped ${targets.length} reviewed Lucid Git task(s) for ${repoPath}. Index locks were left intact.`)
   return targets.length
 }
@@ -170,7 +186,7 @@ export function preemptRepoReads(repoPath: string): number {
   if (killed > 0) {
     logService.warn(
       'git.gate',
-      `Ended ${killed} read-only git process(es) holding ${repoPath} so a waiting write could start.`,
+      `Requested cancellation of ${killed} read-only git process(es) holding ${repoPath} so a waiting write could start.`,
     )
   }
   return killed
@@ -182,8 +198,9 @@ export function killGitProcesses(pids: Iterable<number>): number {
   for (const pid of pids) {
     const entry = liveGitProcesses.get(pid)
     if (!entry) continue
-    liveGitProcesses.delete(pid)
-    void killProcessTree(pid, entry.child).catch(() => { /* existing cancellation remains best effort */ })
+    void stopGitProcess(pid, entry).catch(error => {
+      logService.warn('git.cancel', error instanceof Error ? error.message : String(error))
+    })
     killed++
   }
   return killed
@@ -203,8 +220,29 @@ export function killAllGitProcesses(): number {
     .map(p => `  git ${detectGitSubcommand(p.args)} (${Math.round((Date.now() - p.startedAt) / 1000)}s)`)
     .join('\n')
   const killed = killGitProcesses(pids)
-  logService.warn('git.shutdown', `Terminated ${killed} git process(es) still running at shutdown:\n${detail}`)
+  logService.warn('git.shutdown', `Requested termination of ${killed} git process(es):\n${detail}`)
   return killed
+}
+
+/** Stop admitting Git commands, then drain every owned child, including late
+ * spawns and kills already requested by read preemption or an IPC deadline. */
+export function shutdownGitProcesses(): Promise<void> {
+  gitShuttingDown = true
+  return shutdownPromise ??= (async () => {
+    const deadline = performance.now() + 15_000
+    let stopped = 0
+    while (liveGitProcesses.size > 0 || [...repoGitOps.values()].some(entry => entry.inFlight > 0)) {
+      const tasks = [...liveGitProcesses.entries()]
+      const results = await Promise.allSettled(tasks.map(([pid, entry]) => stopGitProcess(pid, entry)))
+      stopped += results.filter(result => result.status === 'fulfilled').length
+      const failure = results.find(result => result.status === 'rejected')
+      if (failure?.status === 'rejected') throw failure.reason
+      if (liveGitProcesses.size === 0 && [...repoGitOps.values()].every(entry => entry.inFlight === 0)) break
+      if (performance.now() >= deadline) throw new Error('Git work did not drain before the shutdown deadline. Check Task Manager before recovering index locks.')
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    if (stopped) logService.warn('git.shutdown', `Terminated ${stopped} git process(es) and drained pending Git commands.`)
+  })()
 }
 
 /** Env every git process we start shares. */
@@ -290,6 +328,7 @@ function entryFor(repoPath: string): RepoGitOps {
 
 /** Run `fn` with this repo counted as having a git process in flight. */
 async function trackGitOp<T>(repoPath: string, fn: () => Promise<T>): Promise<T> {
+  if (gitShuttingDown) throw new Error('Lucid Git is shutting down. Git command was cancelled.')
   const entry = entryFor(repoPath)
   const start = Date.now()
   entry.inFlight++

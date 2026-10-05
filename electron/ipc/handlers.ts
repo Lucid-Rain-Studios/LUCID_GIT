@@ -114,6 +114,15 @@ interface InFlightCall {
 const inFlightIpc = new Map<number, InFlightCall>()
 let nextIpcCallId = 0
 
+let presenceQuitTask: (() => Promise<void>) | null = null
+let ipcShuttingDown = false
+
+/** The main quit handler owns the final app.quit and session-end log. */
+export function stopPresenceForQuit(): Promise<void> {
+  ipcShuttingDown = true
+  return presenceQuitTask?.() ?? Promise.resolve()
+}
+
 /** One line per IPC call currently executing, oldest first. */
 export function describeInFlightIpc(): string[] {
   const now = Date.now()
@@ -201,6 +210,7 @@ async function requirePresenceAdmin(repoPath: string): Promise<string | null> {
 export function registerHandlers(): void {
   const handle = <TArgs extends unknown[]>(channel: string, fn: IpcHandler<TArgs>): void => {
     ipcMain.handle(channel, async (event, ...args) => {
+      if (ipcShuttingDown) throw new Error('Lucid Git is shutting down. App action was cancelled.')
       const callId = nextIpcCallId++
       inFlightIpc.set(callId, { channel, startedAt: Date.now() })
       const repoPath = EXCLUSIVE_CHANNELS.has(channel) ? repoArgOf(args) : null
@@ -1182,17 +1192,14 @@ export function registerHandlers(): void {
     powerMonitor.on('unlock-screen', () => { session.setLocked(false) })
     powerMonitor.on('suspend', () => { session.setLocked(true) })
     powerMonitor.on('resume', () => { session.setLocked(false) })
-    let exiting = false
-    app.on('before-quit', event => {
-      if (exiting) return
-      exiting = true
+    let drain: Promise<void> | null = null
+    presenceQuitTask = () => {
+      if (drain) return drain
       clearInterval(heartbeat)
       try { session.stop() } catch { /* Expiration handles failed final writes. */ }
-      event.preventDefault()
       // Offline is best effort; never hold application exit on a lost network.
-      void Promise.race([firebasePresenceService.drain(), new Promise(resolve => setTimeout(resolve, 2_000))])
-        .finally(() => app.quit())
-    })
+      return drain = Promise.race([firebasePresenceService.drain(), new Promise<void>(resolve => setTimeout(resolve, 2_000))])
+    }
     presenceSession = session
     return session
   }

@@ -1,5 +1,5 @@
 import { useDialogOverlayDismiss } from '@/lib/useDialogOverlayDismiss'
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import lucidGitIcon from '@/lib/icons/lucid_git.svg'
 import { ipc, SyncStatus, UpdateInfo, PresenceEntry } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
@@ -66,6 +66,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
   const [repoMenuOpen, setRepoMenuOpen] = useState(false)
   const [branchMenuOpen, setBranchMenuOpen] = useState(false)
   const [branchConfirm, setBranchConfirm] = useState<string | null>(null)
+  const pushRunning = useRef(false)
 
   const localBranches  = branches.filter(b => !b.isRemote)
   const remoteBranches = branches.filter(b => b.isRemote)
@@ -172,7 +173,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
   }, [])
 
   const doPush = async (force = false) => {
-    if (!repoPath || syncOp !== 'idle' || updatingFromMain) return
+    if (!repoPath || syncOp !== 'idle' || updatingFromMain || pushRunning.current) return
     if (!force && !canPushNow) return
     if (force) {
       const approved = await useDialogStore.getState().confirm({
@@ -185,14 +186,34 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
       const current = useRepoStore.getState()
       if (!approved || current.repoPath !== repoPath || current.currentBranch !== currentBranch) return
     }
+    if (pushRunning.current) return
+    pushRunning.current = true
     setSyncOp('pushing'); setSyncErr(null)
     try {
       await opRun(force ? 'Force pushing…' : 'Pushing…', () => ipc.push(repoPath, force))
+      if (!force) {
+        markFetchPerformed(repoPath)
+        sessionTopBarFetched.add(repoPath)
+        setHasFetched(true)
+      }
       if (!hasPublishedBranch) markBranchIntegrated(repoPath, currentBranch, false)
       await refreshRevisionState(); showStatusToast('Push successful.')
     }
     catch (e) {
       const s = String(e)
+      if (s.includes('PUSH_REQUIRES_PULL:')) {
+        markFetchPerformed(repoPath)
+        sessionTopBarFetched.add(repoPath)
+        setHasFetched(true)
+        await refreshRevisionState()
+        showStatusToast('Push blocked. Pull the new updates or Update from main first.')
+        setSyncErr(s)
+        await useDialogStore.getState().alert({
+          title: 'Pull updates before pushing',
+          message: `Fetch found new remote updates. Pull them or Update from ${defaultBranch}, then try Push again.`,
+        })
+        return
+      }
       if (s.toLowerCase().includes('everything up-to-date') || s.toLowerCase().includes('up to date')) {
         showStatusToast('No files to push.')
         return
@@ -207,7 +228,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
       showStatusToast('Push failed.')
       setSyncErr(s); pushErr(s, repoPath)
     }
-    finally { setSyncOp('idle') }
+    finally { pushRunning.current = false; setSyncOp('idle') }
   }
 
   /**

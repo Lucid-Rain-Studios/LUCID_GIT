@@ -26,13 +26,13 @@ test('a branch created from origin/main publishes under its own name and changes
   expect(sync).toMatchObject({ hasUpstream: true, hasPublishedBranch: true, remoteBranch: 'origin/new-feature', ahead: 0, behind: 0 })
   expect(logic.pushButtonLabel('idle', sync.hasPublishedBranch)).toBe('Push')
   expect(logic.canPush(true, sync.behind, sync.ahead, 'idle', sync.hasPublishedBranch)).toBe(false)
-  expect(logic.canPush(false, 0, 1, 'idle', true)).toBe(false)
-  expect(logic.canPush(true, 1, 1, 'idle', true)).toBe(false)
-  expect(logic.pushDisabledReason(true, 1, 1, 'idle', true)).toBe('Please Pull first')
+  expect(logic.canPush(false, 0, 1, 'idle', true)).toBe(true)
+  expect(logic.canPush(true, 1, 1, 'idle', true)).toBe(true)
+  expect(logic.pushDisabledReason(true, 1, 1, 'idle', true)).toBeNull()
   expect(logic.canPush(true, 0, 1, 'idle', true)).toBe(true)
 })
 
-test('navbar and dashboard show enabled Push Branch for inherited-upstream unpublished branches, then restore normal push gates', () => {
+test('navbar and dashboard enable Push for outgoing commits regardless of prior fetch, integration or behind counts', () => {
   const repo = { repoPath: 'repo', currentBranch: 'feature', branches: [], fileStatus: [], recentRepos: [], syncTick: 0 }
   const top = component('src/components/layout/TopBar.tsx', {
     '@/lib/topBarSyncBridge': component('src/lib/topBarSyncBridge.ts').exports,
@@ -51,6 +51,7 @@ test('navbar and dashboard show enabled Push Branch for inherited-upstream unpub
   const states = [
     { hasUpstream: true, hasPublishedBranch: false, ahead: 0, behind: 5 },
     { hasUpstream: true, hasPublishedBranch: true, ahead: 1, behind: 5 },
+    { hasUpstream: true, hasPublishedBranch: true, ahead: 1, behind: 0 },
     { hasUpstream: true, hasPublishedBranch: true, ahead: 0, behind: 0 },
   ]
   for (const sync of states) {
@@ -60,7 +61,7 @@ test('navbar and dashboard show enabled Push Branch for inherited-upstream unpub
     const push = flow.props.step.btns[2]
     expect(navbar.props.label).toBe(sync.hasPublishedBranch ? 'Push' : 'Push Branch')
     expect(push.label).toBe(navbar.props.label)
-    expect(navbar.props.disabled).toBe(sync.hasPublishedBranch)
+    expect(navbar.props.disabled).toBe(sync.hasPublishedBranch && sync.ahead === 0)
     expect(push.disabled).toBe(navbar.props.disabled)
   }
   for (const busy of ['fetch', 'pull', 'push']) {
@@ -68,10 +69,14 @@ test('navbar and dashboard show enabled Push Branch for inherited-upstream unpub
   }
 })
 
-test('Fetch alone does not unlock published Push; successful integration is branch/repository scoped and up-to-date Pull stays available', () => {
+test('published Push needs outgoing commits rather than previous integration; busy states still block it', () => {
   const bridge = component('src/lib/topBarSyncBridge.ts').exports
-  expect(logic.canPush(true, 0, 1, 'idle', true, false)).toBe(false)
-  expect(logic.pushDisabledReason(true, 0, 1, 'idle', true, false)).toBe('Please Pull or Update from main first')
+  expect(logic.canPush(true, 0, 1, 'idle', true, false)).toBe(true)
+  expect(logic.pushDisabledReason(true, 0, 1, 'idle', true, false)).toBeNull()
+  expect(logic.canPush(false, 5, 1, 'idle', true, false)).toBe(true)
+  expect(logic.canPush(true, 0, 0, 'idle', true, true)).toBe(false)
+  expect(logic.pushDisabledReason(true, 0, 0, 'idle', true, true)).toBe('Nothing to push')
+  for (const busy of ['fetch', 'pull', 'push']) expect(logic.canPush(false, 5, 1, busy, true, false)).toBe(false)
   expect(logic.canPull(true, 0, 'idle', true)).toBe(true)
   bridge.markBranchIntegrated('repo', 'feature')
   expect(bridge.hasBranchIntegrated('repo', 'feature')).toBe(true)

@@ -42,6 +42,7 @@ interface Waiter {
   kind: OperationKind
   /** Resolves once this waiter's slot has been claimed on its behalf. */
   wake: () => void
+  fail: (error: Error) => void
 }
 
 interface RepoGate {
@@ -51,6 +52,7 @@ interface RepoGate {
 }
 
 const gates = new Map<string, RepoGate>()
+let shuttingDown = false
 const gateKey = (repoPath: string): string => path.resolve(repoPath).toLowerCase()
 
 /** The gate slot the current async context already holds, if any. */
@@ -97,7 +99,7 @@ function pump(key: string): void {
   const gate = gates.get(key)
   if (!gate) return
 
-  while (gate.waiting.length > 0) {
+  while (!shuttingDown && gate.waiting.length > 0) {
     const writer = gate.waiting.findIndex(w => w.kind === 'write')
     const next = writer === -1 ? 0 : writer
     if (!canRun(gate, gate.waiting[next].kind)) break
@@ -132,7 +134,7 @@ function waitForSlot(
       else resolve()
     }
 
-    const waiter: Waiter = { kind, wake: () => finish() }
+    const waiter: Waiter = { kind, wake: () => finish(), fail: error => finish(error) }
     gate.waiting.push(waiter)
 
     if (kind === 'write' && preemptReads) {
@@ -171,6 +173,7 @@ export async function withRepoSlot<T>(
   fn: () => Promise<T>,
   preemptReads?: (repoPath: string) => void,
 ): Promise<T> {
+  if (shuttingDown) throw new Error('Lucid Git is shutting down. Repository work was cancelled.')
   const key = gateKey(repoPath)
   if (heldSlot.getStore()?.key === key) return fn()
 
@@ -179,9 +182,22 @@ export async function withRepoSlot<T>(
   else await waitForSlot(gate, kind, repoPath, preemptReads)
 
   try {
+    // A slot may have been handed over immediately before shutdown started.
+    if (shuttingDown) throw new Error('Lucid Git is shutting down. Repository work was cancelled.')
     return await heldSlot.run({ key }, fn)
   } finally {
     release(gate, kind)
+    pump(key)
+  }
+}
+
+/** Reject queued work before terminating the processes holding its slots. */
+export function shutdownRepoGate(): void {
+  shuttingDown = true
+  for (const [key, gate] of gates) {
+    for (const waiter of gate.waiting.splice(0)) {
+      waiter.fail(new Error('Lucid Git is shutting down. Repository work was cancelled.'))
+    }
     pump(key)
   }
 }
