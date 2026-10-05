@@ -6,6 +6,7 @@ import path from 'path'
 import { performance } from 'node:perf_hooks'
 import { exec, execSafe, execWithProgress, execWithStdin, gitAuthArgs, withGitTimeout, gitOpActivity, waitForGitOpsToDrain, ProgressCallback } from '../util/dugite-exec'
 import { nulPaths, parseNameStatus, parseNumstat } from '../util/git-paths'
+import { withRepoSlot } from '../util/repo-gate'
 import { authService } from './AuthService'
 import { logService } from './LogService'
 import { parseGitLog, GIT_LOG_FORMAT } from '../util/git-log-parse'
@@ -234,6 +235,9 @@ interface LfsTotals {
 // ── GitService ────────────────────────────────────────────────────────────────
 
 class GitService {
+  private _remoteQueue = new Map<string, Promise<void>>()
+  private _fetchInFlight = new Map<string, Promise<void>>()
+
   /**
    * Uncommitted local files that an incoming merge of `mergeRef` into HEAD
    * would also modify. Git refuses a merge / pull only for this overlap set —
@@ -404,12 +408,27 @@ class GitService {
     // new directory into one "dir/" entry. stage() feeds these paths to
     // `git update-index`, which takes literal file paths and cannot expand
     // directories, so file granularity here is load-bearing.
-    const { exitCode, stdout, stderr } = await execSafe(
+    //
+    // That writeback takes index.lock, so a status from any caller — the IPC
+    // handler, PR monitor, forecast — holds a read slot and never overlaps a
+    // write. Inside a write it passes straight through.
+    const { exitCode, stdout, stderr } = await withRepoSlot(repoPath, 'read', () => execSafe(
       ['status', '--porcelain=v1', '-z', '--untracked-files=all'],
       repoPath
-    )
+    ))
     if (exitCode !== 0) throw new Error(stderr || `git status failed (exit ${exitCode})`)
     return parseStatus(stdout)
+  }
+
+  /**
+   * Paths still unmerged in the index. `git diff` against the working tree
+   * writes its refreshed index back, taking index.lock, so this holds a read
+   * slot like `status`.
+   */
+  private unmergedPaths(repoPath: string): Promise<string[]> {
+    return withRepoSlot(repoPath, 'read', () =>
+      execSafe(['diff', '--name-only', '-z', '--diff-filter=U'], repoPath))
+      .then(res => nulPaths(res.stdout))
   }
 
   /** Absolute path to this repository's .git directory. */
@@ -657,7 +676,7 @@ class GitService {
     const token = await authService.getCurrentToken()
     const args = [...gitAuthArgs(token, urls[0]), 'push', '--progress', '--set-upstream', 'origin', `${ref}:${ref}`]
     onProgress?.({ id: 'pr-publish', label: `Pushing ${branch}`, status: 'running' })
-    await this.withStalePackRetry(repoPath, () => execWithProgress(args, repoPath, onProgress), onProgress)
+    await this.withRemote(repoPath, () => this.withStalePackRetry(repoPath, () => execWithProgress(args, repoPath, onProgress), onProgress))
     onProgress?.({ id: 'pr-publish', label: `Pushed ${branch}`, status: 'done' })
   }
 
@@ -702,7 +721,7 @@ class GitService {
 
     onProgress?.({ id: 'push-connect', label: 'Connecting to remote', status: 'running', progress: 12 })
     // Push is idempotent, so replaying a partially-completed push is safe.
-    await this.withStalePackRetry(repoPath, () => execWithProgress(pushArgs, repoPath, onProgress), onProgress)
+    await this.withRemote(repoPath, () => this.withStalePackRetry(repoPath, () => execWithProgress(pushArgs, repoPath, onProgress), onProgress))
     return { branch, filesAhead }
   }
 
@@ -886,14 +905,14 @@ class GitService {
     try {
       const remoteUrl = await this.getRemoteUrl(repoPath)
       onProgress?.({ id: 'pull-connect', label: 'Connecting to remote', status: 'running', progress: 12 })
-      await this.withStalePackRetry(repoPath,
+      await this.withRemote(repoPath, () => this.withStalePackRetry(repoPath,
         () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'pull', ...reconcile, '--progress'], repoPath, onProgress),
         onProgress,
-      )
+      ))
     } catch (error) {
       if (!await this.recoverForRetry(repoPath, error)) throw error
       const remoteUrl = await this.getRemoteUrl(repoPath)
-      await execWithProgress([...gitAuthArgs(token, remoteUrl), 'pull', ...reconcile, '--progress'], repoPath, onProgress)
+      await this.withRemote(repoPath, () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'pull', ...reconcile, '--progress'], repoPath, onProgress))
     }
   }
 
@@ -937,15 +956,47 @@ class GitService {
 
   /** Fetch all remotes. Streams progress. */
   async fetch(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
-    const token = await authService.getCurrentToken()
-    const remoteUrl = await this.getRemoteUrl(repoPath)
-    // --prune matters as much as the fetch itself: without it, remote-tracking
-    // refs for branches someone else deleted linger indefinitely, so the branch
-    // list keeps offering branches that no longer exist on the remote.
-    await this.withStalePackRetry(repoPath,
-      () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', '--all', '--prune', '--progress'], repoPath, onProgress),
-      onProgress,
-    )
+    // A caller arriving while a fetch is queued or running joins it. Auto-fetch,
+    // forecast and a manual click would otherwise race for the same
+    // remote-tracking refs and fail with `cannot lock ref`.
+    const key = path.resolve(repoPath).toLowerCase()
+    const pending = this._fetchInFlight.get(key)
+    if (pending) return pending
+    const request = (async () => {
+      const token = await authService.getCurrentToken()
+      const remoteUrl = await this.getRemoteUrl(repoPath)
+      // --prune matters as much as the fetch itself: without it, remote-tracking
+      // refs for branches someone else deleted linger indefinitely, so the branch
+      // list keeps offering branches that no longer exist on the remote.
+      await this.withRemote(repoPath, () => this.withStalePackRetry(repoPath,
+        () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', '--all', '--prune', '--progress'], repoPath, onProgress),
+        onProgress,
+      ))
+    })().finally(() => {
+      if (this._fetchInFlight.get(key) === request) this._fetchInFlight.delete(key)
+    })
+    this._fetchInFlight.set(key, request)
+    return request
+  }
+
+  /**
+   * Run remote operations one at a time per repository.
+   *
+   * Fetch, pull, push and remote branch deletion all rewrite remote-tracking
+   * refs. Fetch stays outside the repository write gate because it can run for
+   * minutes without touching the index, so this queue is what keeps a
+   * background fetch from colliding with a pull or push on the same ref.
+   * Wrap leaf spawns only: it is not re-entrant, and work inside it must never
+   * wait for a repository slot.
+   */
+  private withRemote<T>(repoPath: string, fn: () => Promise<T>): Promise<T> {
+    const key = path.resolve(repoPath).toLowerCase()
+    const previous = this._remoteQueue.get(key) ?? Promise.resolve()
+    const run = previous.then(fn)
+    const tail = run.then(() => undefined, () => undefined)
+    this._remoteQueue.set(key, tail)
+    void tail.then(() => { if (this._remoteQueue.get(key) === tail) this._remoteQueue.delete(key) })
+    return run
   }
 
   /** List local AND remote-tracking branches with upstream tracking info. */
@@ -1129,10 +1180,12 @@ class GitService {
   async deleteRemoteBranch(repoPath: string, remoteName: string, branch: string): Promise<void> {
     const token = await authService.getCurrentToken()
     const remoteUrl = await this.getRemoteUrl(repoPath)
-    await exec([...gitAuthArgs(token, remoteUrl), 'push', remoteName, '--delete', branch], repoPath)
-    // Ensure local remote-tracking refs are pruned immediately so branch lists
-    // reflect the deletion without requiring a manual fetch.
-    await execSafe([...gitAuthArgs(token, remoteUrl), 'fetch', remoteName, '--prune'], repoPath)
+    await this.withRemote(repoPath, async () => {
+      await exec([...gitAuthArgs(token, remoteUrl), 'push', remoteName, '--delete', branch], repoPath)
+      // Ensure local remote-tracking refs are pruned immediately so branch lists
+      // reflect the deletion without requiring a manual fetch.
+      await execSafe([...gitAuthArgs(token, remoteUrl), 'fetch', remoteName, '--prune'], repoPath)
+    })
   }
 
   /**
@@ -1305,10 +1358,10 @@ class GitService {
     // Synthetic stage events — guarantee the bar shows progression even when
     // git itself goes silent (already up-to-date fetch, pure ref-bump merge).
     onProgress?.({ id: 'stage', label: 'Fetching origin', status: 'running' })
-    await this.withStalePackRetry(repoPath,
+    await this.withRemote(repoPath, () => this.withStalePackRetry(repoPath,
       () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', 'origin', '--prune', '--progress'], repoPath, onProgress),
       onProgress,
-    )
+    ))
 
     const defaultBranch = await this.remoteDefaultBranch(repoPath)
     const check = await execSafe(['rev-parse', '--verify', defaultBranch.ref], repoPath)
@@ -2409,8 +2462,7 @@ ${lastError}` : '')
   }
 
   async continueMerge(repoPath: string, targetBranch: string): Promise<void> {
-    const unresolved = await execSafe(['diff', '--name-only', '-z', '--diff-filter=U'], repoPath)
-    const unresolvedFiles = nulPaths(unresolved.stdout)
+    const unresolvedFiles = await this.unmergedPaths(repoPath)
     if (unresolvedFiles.length > 0) {
       throw new Error(`Resolve all merge conflicts before finalizing:\n${unresolvedFiles.join('\n')}`)
     }
@@ -2484,8 +2536,7 @@ ${lastError}` : '')
       // No merge in progress. There may still be conflicts — see below.
     }
 
-    const unresolvedRes = await execSafe(['diff', '--name-only', '-z', '--diff-filter=U'], repoPath)
-    const unresolvedFiles = nulPaths(unresolvedRes.stdout)
+    const unresolvedFiles = await this.unmergedPaths(repoPath)
 
     // A conflict does not imply a merge. `git stash apply` merges the stashed
     // changes into the working tree and can conflict exactly as a merge does —
@@ -2633,8 +2684,7 @@ ${lastError}` : '')
     const subjectRes = await execSafe(['log', '-1', '--format=%s', cherryPickHead], repoPath)
     const sourceMessage = subjectRes.exitCode === 0 ? subjectRes.stdout.trim() : ''
 
-    const unresolvedRes = await execSafe(['diff', '--name-only', '-z', '--diff-filter=U'], repoPath)
-    const unresolvedFiles = nulPaths(unresolvedRes.stdout)
+    const unresolvedFiles = await this.unmergedPaths(repoPath)
 
     return { cherryPickHead, sourceMessage, unresolvedFiles }
   }
@@ -2651,8 +2701,7 @@ ${lastError}` : '')
 
   /** Finalize an in-progress cherry-pick after all conflicts have been resolved. */
   async continueCherryPick(repoPath: string): Promise<void> {
-    const unresolved = await execSafe(['diff', '--name-only', '-z', '--diff-filter=U'], repoPath)
-    const unresolvedFiles = nulPaths(unresolved.stdout)
+    const unresolvedFiles = await this.unmergedPaths(repoPath)
     if (unresolvedFiles.length > 0) {
       throw new Error(`Resolve all cherry-pick conflicts before finalizing:\n${unresolvedFiles.join('\n')}`)
     }
@@ -2889,19 +2938,19 @@ ${lastError}` : '')
   async cleanupShallow(repoPath: string, depth: number, onProgress?: ProgressCallback): Promise<void> {
     const token = await authService.getCurrentToken()
     const remoteUrl = await this.getRemoteUrl(repoPath)
-    await this.withStalePackRetry(repoPath,
+    await this.withRemote(repoPath, () => this.withStalePackRetry(repoPath,
       () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', '--depth', String(depth), '--progress'], repoPath, onProgress),
       onProgress,
-    )
+    ))
   }
 
   async cleanupUnshallow(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
     const token = await authService.getCurrentToken()
     const remoteUrl = await this.getRemoteUrl(repoPath)
-    await this.withStalePackRetry(repoPath,
+    await this.withRemote(repoPath, () => this.withStalePackRetry(repoPath,
       () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', '--unshallow', '--progress'], repoPath, onProgress),
       onProgress,
-    )
+    ))
   }
 
   // ── LFS ───────────────────────────────────────────────────────────────────

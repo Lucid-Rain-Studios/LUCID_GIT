@@ -55,8 +55,14 @@ const gates = new Map<string, RepoGate>()
 let shuttingDown = false
 const gateKey = (repoPath: string): string => path.resolve(repoPath).toLowerCase()
 
-/** The gate slot the current async context already holds, if any. */
-const heldSlot = new AsyncLocalStorage<{ key: string }>()
+/**
+ * The gate slot the current async context already holds, if any.
+ *
+ * `active` drops when the slot is released. Work an operation started without
+ * awaiting — a follow-up check after a pull — inherits this context, and must
+ * not keep passing through the gate once the operation that owned it is done.
+ */
+const heldSlot = new AsyncLocalStorage<{ key: string; active: boolean }>()
 
 function gateFor(key: string): RepoGate {
   let gate = gates.get(key)
@@ -175,17 +181,20 @@ export async function withRepoSlot<T>(
 ): Promise<T> {
   if (shuttingDown) throw new Error('Lucid Git is shutting down. Repository work was cancelled.')
   const key = gateKey(repoPath)
-  if (heldSlot.getStore()?.key === key) return fn()
+  const held = heldSlot.getStore()
+  if (held?.key === key && held.active) return fn()
 
   const gate = gateFor(key)
   if (canRun(gate, kind)) claim(gate, kind)
   else await waitForSlot(gate, kind, repoPath, preemptReads)
 
+  const token = { key, active: true }
   try {
     // A slot may have been handed over immediately before shutdown started.
     if (shuttingDown) throw new Error('Lucid Git is shutting down. Repository work was cancelled.')
-    return await heldSlot.run({ key }, fn)
+    return await heldSlot.run(token, fn)
   } finally {
+    token.active = false
     release(gate, kind)
     pump(key)
   }

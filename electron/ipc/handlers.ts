@@ -80,7 +80,24 @@ const EXCLUSIVE_CHANNELS = new Set<string>([
   CHANNELS.GIT_PUSH, CHANNELS.GIT_UPDATE_FROM_MAIN, CHANNELS.GIT_CHECKOUT,
   CHANNELS.GIT_MERGE, CHANNELS.LFS_MIGRATE, CHANNELS.LFS_RESTORE,
   CHANNELS.CLEANUP_GC,
+  // Conflict resolution checks out and stages one file per call while the
+  // watcher refreshes status after each — ungated, that refresh took
+  // index.lock out from under the next checkout.
+  CHANNELS.GIT_MERGE_RESOLVE_TEXT, CHANNELS.GIT_MERGE_CONTINUE, CHANNELS.GIT_MERGE_ABORT,
+  CHANNELS.GIT_CHERRY_PICK, CHANNELS.GIT_CHERRY_PICK_CONTINUE, CHANNELS.GIT_CHERRY_PICK_ABORT,
+  CHANNELS.GIT_REVERT, CHANNELS.GIT_REBASE_ABORT, CHANNELS.GIT_RESTORE_FILE, CHANNELS.UNDO_LAST,
+  CHANNELS.GIT_STASH_SAVE, CHANNELS.GIT_STASH_POP, CHANNELS.GIT_STASH_APPLY, CHANNELS.GIT_STASH_DROP,
+  CHANNELS.GIT_COMMIT_AMEND, CHANNELS.GIT_APPLY_PATCH,
+  CHANNELS.GIT_BRANCH_RENAME, CHANNELS.GIT_BRANCH_DELETE, CHANNELS.GIT_BRANCH_DELETE_REMOTE,
+  CHANNELS.GIT_SET_UPSTREAM, CHANNELS.GIT_SET_CONFIG,
+  CHANNELS.LFS_TRACK, CHANNELS.LFS_UNTRACK, CHANNELS.CLEANUP_PRUNE_LFS,
 ])
+
+// Fetch-only channels stay out of the set above on purpose: on a large
+// project they run for minutes, and holding the repository that long would
+// starve status refreshes and time out queued writes. They update refs, not
+// the index, so GitService serializes them against other remote operations
+// instead (see `withRemote`).
 
 /**
  * The repository an IPC call operates on, when the first argument names one.
@@ -653,8 +670,10 @@ export function registerHandlers(): void {
     heatmapService.markConflictsResolved(repoPath, ourBranch, targetBranch)
   })
 
+  // Merge-state queries take a read slot so they wait out a resolve rather than
+  // racing it: `git diff` writes back its refreshed index, taking index.lock.
   handle(CHANNELS.GIT_MERGE_GET_CONFLICT_TEXT, async (_event, repoPath: string, filePath: string) => {
-    return gitService.getMergeConflictText(repoPath, filePath)
+    return withRepoSlot(repoPath, 'read', () => gitService.getMergeConflictText(repoPath, filePath))
   })
 
   handle(CHANNELS.GIT_MERGE_RESOLVE_TEXT, async (_event, repoPath: string, filePath: string, choice: 'ours' | 'theirs') => {
@@ -672,10 +691,12 @@ export function registerHandlers(): void {
   })
 
   handle(CHANNELS.GIT_MERGE_IN_PROGRESS, async (_event, repoPath: string) => {
-    const state = await gitService.mergeInProgress(repoPath)
-    if (!state) return null
-    const conflicts = await gitService.listInProgressConflicts(repoPath)
-    return { ...state, conflicts }
+    return withRepoSlot(repoPath, 'read', async () => {
+      const state = await gitService.mergeInProgress(repoPath)
+      if (!state) return null
+      const conflicts = await gitService.listInProgressConflicts(repoPath)
+      return { ...state, conflicts }
+    })
   })
 
 // ── Locks — Phase 5 ───────────────────────────────────────────────────────
@@ -1047,10 +1068,12 @@ export function registerHandlers(): void {
   )
 
   handle(CHANNELS.GIT_CHERRY_PICK_IN_PROGRESS, async (_event, repoPath: string) => {
-    const state = await gitService.cherryPickInProgress(repoPath)
-    if (!state) return null
-    const conflicts = await gitService.listInProgressCherryPickConflicts(repoPath)
-    return { ...state, conflicts }
+    return withRepoSlot(repoPath, 'read', async () => {
+      const state = await gitService.cherryPickInProgress(repoPath)
+      if (!state) return null
+      const conflicts = await gitService.listInProgressCherryPickConflicts(repoPath)
+      return { ...state, conflicts }
+    })
   })
 
   handle(CHANNELS.GIT_CHERRY_PICK_CONTINUE, async (_event, repoPath: string) => {
