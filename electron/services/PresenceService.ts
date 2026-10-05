@@ -49,9 +49,10 @@ class PresenceService {
     const gitIgnorePath = path.join(repoPath, '.gitignore')
     const existing = fs.existsSync(gitIgnorePath) ? fs.readFileSync(gitIgnorePath, 'utf8') : ''
     const entry = '/.lucid-git/lucid-presence.json*'
-    const lines = existing.split(/\r?\n/)
-    // A later negation can override an earlier rule; keep ours last.
-    if (lines.filter(line => line.trim() && !line.trim().startsWith('#')).at(-1) !== entry) {
+    const lines = existing.split(/\r?\n/).map(line => line.trim())
+    const last = lines.lastIndexOf(entry)
+    // Only a later negation can override our rule; re-append it after one.
+    if (last === -1 || lines.slice(last + 1).some(line => line.startsWith('!'))) {
       fs.appendFileSync(gitIgnorePath, `${existing && !existing.endsWith('\n') ? '\n' : ''}${entry}\n`, 'utf8')
     }
   }

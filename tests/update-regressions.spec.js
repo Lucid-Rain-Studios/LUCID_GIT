@@ -160,6 +160,16 @@ test('renamed activity leaves tracked legacy presence untouched and Firebase con
   expect(Object.keys(presenceService.read(repo).entries)).toEqual(['alice'])
 })
 
+test('activity ignore is not re-appended when later positive rules follow it', () => {
+  const repo = repository(), ignore = path.join(repo, '.gitignore')
+  const rules = '/.lucid-git/lucid-presence.json*\n# Lucid Git\n/.lucid-git/presence.json\n/.lucid-git/*.bak\n/.lucid-git/*.tmp\n'
+  fs.writeFileSync(ignore, rules)
+  presenceService.update(repo, 'alice', entry)
+  presenceService.update(repo, 'alice', { ...entry, status: 'away' })
+  expect(fs.readFileSync(ignore, 'utf8')).toBe(rules)
+  expect(git(repo, '--no-optional-locks', 'status', '--porcelain', '--untracked-files=all', '--', '.lucid-git')).toBe('')
+})
+
 test('activity ignore works in linked worktrees and is restored after a later negation', () => {
   const repo = repository(), worktree = tmpDir('lg-presence-worktree-')
   git(repo, '-c', 'core.hooksPath=', 'worktree', 'add', '-qb', 'presence-test', worktree)
