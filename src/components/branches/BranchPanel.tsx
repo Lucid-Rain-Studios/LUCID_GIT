@@ -351,7 +351,7 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
 
   const selectedBranch = selectedBranchName
     ? (localBranches.find(b => b.name === selectedBranchName)
-      ?? remoteBranches.find(b => b.displayName === selectedBranchName || b.name === selectedBranchName)
+      ?? remoteBranches.find(b => b.name === selectedBranchName)
       ?? null)
     : null
 
@@ -575,8 +575,8 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
                 <div
                   key={branch.name}
                   onContextMenu={e => openBranchMenu(e, branch, false)}
-                  onClick={() => setSelectedBranchName(branch.displayName)}
-                  className={cn("group flex items-center gap-1.5 px-3 py-2 border-b border-lg-border/40 hover:bg-lg-bg-elevated/40 transition-colors min-w-0", selectedBranchName === branch.displayName && "bg-lg-bg-elevated/70")}
+                  onClick={() => setSelectedBranchName(branch.name)}
+                  className={cn("group flex items-center gap-1.5 px-3 py-2 border-b border-lg-border/40 hover:bg-lg-bg-elevated/40 transition-colors min-w-0", selectedBranchName === branch.name && "bg-lg-bg-elevated/70")}
                 >
                   {/* Remote indicator */}
                   <span className="shrink-0 text-[9px] font-mono text-lg-text-secondary/50 leading-none">
@@ -692,9 +692,9 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
           style={{ left: ctxMenu.x, top: ctxMenu.y }}
           onClick={e => e.stopPropagation()}
         >
-          <button className="w-full text-left px-3 py-1.5 hover:bg-lg-bg-secondary" onClick={() => { setSelectedBranchName(ctxMenu.branch.displayName); setCtxMenu(null) }}>Compare to branch</button>
+          <button className="w-full text-left px-3 py-1.5 hover:bg-lg-bg-secondary" onClick={() => { setSelectedBranchName(ctxMenu.branch.name); setCtxMenu(null) }}>Compare to branch</button>
           {!ctxMenu.branch.current && (
-            <button className="w-full text-left px-3 py-1.5 hover:bg-lg-bg-secondary" onClick={() => onMergePreview(ctxMenu.branch.displayName)}>Merge into current branch…</button>
+            <button className="w-full text-left px-3 py-1.5 hover:bg-lg-bg-secondary" onClick={() => { onMergePreview(ctxMenu.branch.name); setCtxMenu(null) }}>Merge into current branch…</button>
           )}
           <button className="w-full text-left px-3 py-1.5 hover:bg-lg-bg-secondary" onClick={() => openCompareOnGitHub(ctxMenu.branch.displayName)}>Compare on GitHub</button>
           <button className="w-full text-left px-3 py-1.5 hover:bg-lg-bg-secondary" onClick={() => openBranchOnGitHub(ctxMenu.branch.displayName)}>View branch on GitHub</button>
