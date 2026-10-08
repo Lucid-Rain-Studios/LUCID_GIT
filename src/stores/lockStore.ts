@@ -66,8 +66,9 @@ export const useLockStore = create<LockState>((set, get) => ({
               ghostByPath.set(normalized, {
                 id: `ghost-pr-${pr.number}-${normalized}`,
                 path: normalized,
-                owner: { name: 'Predicted PR ownership #' + pr.number, login: 'ghost' },
+                owner: { name: pr.author ? `Ghost (${pr.author})` : 'Ghost (PR #' + pr.number + ')', login: 'ghost' },
                 lockedAt: pr.updatedAt,
+                prOverlay: { number: pr.number, author: pr.author, htmlUrl: pr.htmlUrl },
               })
             }
           }

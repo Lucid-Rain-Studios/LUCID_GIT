@@ -139,6 +139,8 @@ export interface Lock {
   owner: { name: string; login: string }
   lockedAt: string   // ISO date string
   isGhost?: boolean  // true when the file no longer exists on disk
+  // Set on synthetic locks predicted from an open PR. There is no LFS lock behind these.
+  prOverlay?: { number: number; author: string; htmlUrl: string }
 }
 
 export interface LFSStatus {

@@ -75,6 +75,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
   }, [source, normalizedSearch])
 
   const selectableLocks = useMemo(() => filtered.filter(lock => {
+    if (lock.prOverlay) return false
     const isOwn = currentLogin && lock.owner.login === currentLogin
     return Boolean(isOwn || isAdmin)
   }), [filtered, currentLogin, isAdmin])
@@ -99,16 +100,19 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
 
   // Group team locks by owner
   const ownerGroups = useMemo(() => {
-    const groups: { login: string; name: string; locks: typeof teamLocks }[] = []
+    const groups: { key: string; login: string; name: string; locks: typeof teamLocks }[] = []
     if (tab !== 'team') return groups
     const seen = new Map<string, typeof groups[0]>()
     for (const l of filtered) {
-      if (!seen.has(l.owner.login)) {
-        const group = { login: l.owner.login, name: l.owner.name, locks: [] as typeof teamLocks }
-        seen.set(l.owner.login, group)
+      // Predicted-PR rows group per PR, not under one shared "ghost" owner.
+      const key = l.prOverlay ? `pr-${l.prOverlay.number}` : l.owner.login
+      if (!seen.has(key)) {
+        const name = l.prOverlay ? `${l.owner.name} · PR #${l.prOverlay.number}` : l.owner.name
+        const group = { key, login: l.owner.login, name, locks: [] as typeof teamLocks }
+        seen.set(key, group)
         groups.push(group)
       }
-      seen.get(l.owner.login)!.locks.push(l)
+      seen.get(key)!.locks.push(l)
     }
     return groups
   }, [tab, filtered, teamLocks])
@@ -230,6 +234,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
   }
 
   const doUnlock = async (lock: Lock, force: boolean) => {
+    if (lock.prOverlay) return
     if (force) {
       const ok = await dialog.confirm({
         title: 'Force unlock',
@@ -458,21 +463,21 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
           /* Team tab — grouped by owner */
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }} onContextMenu={e => { e.preventDefault(); if (selectedLocks.length > 0) setCtxMenu({ x: e.clientX, y: e.clientY }) }}>
             {ownerGroups.map(group => {
-              const isCollapsed = !expandedOwners.has(group.login)
+              const isCollapsed = !expandedOwners.has(group.key)
               const color = authorColor(group.name)
               return (
-                <div key={group.login} style={{
+                <div key={group.key} style={{
                   border: '1px solid #1a2030', borderRadius: 10, overflow: 'hidden',
                 }}>
                   {/* Owner header */}
                   <div
                     role="button"
                     tabIndex={0}
-                    onClick={() => toggleOwner(group.login)}
+                    onClick={() => toggleOwner(group.key)}
                     onKeyDown={e => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault()
-                        toggleOwner(group.login)
+                        toggleOwner(group.key)
                       }
                     }}
                     style={{
@@ -597,7 +602,7 @@ function LockRow({
 
   const isOwn     = currentLogin && lock.owner.login === currentLogin
   const isBusy    = unlocking === lock.path
-  const canUnlock = (isOwn || isAdmin) && !disableActions
+  const canUnlock = (isOwn || isAdmin) && !disableActions && !lock.prOverlay
   const force     = !isOwn
   const color     = authorColor(lock.owner.name)
 
@@ -725,6 +730,17 @@ function LockRow({
           >
             {isBusy ? '…' : force ? 'Force Unlock' : 'Unlock'}
           </ActionBtn>
+        ) : lock.prOverlay ? (
+          <button
+            title={`Predicted from open PR #${lock.prOverlay.number}. No LFS lock exists to release. Click to open the PR.`}
+            onClick={() => { if (lock.prOverlay?.htmlUrl) void ipc.openExternal(lock.prOverlay.htmlUrl).catch(() => {}) }}
+            style={{
+              fontFamily: 'var(--lg-font-ui)', fontSize: 10.5, fontWeight: 600,
+              background: 'rgba(90,104,128,0.08)', color: '#8a94aa',
+              border: '1px solid rgba(90,104,128,0.2)', borderRadius: 4,
+              padding: '4px 8px', flexShrink: 0, cursor: 'pointer',
+            }}
+          >PR #{lock.prOverlay.number}</button>
         ) : (
           <span style={{
             fontSize: 9, fontWeight: 700, letterSpacing: '0.06em',
