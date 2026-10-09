@@ -35,6 +35,7 @@ export interface Account {
 
 export interface FileStatus {
   path: string
+  originalPath?: string
   indexStatus: string
   workingStatus: string
   staged: boolean

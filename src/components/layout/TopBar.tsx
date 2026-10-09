@@ -1369,10 +1369,10 @@ function PushDropdown({ children, disabled, onForcePush, contextKey }: {
         if (event.key === 'ArrowDown' && !disabled) { event.preventDefault(); setOpen(true); itemRef.current?.focus() }
       }}>
       {children}
-      <button ref={triggerRef} className="lg-toolbar-control" aria-label="Push options"
+      <button ref={triggerRef} className="lg-toolbar-control lg-icon-control" aria-label="Push options"
         aria-haspopup="menu" aria-expanded={open} disabled={disabled}
         onClick={() => setOpen(value => !value)}
-        style={{ height: 28, width: 23, borderRadius: 5, border: '1px solid var(--lg-border)', background: 'transparent', color: 'var(--lg-text-primary)', cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1 }}>
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, height: 28, width: 23, borderRadius: 5, border: '1px solid var(--lg-border)', background: 'transparent', color: 'var(--lg-text-primary)', cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1 }}>
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="m2 3.5 3 3 3-3" stroke="currentColor" strokeWidth="1.4" /></svg>
       </button>
       {open && !disabled && (

@@ -82,6 +82,7 @@ function parseStatus(raw: string): FileStatus[] {
 
     result.push({
       path,
+      ...(indexStatus === 'R' || indexStatus === 'C' ? { originalPath: entries[i + 1] } : {}),
       indexStatus,
       workingStatus,
       staged: indexStatus !== ' ' && indexStatus !== '?' && indexStatus !== '!',

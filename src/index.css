@@ -149,6 +149,22 @@ html.lg-appearance-applied #root .lg-toolbar-control.lg-icon-control {
   padding: 0 !important;
 }
 
+#root button.lg-discard-trigger {
+  padding: 0 !important;
+}
+
+#root .lg-discard-menu button {
+  padding: 8px 12px !important;
+  min-height: 32px !important;
+  background: transparent;
+}
+
+#root .lg-discard-menu button:hover:not(:disabled),
+#root .lg-discard-menu button:focus-visible {
+  background: rgba(232, 69, 69, 0.12);
+  outline: none;
+}
+
 html.lg-appearance-applied #root .lg-compact-icon-button {
   min-height: 0 !important;
   padding: 0 !important;

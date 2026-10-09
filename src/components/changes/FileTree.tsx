@@ -197,9 +197,10 @@ export function FileTree({
   const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login ?? null
   const canSelectAllDeferredStagePaths = isDeferredStaging
     && files.some(file => canStagePath(file.path, locks, currentLogin) && !deferredStagePaths?.has(file.path))
-  // "Discard All" resets the index too, so staged rows count as candidates.
-  // Only files that are purely untracked (never staged) are left alone.
-  const discardCandidates = files.filter(file => file.indexStatus !== '?')
+  // Added includes staged additions and files never added to the index.
+  const isAddedFile = (file: FileStatus) => file.indexStatus === 'A' || file.indexStatus === 'C' || file.indexStatus === '?' || file.workingStatus === '?'
+  const addedFiles = files.filter(isAddedFile)
+  const changedFiles = files.filter(file => !isAddedFile(file))
 
   // ── Multi-select state ─────────────────────────────────────────────────────
   const [multiPaths, setMultiPaths]         = useState<Set<string>>(new Set())
@@ -337,6 +338,49 @@ export function FileTree({
     setMultiPaths(new Set())
   }
 
+  const handleToolbarDiscard = async (scope: 'all' | 'changed' | 'added') => {
+    const candidates = scope === 'changed' ? changedFiles : scope === 'added' ? addedFiles : files
+    if (busy || (!mergeBranch && candidates.length === 0)) return
+    const abort = Boolean(mergeBranch)
+    const label = abort ? 'Abort Merge' : scope === 'changed' ? 'Discard Changed' : scope === 'added' ? 'Discard Added' : 'Discard'
+    const ok = await dialog.confirm({
+      title: abort ? `Abort the merge from ${mergeBranch}` : label,
+      message: abort
+        ? 'This will abandon the in-progress merge and restore the branch to its previous state.'
+        : `Discard ${candidates.length} ${scope === 'all' ? 'local' : scope} file${candidates.length === 1 ? '' : 's'}?`,
+      detail: abort ? 'Untracked files are kept.' : scope === 'changed'
+        ? 'Staged and working-tree changes will be restored. Added files are kept. This cannot be undone.'
+        : 'Added files will be deleted from disk.' + (scope === 'all' ? ' Staged and working-tree changes will also be restored.' : ' Changed files are kept.') + ' This cannot be undone.',
+      confirmLabel: label, danger: true,
+    })
+    if (!ok) return
+    await run(abort ? 'Aborting merge' : 'Discarding files', async () => {
+      if (abort) {
+        await ipc.discardAll(repoPath)
+      } else if (scope === 'all') {
+        await ipc.discardAll(repoPath)
+        const untracked = addedFiles.filter(file => file.indexStatus === '?' || file.workingStatus === '?').map(file => file.path)
+        if (untracked.length) await ipc.discard(repoPath, untracked, true)
+      } else if (scope === 'changed') {
+        const renames = candidates.filter(file => file.indexStatus === 'R' && file.originalPath)
+        if (renames.length) await ipc.unstage(repoPath, renames.flatMap(file => [file.path, file.originalPath!]))
+        const restorePaths = candidates.map(file => file.indexStatus === 'R' && file.originalPath ? file.originalPath : file.path)
+        await ipc.discard(repoPath, restorePaths, false)
+        if (renames.length) await ipc.discard(repoPath, renames.map(file => file.path), true)
+      } else {
+        const stagedAdditions = candidates.filter(file => file.indexStatus === 'A' || file.indexStatus === 'C').map(file => file.path)
+        if (stagedAdditions.length) await ipc.unstage(repoPath, stagedAdditions)
+        await ipc.discard(repoPath, candidates.map(file => file.path), true)
+      }
+      // A rejected discard must retain locks, including when only part of a
+      // batch completed. Never release them from a finally block.
+      if (currentLogin) for (const file of candidates) {
+        if (abort && file.indexStatus === '?') continue
+        if (lockFor(file)?.owner.login === currentLogin) await unlockFile(repoPath, file.path).catch(() => {})
+      }
+    })
+  }
+
   const handleMultiBulkStash = async () => {
     setMultiCtx(null)
     const stashablePaths = multiTrackedUnstagedPaths
@@ -386,46 +430,18 @@ export function FileTree({
           }}
         />
         <ActionBtn
-          label={mergeBranch ? 'Abort Merge' : 'Discard All'}
+          label={mergeBranch ? 'Abort Merge' : 'Discard'}
           danger
-          // A merge with nothing else staged still needs aborting, so the
-          // empty-changeset rule does not apply while one is in progress.
-          disabled={busy || (!mergeBranch && discardCandidates.length === 0)}
-          onClick={async () => {
-            const newFileCount = discardCandidates.filter(f => f.indexStatus === 'A' || f.indexStatus === 'R').length
-            const ok = await dialog.confirm({
-              title: mergeBranch ? `Abort the merge from ${mergeBranch}` : 'Discard all changes',
-              message: mergeBranch
-                ? `This will abandon the in-progress merge and put the branch back where it was before it started. This cannot be undone.`
-                : 'This will discard all staged and working-tree changes. This cannot be undone.',
-              detail: mergeBranch
-                ? 'The files the merge was bringing in are discarded with it. Untracked files are kept.'
-                : newFileCount > 0
-                  ? `${newFileCount} staged new file${newFileCount === 1 ? '' : 's'} will be deleted from disk. Untracked files are kept.`
-                  : 'Untracked files are kept.',
-              confirmLabel: mergeBranch ? 'Abort Merge' : 'Discard All', danger: true,
-            })
-            if (!ok) return
-            // Capture files locked by me before discarding so they can be unlocked after reset.
-            const myLockedFiles = currentLogin
-              ? discardCandidates.filter(f => {
-                  const lock = lockFor(f)
-                  return lock?.owner.login === currentLogin
-                })
-              : []
-            run(mergeBranch ? 'Aborting merge…' : 'Discarding changes…', async () => {
-              // Release locks even on a partial failure — whatever did get
-              // reset should not stay locked behind the error.
-              try {
-                await ipc.discardAll(repoPath)
-              } finally {
-                for (const file of myLockedFiles) {
-                  await unlockFile(repoPath, file.path).catch(() => {})
-                }
-              }
-            })
-          }}
+          disabled={busy || (!mergeBranch && files.length === 0)}
+          onClick={() => { void handleToolbarDiscard('all') }}
         />
+        {!mergeBranch && <DiscardDropdown
+          disabled={busy}
+          changedDisabled={changedFiles.length === 0}
+          addedDisabled={addedFiles.length === 0}
+          contextKey={repoPath}
+          onDiscard={scope => { void handleToolbarDiscard(scope) }}
+        />}
         <ActionBtn
           label="Stash…"
           disabled={busy}
@@ -693,6 +709,58 @@ function ViewToggleBtn({ active, title, onClick, children }: {
       }}
     >{children}</button>
   )
+}
+
+function DiscardDropdown({ disabled, changedDisabled, addedDisabled, contextKey, onDiscard }: {
+  disabled: boolean; changedDisabled: boolean; addedDisabled: boolean; contextKey: string
+  onDiscard: (scope: 'all' | 'changed' | 'added') => void
+}) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  useEffect(() => { setOpen(false) }, [contextKey, disabled])
+  useEffect(() => {
+    if (!open) return
+    menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
+    const dismiss = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', dismiss)
+    return () => document.removeEventListener('mousedown', dismiss)
+  }, [open])
+  return <div ref={rootRef} style={{ position: 'relative', display: 'flex', flexShrink: 0 }}
+    onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false) }}
+    onKeyDown={event => {
+      if (event.key === 'Escape') { setOpen(false); triggerRef.current?.focus() }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        if (!open) { if (!disabled) setOpen(true); return }
+        const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])
+        const index = items.indexOf(document.activeElement as HTMLButtonElement)
+        items[(index + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus()
+      }
+    }}>
+    <button ref={triggerRef} type="button" className="lg-discard-trigger"
+      aria-label="Discard options" aria-haspopup="menu" aria-expanded={open} disabled={disabled}
+      onClick={() => setOpen(value => !value)}
+      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 24, width: 30, padding: 0,
+        background: '#10131c', color: '#e84545', border: '1px solid #e84545', borderRadius: 5, cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1 }}>
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="m2 3.5 3 3 3-3" stroke="currentColor" strokeWidth="1.4" /></svg>
+    </button>
+    {open && !disabled && <div ref={menuRef} role="menu" aria-label="Discard actions" className="lg-discard-menu"
+      style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 100, minWidth: 170, padding: 4,
+        borderRadius: 6, border: '1px solid var(--lg-border)', background: 'var(--lg-bg-secondary, #10131c)', boxShadow: '0 8px 24px #0006' }}>
+      {([{ scope: 'all', label: 'Discard All', disabled: false }, { scope: 'changed', label: 'Discard Changed', disabled: changedDisabled },
+        { scope: 'added', label: 'Discard Added', disabled: addedDisabled }] as const).map(item =>
+        <button key={item.scope} type="button" role="menuitem" disabled={item.disabled}
+          onClick={() => { setOpen(false); triggerRef.current?.focus(); onDiscard(item.scope) }}
+          style={{ display: 'block', width: '100%', textAlign: 'left', border: 0, borderRadius: 4, color: '#e84545',
+            fontSize: 12, whiteSpace: 'nowrap', cursor: item.disabled ? 'not-allowed' : 'pointer', opacity: item.disabled ? 0.45 : 1 }}>
+          {item.label}
+        </button>)}
+    </div>}
+  </div>
 }
 
 function ActionBtn({ label, onClick, disabled, danger }: {

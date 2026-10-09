@@ -23,6 +23,7 @@ export interface OperationStep {
 
 export interface FileStatus {
   path: string
+  originalPath?: string
   indexStatus: string   // staged status  (X in XY)
   workingStatus: string // working status (Y in XY)
   staged: boolean

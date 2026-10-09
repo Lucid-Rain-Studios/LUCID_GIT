@@ -7,7 +7,7 @@
 ## Context navigation
 When you need to understand the codebase, docs, or files in this project:
 1. Always query the knowledge graph first: `/graphify query "your question"`.
-2. Only read raw files when the user explicitly authorizes it, such as “read the file” or “look at the raw file”. Honor authorization already given in the current conversation and its scope.
+2. Read raw files as needed after querying the knowledge graph. Explicit user permission is not required for raw-file reads.
 3. Use `graphify-out/wiki/index.md` as the navigation entry point when available. If absent or outdated, report that limitation rather than treating the graph as current implementation evidence.
 
 ## Persistent audit tracking
