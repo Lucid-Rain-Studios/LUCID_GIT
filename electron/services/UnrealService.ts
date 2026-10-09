@@ -194,29 +194,54 @@ export interface UESetupStatus {
 }
 
 class UnrealService {
-  /** Scan the repository root for a .uproject file and return project info. */
-  detect(repoPath: string): UEProject | null {
-    let entries: string[]
-    try { entries = fs.readdirSync(repoPath) } catch { return null }
+  private detections = new Map<string, Promise<UEProject | null>>()
 
-    const uprojectFile = entries.find(f => f.endsWith('.uproject'))
-    if (!uprojectFile) return null
+  /** Deduplicate concurrent probes; refreshes always read the current manifest. */
+  detect(repoPath: string): Promise<UEProject | null> {
+    const root = path.resolve(repoPath)
+    const pending = this.detections.get(root)
+    if (pending) return pending
+    const task = this.detectProject(root).finally(() => this.detections.delete(root))
+    this.detections.set(root, task)
+    return task
+  }
 
-    const uprojectPath = path.join(repoPath, uprojectFile)
-    try {
-      const raw = JSON.parse(fs.readFileSync(uprojectPath, 'utf-8')) as Record<string, unknown>
-      return {
-        name:          uprojectFile.replace('.uproject', ''),
-        uprojectPath,
-        engineVersion: String(raw['EngineAssociation'] ?? 'Unknown'),
+  private async detectProject(root: string): Promise<UEProject | null> {
+    // Breadth-first, deterministic and bounded: do not walk generated asset trees.
+    const excluded = new Set(['.git', 'node_modules', 'binaries', 'build', 'intermediate',
+      'saved', 'deriveddatacache', 'content', 'plugins', 'third_party'])
+    const queue = [{ dir: root, depth: 0 }]
+    let scanned = 0
+    while (queue.length && scanned++ < 256) {
+      const { dir, depth } = queue.shift()!
+      let entries: fs.Dirent[]
+      try { entries = await fs.promises.readdir(dir, { withFileTypes: true }) } catch { continue }
+      entries.sort((a, b) => a.name.localeCompare(b.name))
+      for (const entry of entries) {
+        if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.uproject')) continue
+        const uprojectPath = path.join(dir, entry.name)
+        let association = ''
+        try {
+          if ((await fs.promises.stat(uprojectPath)).size > 1024 * 1024) continue
+          const raw = JSON.parse((await fs.promises.readFile(uprojectPath, 'utf8')).replace(/^\uFEFF/, ''))
+          if (typeof raw?.EngineAssociation === 'string') association = raw.EngineAssociation.trim()
+        } catch { /* malformed manifests still identify a project, version unknown */ }
+        return {
+          name: entry.name.replace(/\.uproject$/i, ''), uprojectPath,
+          engineAssociation: association,
+          // Custom engine IDs are associations, not version numbers.
+          engineVersion: /^\d+\.\d+(?:\.\d+)?$/.test(association) ? association : 'Unknown',
+        }
       }
-    } catch {
-      return {
-        name:          uprojectFile.replace('.uproject', ''),
-        uprojectPath,
-        engineVersion: 'Unknown',
+      if (depth < 3) {
+        for (const entry of entries) {
+          if (entry.isDirectory() && !entry.name.startsWith('.') && !excluded.has(entry.name.toLowerCase()) && queue.length + scanned < 256) {
+            queue.push({ dir: path.join(dir, entry.name), depth: depth + 1 })
+          }
+        }
       }
     }
+    return null
   }
 
   /** Return whether .gitattributes / .gitignore already contain UE-specific entries. */
@@ -264,24 +289,25 @@ class UnrealService {
    * Checks project Plugins/, then the engine installation.
    * Returns the folder name and location so the UI can show the exact path.
    */
-  pluginStatus(repoPath: string): {
+  async pluginStatus(repoPath: string): Promise<{
     installed: boolean
     location: 'project' | 'engine' | null
     pluginFolder: string | null
-  } {
+  }> {
     // Possible folder names — ordered by preference
     const FOLDER_NAMES = ['UEGitPlugin', 'GitSourceControl', 'UEGitPlugin-main']
     const UPLUGIN = 'GitSourceControl.uplugin'
+    const project = await this.detect(repoPath)
+    const projectDir = project ? path.dirname(project.uprojectPath) : repoPath
 
     // 1. Project-level — best option: plugin ships with the repo
     for (const folder of FOLDER_NAMES) {
-      if (fs.existsSync(path.join(repoPath, 'Plugins', folder, UPLUGIN))) {
+      if (fs.existsSync(path.join(projectDir, 'Plugins', folder, UPLUGIN))) {
         return { installed: true, location: 'project', pluginFolder: folder }
       }
     }
 
     // 2. Engine-level — works for this user but teammates need their own install
-    const project = this.detect(repoPath)
     const version = project?.engineVersion ?? ''
     if (/^\d+\.\d+/.test(version)) {
       const ueFolder = `UE_${version}`
@@ -320,15 +346,17 @@ class UnrealService {
   }
 
   /** Read current state of the two UE config files that affect source control. */
-  ueConfigStatus(repoPath: string): {
+  async ueConfigStatus(repoPath: string): Promise<{
     editorConfigExists: boolean
     editorConfigHasSccSettings: boolean
     editorConfigHasCheckoutSettings: boolean
     engineConfigExists: boolean
     engineConfigHasSkipCheck: boolean
-  } {
-    const editorPath = path.join(repoPath, 'Config', 'DefaultEditorPerProjectUserSettings.ini')
-    const enginePath = path.join(repoPath, 'Config', 'DefaultEngine.ini')
+  }> {
+    const project = await this.detect(repoPath)
+    const projectDir = project ? path.dirname(project.uprojectPath) : repoPath
+    const editorPath = path.join(projectDir, 'Config', 'DefaultEditorPerProjectUserSettings.ini')
+    const enginePath = path.join(projectDir, 'Config', 'DefaultEngine.ini')
 
     let editorContent = ''
     let engineContent = ''
@@ -349,8 +377,9 @@ class UnrealService {
    * Sets source control checkout behaviour for the GitSourceControl plugin workflow.
    * Preserves all existing content.
    */
-  writeEditorConfig(repoPath: string): void {
-    const configDir = path.join(repoPath, 'Config')
+  async writeEditorConfig(repoPath: string): Promise<void> {
+    const project = await this.detect(repoPath)
+    const configDir = path.join(project ? path.dirname(project.uprojectPath) : repoPath, 'Config')
     fs.mkdirSync(configDir, { recursive: true })
     const filePath = path.join(configDir, 'DefaultEditorPerProjectUserSettings.ini')
 
@@ -377,8 +406,9 @@ class UnrealService {
    * Disables the read-only file check that conflicts with LFS lock workflows.
    * Preserves all existing content.
    */
-  writeEngineConfig(repoPath: string): void {
-    const configDir = path.join(repoPath, 'Config')
+  async writeEngineConfig(repoPath: string): Promise<void> {
+    const project = await this.detect(repoPath)
+    const configDir = path.join(project ? path.dirname(project.uprojectPath) : repoPath, 'Config')
     fs.mkdirSync(configDir, { recursive: true })
     const filePath = path.join(configDir, 'DefaultEngine.ini')
 

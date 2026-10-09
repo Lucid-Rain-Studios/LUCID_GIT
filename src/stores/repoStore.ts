@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { FileStatus, BranchInfo } from '@/ipc'
+import { FileStatus, BranchInfo, UEProject } from '@/ipc'
 import { useOperationStore } from './operationStore'
 
 const RECENT_REPOS_KEY = 'lucid-git:recent-repos'
@@ -7,6 +7,7 @@ const MAX_RECENT = 10
 let repoGeneration = 0
 let statusRequest = 0
 let branchRequest = 0
+let unrealRequest = 0
 export const repoSessionVersion = () => repoGeneration
 
 function loadRecentRepos(): string[] {
@@ -18,6 +19,9 @@ function saveRecentRepos(paths: string[]) {
 }
 
 interface RepoState {
+  unrealProject: UEProject | null
+  unrealDetecting: boolean
+  refreshUnrealProject: () => Promise<void>
   repoPath: string | null
   currentBranch: string
   branches: BranchInfo[]
@@ -45,6 +49,18 @@ interface RepoState {
 }
 
 export const useRepoStore = create<RepoState>((set, get) => ({
+  unrealProject: null,
+  unrealDetecting: false,
+  refreshUnrealProject: async () => {
+    const { repoPath } = get()
+    if (!repoPath) return
+    const generation = repoGeneration, request = ++unrealRequest
+    set({ unrealDetecting: true })
+    const project = await window.lucidGit.ueDetect(repoPath).catch(() => null)
+    if (generation === repoGeneration && get().repoPath === repoPath && request === unrealRequest) {
+      set({ unrealProject: project, unrealDetecting: false })
+    }
+  },
   repoPath: null,
   currentBranch: '',
   branches: [],
@@ -62,7 +78,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
     const request = ++statusRequest
     const branchesRequest = ++branchRequest
     const current = () => repoGeneration === generation && get().repoPath === path && statusRequest === request
-    set({ isLoading: true, error: null })
+    set({ isLoading: true, unrealDetecting: false, error: null })
     try {
       if (!await window.lucidGit.isRepo(path)) throw new Error('This folder is not a Git repository.')
     } catch (error) {
@@ -70,7 +86,8 @@ export const useRepoStore = create<RepoState>((set, get) => ({
       return
     }
     if (repoGeneration !== generation) return
-    set({ repoPath: path, fileStatus: [], currentBranch: '', branches: [], isLoading: true, isSilentRefreshing: false, error: null })
+    set({ repoPath: path, unrealProject: null, fileStatus: [], currentBranch: '', branches: [], isLoading: true, isSilentRefreshing: false, error: null })
+    void get().refreshUnrealProject()
     get().addRecentRepo(path)
     const op = useOperationStore.getState()
     try {
@@ -111,6 +128,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
     const branchesRequest = ++branchRequest
     const current = () => generation === repoGeneration && get().repoPath === repoPath && request === statusRequest
     set({ isLoading: true })
+    void get().refreshUnrealProject()
     const op = useOperationStore.getState()
     try {
       await op.run('Refreshing…', async () => {
@@ -146,6 +164,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
     const generation = repoGeneration
     const request = ++statusRequest
     set({ isSilentRefreshing: true })
+    void get().refreshUnrealProject()
     try {
       const [statusR, branchR] = await Promise.allSettled([
         window.lucidGit.status(repoPath),
@@ -182,6 +201,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
       if (generation !== repoGeneration || get().repoPath !== repoPath) return
       await window.lucidGit.checkout(repoPath, branch)
       if (generation !== repoGeneration || get().repoPath !== repoPath) return
+      void get().refreshUnrealProject()
       const request = ++statusRequest
       const branchesRequest = ++branchRequest
       // The checkout already succeeded. Refreshing what it changed is
@@ -218,7 +238,8 @@ export const useRepoStore = create<RepoState>((set, get) => ({
     repoGeneration++
     statusRequest++
     branchRequest++
-    set({ repoPath: null, fileStatus: [], currentBranch: '', branches: [], isLoading: false, isSilentRefreshing: false, error: null })
+    unrealRequest++
+    set({ repoPath: null, unrealProject: null, unrealDetecting: false, fileStatus: [], currentBranch: '', branches: [], isLoading: false, isSilentRefreshing: false, error: null })
   },
 
   setError: (error) => set({ error }),

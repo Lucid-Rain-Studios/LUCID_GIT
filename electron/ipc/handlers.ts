@@ -6,6 +6,8 @@ import { dependencyService } from '../services/DependencyService'
 import { heatmapService } from '../services/HeatmapService'
 import { forecastService } from '../services/ForecastService'
 import { assetDiffService } from '../services/AssetDiffService'
+import { blueprintRevisionService } from '../services/BlueprintRevisionService'
+import type { BlueprintRequest } from '../blueprintTypes'
 import { presenceService } from '../services/PresenceService'
 import { firebasePresenceService, validateFirebaseConfig } from '../services/FirebasePresenceService'
 import { PresenceSession } from '../services/PresenceSession'
@@ -137,6 +139,7 @@ let ipcShuttingDown = false
 /** The main quit handler owns the final app.quit and session-end log. */
 export function stopPresenceForQuit(): Promise<void> {
   ipcShuttingDown = true
+  blueprintRevisionService.stop?.()
   return presenceQuitTask?.() ?? Promise.resolve()
 }
 
@@ -225,6 +228,7 @@ async function requirePresenceAdmin(repoPath: string): Promise<string | null> {
 }
 
 export function registerHandlers(): void {
+  const blueprintReads = new Map<string, AbortController>()
   const handle = <TArgs extends unknown[]>(channel: string, fn: IpcHandler<TArgs>): void => {
     ipcMain.handle(channel, async (event, ...args) => {
       if (ipcShuttingDown) throw new Error('Lucid Git is shutting down. App action was cancelled.')
@@ -1126,6 +1130,21 @@ export function registerHandlers(): void {
   )
 
   // ── Asset diff previews — Phase 17 ───────────────────────────────────────
+  handle(CHANNELS.BLUEPRINT_COMPARE, async (event, repoPath: string, request: BlueprintRequest) => {
+    if (!request || typeof request.requestId !== 'string' || !/^[a-zA-Z0-9-]{1,80}$/.test(request.requestId)) throw new Error('Invalid Blueprint review request.')
+    const key = event.sender.id + ':' + request.requestId
+    if (blueprintReads.has(key)) throw new Error('Blueprint review request is already running.')
+    // Obsolete subscriptions stop scheduling further work; shared extractions
+    // retain their own deadline and remain useful to other review consumers.
+    for (const [old, controller] of blueprintReads) if (old.startsWith(event.sender.id + ':')) controller.abort()
+    const controller = new AbortController(); blueprintReads.set(key, controller)
+    const destroyed = () => controller.abort()
+    event.sender.once('destroyed', destroyed)
+    try { return await blueprintRevisionService.compare(repoPath, request, controller.signal) }
+    finally { event.sender.removeListener('destroyed', destroyed); blueprintReads.delete(key) }
+  })
+  handle(CHANNELS.BLUEPRINT_CANCEL, (event, requestId: string) => { blueprintReads.get(event.sender.id + ':' + requestId)?.abort() })
+
   handle(CHANNELS.ASSET_DIFF_PREVIEW, (_event, repoPath: string, filePath: string, leftRef: string, rightRef: string, editorBinaryOverride?: string) =>
     assetDiffService.diff({ repoPath, filePath, leftRef, rightRef, editorBinaryOverride })
   )

@@ -2365,10 +2365,22 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
 
       {/* ── Right column ──────────────────────────────────────────────────── */}
       <FileDetailsSidePanel
+        blueprintFiles={centerFile?.kind === 'commit' && selectedCommit ? commitFiles.filter(f => /\.uasset$/i.test(f.path)).map(file => ({ path: file.path, selected: centerFile?.kind === 'commit' && centerFile.file.path === file.path, onSelect: () => selectCenterFile({ kind: 'commit', file, commitHash: selectedCommit.hash }) })) : fileStatus.filter(f => /\.uasset$/i.test(f.path)).map(file => ({ path: file.path, selected: centerFile?.kind === 'working' && centerFile.file.path === file.path && centerFile.file.staged === file.staged, label: `${file.staged ? 'Staged' : 'Unstaged'} � ${file.path}`, onSelect: () => selectCenterFile({ kind: 'working', file }) }))}
         filePath={centerFile?.file.path ?? null}
-        hash={centerFile?.kind === 'commit' ? centerFile.commitHash : 'HEAD'}
+        hash={centerFile?.kind === 'commit' ? centerFile.commitHash : centerFile?.file.staged ? 'INDEX' : 'WORKING'}
         repoPath={repoPath}
         diff={diff}
+        blueprintRequest={centerFile ? centerFile.kind === 'commit' ? {
+          filePath: centerFile.file.path,
+          oldPath: centerFile.file.oldPath,
+          leftRef: centerFile.file.status.startsWith('A') ? 'ABSENT' : selectedCommit?.hash === centerFile.commitHash ? selectedCommit.parentHashes[0] ?? 'ABSENT' : centerFile.commitHash + '^1',
+          rightRef: centerFile.file.status.startsWith('D') ? 'ABSENT' : centerFile.commitHash,
+        } : {
+          filePath: centerFile.file.path,
+          oldPath: centerFile.file.staged || ['R', 'C'].includes(centerFile.file.workingStatus) ? centerFile.file.originalPath : undefined,
+          leftRef: centerFile.file.staged ? centerFile.file.indexStatus === 'A' ? 'ABSENT' : 'HEAD' : centerFile.file.workingStatus === '?' ? 'ABSENT' : 'INDEX',
+          rightRef: (centerFile.file.staged ? centerFile.file.indexStatus : centerFile.file.workingStatus) === 'D' ? 'ABSENT' : centerFile.file.staged ? 'INDEX' : 'WORKING',
+        } : undefined}
         diffLoading={diffLoading}
         blame={blame}
         blameLoading={blameLoading}

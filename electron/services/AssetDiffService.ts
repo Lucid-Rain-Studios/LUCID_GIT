@@ -200,10 +200,23 @@ class AssetDiffService {
     }
     try {
       await fs.promises.writeFile(destFile, binary)
-      return { blobPath: destFile, sizeBytes: binary.length }
+    return { blobPath: destFile, sizeBytes: binary.length }
     } catch (error) {
       return { blobPath: null, sizeBytes: binary.length, reason: 'Unable to write asset preview: ' + String(error) }
     }
+  }
+
+  /** Resolve a captured pointer without checking out or modifying its worktree file. */
+  async resolveLfsPointer(repoPath: string, filePath: string, pointer: Buffer): Promise<Buffer> {
+    const text = pointer.toString('utf8')
+    const oid = text.match(/^oid sha256:([a-f0-9]{64})$/m)?.[1]
+    const size = Number(text.match(/^size (\d+)$/m)?.[1])
+    if (!oid || !Number.isSafeInteger(size) || size < 0) throw new Error('Invalid LFS pointer.')
+    if (size > PREVIEW_MAX_BYTES) throw new Error('LFS asset exceeds the 256 MB preview limit.')
+    const [token, remoteUrl] = await Promise.all([authService.getCurrentToken(), gitService.getRemoteUrl(repoPath)])
+    const content = await execBinary([...gitAuthArgs(token, remoteUrl), 'lfs', 'smudge', '--', filePath], repoPath, pointer)
+    if (content.length !== size || crypto.createHash('sha256').update(content).digest('hex') !== oid) throw new Error('LFS content is unavailable or does not match the selected pointer.')
+    return content
   }
 
   /**

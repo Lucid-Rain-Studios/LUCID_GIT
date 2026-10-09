@@ -61,7 +61,7 @@ test('LG-026 backend rejects amend of pushed HEAD even after the UI check', asyn
 })
 
 test('LG-030 invalid opens preserve active repo and refresh failures preserve data with a visible error', async () => {
-  const api = { isRepo: async p => p !== 'invalid', status: async () => ['dirty'], currentBranch: async () => 'main', branchList: async () => ['main'], checkout: async () => {} }
+  const api = { ueDetect: async () => null, isRepo: async p => p !== 'invalid', status: async () => ['dirty'], currentBranch: async () => 'main', branchList: async () => ['main'], checkout: async () => {} }
   const { useRepoStore: state } = component('src/stores/repoStore.ts', { zustand: require('zustand'), './operationStore': { useOperationStore: store({ run: (_, fn) => fn() }) } }, { window: { lucidGit: api } }).exports
   await state.getState().openRepo('valid'); await state.getState().openRepo('invalid')
   expect(state.getState()).toMatchObject({ repoPath: 'valid', fileStatus: ['dirty'], isLoading: false })

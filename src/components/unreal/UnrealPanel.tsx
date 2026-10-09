@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { ipc, UEProject, UESetupStatus, UEPluginStatus, UEConfigStatus, GitIdentity } from '@/ipc'
+import { ipc, UESetupStatus, UEPluginStatus, UEConfigStatus, GitIdentity } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useAuthStore } from '@/stores/authStore'
 import { cn } from '@/lib/utils'
@@ -18,11 +18,11 @@ interface UnrealPanelProps {
 }
 
 export function UnrealPanel({ repoPath }: UnrealPanelProps) {
-  const { fileStatus } = useRepoStore()
+  const { fileStatus, unrealProject, unrealDetecting } = useRepoStore()
+  const project = unrealDetecting && !unrealProject ? 'loading' : unrealProject
   const { accounts, currentAccountId } = useAuthStore()
   const currentAccount = accounts.find(a => a.userId === currentAccountId) ?? null
 
-  const [project,      setProject]      = useState<UEProject | null | 'loading'>('loading')
   const [setupStatus,  setSetupStatus]  = useState<UESetupStatus | null>(null)
   const [pluginStatus, setPluginStatus] = useState<UEPluginStatus | null>(null)
   const [cfgStatus,    setCfgStatus]    = useState<UEConfigStatus | null>(null)
@@ -43,8 +43,7 @@ export function UnrealPanel({ repoPath }: UnrealPanelProps) {
   const load = async () => {
     setError(null)
     try {
-      const [proj, status, templates, plugin, cfg, id, lvRaw] = await Promise.all([
-        ipc.ueDetect(repoPath),
+      const [status, templates, plugin, cfg, id, lvRaw] = await Promise.all([
         ipc.ueSetupStatus(repoPath),
         ipc.ueTemplates(),
         ipc.uePluginStatus(repoPath),
@@ -52,7 +51,6 @@ export function UnrealPanel({ repoPath }: UnrealPanelProps) {
         ipc.gitGetIdentity(repoPath),
         ipc.getGitConfig(repoPath, 'lfs.locksverify'),
       ])
-      setProject(proj)
       setSetupStatus(status)
       setAttrTemplate(templates.gitattributes)
       setIgnoreTemplate(templates.gitignore)
@@ -62,7 +60,6 @@ export function UnrealPanel({ repoPath }: UnrealPanelProps) {
       setLockVerify(lvRaw === 'true')
     } catch (e) {
       setError(String(e))
-      setProject(null)
     }
   }
 
@@ -101,10 +98,10 @@ export function UnrealPanel({ repoPath }: UnrealPanelProps) {
           <span className="text-lg-text-secondary animate-pulse text-[10px]">Detecting UE project…</span>
         )}
         {project !== 'loading' && project && (
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] uppercase tracking-widest text-lg-accent font-semibold">UE5</span>
+          <div className="flex items-center gap-2" title={`${project.uprojectPath}\nEngine association: ${project.engineAssociation || project.engineVersion}`}>
+            <span className="text-[10px] uppercase tracking-widest text-lg-accent font-semibold">Unreal</span>
             <span className="text-lg-text-primary font-semibold">{project.name}</span>
-            <span className="text-lg-text-secondary">v{project.engineVersion}</span>
+            <span className="text-lg-text-secondary">{project.engineVersion === 'Unknown' ? 'Version unknown' : `UE ${project.engineVersion}`}</span>
           </div>
         )}
         {project !== 'loading' && !project && (

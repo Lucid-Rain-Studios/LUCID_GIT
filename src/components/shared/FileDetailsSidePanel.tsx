@@ -5,6 +5,16 @@ import { TextDiff } from '@/components/diff/TextDiff'
 import { FilePathText } from '@/components/ui/FilePathText'
 import { CommitContextMenu } from '@/components/shared/CommitContextMenu'
 import { CommitFilesModal } from '@/components/shared/CommitFilesModal'
+import { BlueprintDiff, type BlueprintFileChoice } from '@/components/diff/BlueprintDiff'
+import type { BlueprintRequest } from '@/ipc'
+import { useRepoStore } from '@/stores/repoStore'
+
+function BlueprintAssetPanel({ request, files, ...props }: { files?: BlueprintFileChoice[]; request: Omit<BlueprintRequest, 'requestId'>; repoPath: string; filePath: string; hash: string; remoteUrl: string | null }) {
+  const [details, setDetails] = useState(false)
+  const project = useRepoStore(state => state.repoPath === props.repoPath ? state.unrealProject : null)
+  return details ? <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}><button className="lg-toolbar-control" onClick={() => setDetails(false)}>Back to Blueprint graph</button><AssetPanel {...props} /></div>
+    : <BlueprintDiff files={files} project={project} repoPath={props.repoPath} request={request} onFallback={() => setDetails(true)} />
+}
 
 export function isPreviewAsset(filePath: string): boolean {
   return isBinaryPath(filePath)
@@ -325,11 +335,15 @@ export function FileDetailsSidePanel({
   mode = 'preview',
   emptyMessage = 'Select a file to preview',
   remoteUrl = null,
+  blueprintRequest,
+  blueprintFiles,
 }: {
   repoPath: string
   filePath: string | null
   hash?: string
   remoteUrl?: string | null
+  blueprintFiles?: BlueprintFileChoice[]
+  blueprintRequest?: Omit<BlueprintRequest, 'requestId'>
   diff?: DiffContent | null
   diffLoading?: boolean
   blame: BlameEntry[]
@@ -349,6 +363,7 @@ export function FileDetailsSidePanel({
   }
 
   if (isPreviewAsset(filePath)) {
+    if (/\.uasset$/i.test(filePath) && blueprintRequest) return <BlueprintAssetPanel key={[repoPath, filePath, blueprintRequest.oldPath, blueprintRequest.leftRef, blueprintRequest.rightRef].join('|')} request={blueprintRequest} files={blueprintFiles} repoPath={repoPath} filePath={filePath} hash={hash} remoteUrl={remoteUrl} />
     return <AssetPanel repoPath={repoPath} filePath={filePath} hash={hash} remoteUrl={remoteUrl} />
   }
 

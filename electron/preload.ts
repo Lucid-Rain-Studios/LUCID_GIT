@@ -1,8 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { CHANNELS } from './ipc/channels'
 import type { RecoveryGitTask } from './indexRecoveryTypes'
+import type { BlueprintRequest } from './blueprintTypes'
 
 const api = {
+  blueprintCompare: (repoPath: string, request: BlueprintRequest) => ipcRenderer.invoke(CHANNELS.BLUEPRINT_COMPARE, repoPath, request),
+  blueprintCancel: (requestId: string) => ipcRenderer.invoke(CHANNELS.BLUEPRINT_CANCEL, requestId),
   diagnoseIndex: (repoPath: string) => ipcRenderer.invoke(CHANNELS.GIT_INDEX_DIAGNOSE, repoPath),
   repairIndex: (repoPath: string, token: string) => ipcRenderer.invoke(CHANNELS.GIT_INDEX_REPAIR, repoPath, token),
   undoIndexRepair: (repoPath: string, id: string) => ipcRenderer.invoke(CHANNELS.GIT_INDEX_UNDO, repoPath, id),

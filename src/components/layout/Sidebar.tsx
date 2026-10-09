@@ -116,7 +116,7 @@ function loadVisibility(): Record<string, string[]> {
 }
 
 export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthChange, repoPath, onOpenTerminal, onOpenRepo, onOpenExplorer }: SidebarProps) {
-  const { fileStatus, currentBranch, syncTick, prTick } = useRepoStore()
+  const { fileStatus, currentBranch, syncTick, prTick, unrealProject } = useRepoStore()
   const { accounts, currentAccountId } = useAuthStore()
   const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login?.toLowerCase() ?? null
   const lockedFileCount = useLockStore(s =>
@@ -183,7 +183,7 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
 
   // ── Optional-feature visibility (Unreal / LFS): auto-detect + manual override ──
   const [featureVis, setFeatureVis]   = useState<{ unreal: FeatureVisibility; lfs: FeatureVisibility }>({ unreal: 'auto', lfs: 'auto' })
-  const [featureDetected, setFeatureDetected] = useState<{ unreal: boolean; lfs: boolean }>({ unreal: false, lfs: false })
+  const [featureDetected, setFeatureDetected] = useState<{ lfs: boolean }>({ lfs: false })
 
   // ── Terminal picker ──────────────────────────────────────────────────────────
   const [preferredTerminal, setPreferredTerminal] = useState('auto')
@@ -232,23 +232,19 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
     } catch { /* the terminal still opened — a failed save just isn't sticky */ }
   }, [onOpenTerminal])
 
-  // Detect whether the open repo actually uses Unreal / LFS (drives 'auto' mode).
+  // Unreal metadata is shared by the repository store; LFS has its own probe.
   useEffect(() => {
     let cancelled = false
     if (!repoPath) {
-      setFeatureDetected({ unreal: false, lfs: false })
+      setFeatureDetected({ lfs: false })
       return
     }
     ;(async () => {
-      const [ue, lfs] = await Promise.allSettled([
-        ipc.ueDetect(repoPath),
-        ipc.lfsStatus(repoPath),
-      ])
+      const [lfs] = await Promise.allSettled([ipc.lfsStatus(repoPath)])
       if (cancelled) return
-      const unreal = ue.status === 'fulfilled' && ue.value != null
       const lfsUsed = lfs.status === 'fulfilled'
         && ((lfs.value?.tracked?.length ?? 0) > 0 || (lfs.value?.objects ?? 0) > 0)
-      setFeatureDetected({ unreal, lfs: lfsUsed })
+      setFeatureDetected({ lfs: lfsUsed })
     })()
     return () => { cancelled = true }
   }, [repoPath, syncTick])
@@ -257,10 +253,10 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
   const featureAllows = useCallback((id: TabId): boolean => {
     const resolve = (mode: FeatureVisibility, detected: boolean) =>
       mode === 'show' ? true : mode === 'hide' ? false : detected
-    if (id === 'unreal') return resolve(featureVis.unreal, featureDetected.unreal)
+    if (id === 'unreal') return resolve(featureVis.unreal, unrealProject != null)
     if (id === 'lfs')    return resolve(featureVis.lfs,    featureDetected.lfs)
     return true
-  }, [featureVis, featureDetected])
+  }, [featureVis, featureDetected, unrealProject])
 
   // If the active tab gets gated away (e.g. user hides the feature), fall back.
   useEffect(() => {

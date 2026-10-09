@@ -277,6 +277,7 @@ test('LG-015 a stalled binary command yields and its deadline kills the process'
 
 function repoStore(api) {
   api.isRepo ??= async () => true
+  api.ueDetect ??= async () => null
   return component('src/stores/repoStore.ts', {
     zustand: require('zustand'), './operationStore': { useOperationStore: store({ run: (_, fn) => fn() }) },
   }, { window: { lucidGit: api } }).exports

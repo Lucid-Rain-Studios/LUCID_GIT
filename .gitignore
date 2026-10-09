@@ -18,3 +18,13 @@ test-results/
 
 # Local activity and its atomic-write backups/recovery files
 /.lucid-git/lucid-presence.json*
+
+# Local dependency checkouts and Blueprint extractor build products
+/third_party/
+/tools/BlueprintExtractor/bin/
+/tools/BlueprintExtractor/obj/
+/.blueprint-build/
+/public/blueprint/
+
+/tests/blueprint-reader/bin/
+/tests/blueprint-reader/obj/

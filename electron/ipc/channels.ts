@@ -174,6 +174,8 @@ export const CHANNELS = {
 
   // Asset diff previews (Phase 17)
   ASSET_DIFF_PREVIEW:      'asset:diff-preview',
+  BLUEPRINT_COMPARE:       'asset:blueprint-compare',
+  BLUEPRINT_CANCEL:        'asset:blueprint-cancel',
   ASSET_RENDER_THUMBNAIL:  'asset:render-thumbnail',
   ASSET_EXTRACT_METADATA:  'asset:extract-metadata',
 

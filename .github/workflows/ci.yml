@@ -20,6 +20,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build Blueprint tools
+        run: npm run blueprint:setup && npm run blueprint:build
+
+      - name: Install browser for Blueprint regression checks
+        run: npx playwright install --with-deps chromium
+
+      - name: Blueprint revision and renderer regression checks
+        run: npx tsc -p tsconfig.main.json && npx playwright test tests/blueprint-viewer.spec.js tests/blueprint-diff.spec.js tests/unreal-detection.spec.js
+
       - name: Type check (renderer)
         run: npx tsc -p tsconfig.renderer.json --noEmit
 

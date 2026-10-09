@@ -12,6 +12,13 @@ files:
   - "package.json"
 
 extraResources:
+  - from: .blueprint-build/publish
+    to: blueprint-extractor
+    filter:
+      - "win-x64/**/*"
+      - "osx-x64/**/*"
+      - "osx-arm64/**/*"
+      - "linux-x64/**/*"
   - from: assets/icon.png
     to: assets/icon.png
   - from: assets/icon.ico

@@ -291,6 +291,7 @@ export interface CleanupResult {
 }
 
 export interface UEProject {
+  engineAssociation?: string
   name: string
   uprojectPath: string
   engineVersion: string

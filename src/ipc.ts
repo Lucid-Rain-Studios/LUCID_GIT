@@ -1,5 +1,7 @@
 // Typed wrappers around window.lucidGit.*
 import type { IndexDiagnosis, IndexRepairResult, IndexRecoveryBlockers, IndexLockRecoveryResult, RecoveryGitTask } from '../electron/indexRecoveryTypes'
+import type { BlueprintRequest, BlueprintComparison } from '../electron/blueprintTypes'
+export type { BlueprintRequest, BlueprintComparison, BlueprintDocument, BlueprintGraph, BlueprintNode, BlueprintPin, BlueprintSide } from '../electron/blueprintTypes'
 export type { IndexDiagnosis, IndexRepairResult, IndexRecoveryBlockers, IndexLockRecoveryResult, RecoveryGitTask } from '../electron/indexRecoveryTypes'
 // This file is the single source of truth for the renderer-side IPC contract.
 
@@ -253,6 +255,7 @@ export interface WebhookConfig {
 }
 
 export interface UEProject {
+  engineAssociation?: string
   name: string
   uprojectPath: string
   engineVersion: string
@@ -892,6 +895,8 @@ export interface LucidGitAPI {
 
   // Asset diff previews — Phase 17
   assetDiffPreview: (repoPath: string, filePath: string, leftRef: string, rightRef: string, editorBinaryOverride?: string) => Promise<AssetDiffResult>
+  blueprintCompare: (repoPath: string, request: BlueprintRequest) => Promise<BlueprintComparison>
+  blueprintCancel: (requestId: string) => Promise<void>
   assetRenderThumbnail: (repoPath: string, filePath: string, ref: string) => Promise<string | null>
   assetExtractMetadata: (repoPath: string, filePath: string, ref: string) => Promise<Record<string, string>>
 
