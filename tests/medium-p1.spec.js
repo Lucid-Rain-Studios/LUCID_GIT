@@ -103,16 +103,17 @@ test('LG-002 bulk LFS unlock scopes credentials once for the entire batch', asyn
   let remoteReads = 0, tokenReads = 0
   const { lockService } = component('electron/services/LockService.ts', {
     'node:fs': fs, 'node:path': path,
-    './AuthService': { authService: { getCurrentToken: async () => { tokenReads++; return 'private' } } },
+    './AuthService': { authService: { getCurrentToken: async () => { tokenReads++; return 'private' }, listAccounts: () => ({ currentAccountId: 'test' }) } },
     './GitService': { gitService: { getRemoteUrl: async () => { remoteReads++; return 'https://github.com/owner/repo.git' } } },
     './HeatmapService': { heatmapService: { recordLockEvent() {} } },
-    '../util/dugite-exec': { gitAuthArgs: runner.gitAuthArgs, exec: async args => { calls.push(args) } },
+    '../util/dugite-exec': { gitAuthArgs: runner.gitAuthArgs, execWithStdin: async args => { calls.push(args) }, exec: async args => { calls.push(args); return { stdout: JSON.stringify({ ours: [], theirs: [] }) } }, withGitTimeout: fn => fn() },
+    electron: { BrowserWindow: { getAllWindows: () => [] } },
   }).exports
   const result = await lockService.unlockFiles(dir, [{ filePath: 'a', lockId: '1' }, { filePath: 'b', lockId: '2' }])
   expect(result.failed).toEqual([])
   expect(remoteReads).toBe(1)
   expect(tokenReads).toBe(1)
-  expect(calls).toHaveLength(2)
+  expect(calls).toHaveLength(3)
   for (const args of calls) expect(args.some(arg => arg.startsWith('http.https://github.com/.extraheader='))).toBe(true)
 })
 

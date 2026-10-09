@@ -144,7 +144,8 @@ export const useLockStore = create<LockState>((set, get) => ({
 
     try {
       const result = await ipc.unlockFiles(repoPath, realTargets)
-      if (active(repoPath, session) && result.failed.length > 0) {
+      if (active(repoPath, session) && result.locks) get().setLocks(result.locks)
+      if (active(repoPath, session) && !result.locks && result.failed.length > 0) {
         const failedPaths = new Set(result.failed.map(item => item.filePath.replace(/\\/g, '/')))
         const failedLocks = removedLocks.filter(lock => failedPaths.has(lock.path.replace(/\\/g, '/')))
         set(state => ({
@@ -152,6 +153,7 @@ export const useLockStore = create<LockState>((set, get) => ({
           error: `${result.failed.length} file${result.failed.length === 1 ? '' : 's'} failed to unlock`,
         }))
       }
+      if (active(repoPath, session) && result.refreshError) set({ error: result.refreshError })
       return result
     } catch (error) {
       if (active(repoPath, session)) set(state => ({

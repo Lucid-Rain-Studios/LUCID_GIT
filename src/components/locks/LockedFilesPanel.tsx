@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useMemo } from 'react'
-import { ipc, Lock, LfsLocksMaintenanceResult } from '@/ipc'
+import { ipc, Lock, LfsLocksMaintenanceResult, BulkUnlockResult } from '@/ipc'
 import { useLockStore } from '@/stores/lockStore'
 import { useAuthStore } from '@/stores/authStore'
 import { AppCheckbox } from '@/components/ui/AppCheckbox'
@@ -52,6 +52,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
   const [refreshing, setRefreshing] = useState(false)
   const [expandedOwners, setExpandedOwners] = useState<Set<string>>(new Set())
   const [selectedLockIds, setSelectedLockIds] = useState<Set<string>>(new Set())
+  const [bulkUnlock, setBulkUnlock] = useState<{ repoPath: string; paths: string[]; result?: BulkUnlockResult } | null>(null)
   const lastSelectedIdRef = useRef<string | null>(null)
 
   const myLocks = useMemo(
@@ -195,15 +196,17 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
       if (!ok) return
     }
     setUnlocking('__bulk__')
+    setBulkUnlock({ repoPath, paths: selectedLocks.map(lock => lock.path) })
     try {
       op.start(`Unlocking ${selectedLocks.length} file${selectedLocks.length === 1 ? '' : 's'}`)
       const result = await unlockFiles(repoPath, selectedLocks.map(lock => {
         const force = !currentLogin || lock.owner.login !== currentLogin
         return { filePath: lock.path, force, lockId: lock.id }
       }))
-      if (result.failed.length > 0) throw new Error(`${result.failed.length} of ${selectedLocks.length} files failed to unlock. ${result.failed[0].error}`)
-      setSelectedLockIds(new Set())
+      setBulkUnlock(state => state?.repoPath === repoPath ? { ...state, result } : state)
+      setSelectedLockIds(new Set(selectedLocks.filter(lock => result.failed.some(item => item.filePath === lock.path)).map(lock => lock.id)))
     } catch (e) {
+      setBulkUnlock(state => state?.repoPath === repoPath ? { ...state, result: { unlocked: [], failed: state.paths.map(filePath => ({ filePath, error: String(e) })) } } : state)
       await dialog.alert({ title: 'Error', message: String(e) })
     } finally {
       op.finish()
@@ -220,12 +223,14 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
     })
     if (!ok) return
     setUnlocking('__bulk__')
+    setBulkUnlock({ repoPath, paths: myLocks.map(lock => lock.path) })
     try {
       op.start(`Unlocking ${myLocks.length} file${myLocks.length === 1 ? '' : 's'}`)
       const result = await unlockFiles(repoPath, myLocks.map(lock => ({ filePath: lock.path, lockId: lock.id })))
-      if (result.failed.length > 0) throw new Error(`${result.failed.length} of ${myLocks.length} files failed to unlock. ${result.failed[0].error}`)
-      setSelectedLockIds(new Set())
+      setBulkUnlock(state => state?.repoPath === repoPath ? { ...state, result } : state)
+      setSelectedLockIds(new Set(myLocks.filter(lock => result.failed.some(item => item.filePath === lock.path)).map(lock => lock.id)))
     } catch (e) {
+      setBulkUnlock(state => state?.repoPath === repoPath ? { ...state, result: { unlocked: [], failed: state.paths.map(filePath => ({ filePath, error: String(e) })) } } : state)
       await dialog.alert({ title: 'Error', message: String(e) })
     } finally {
       op.finish()
@@ -412,6 +417,31 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
           )}
         </div>
       </div>
+
+      {bulkUnlock?.repoPath === repoPath && (
+        <section aria-label="Unlock progress" style={{ margin: '12px 24px 0', padding: 12, border: '1px solid #2f3a54', borderRadius: 8 }}>
+          <div role="status" style={{ fontSize: 12, color: '#dde1f0' }}>
+            {bulkUnlock.result
+              ? `${bulkUnlock.result.unlocked.length} unlocked · ${bulkUnlock.result.failed.length} failed`
+              : `${op.steps.filter(step => step.id.startsWith('unlock-batch-file-') && (step.status === 'done' || step.status === 'error')).length} / ${bulkUnlock.paths.length} completed`}
+          </div>
+          {bulkUnlock.result?.refreshError && <div role="alert">{bulkUnlock.result.refreshError}</div>}
+          <div style={{ maxHeight: 180, overflowY: 'auto', marginTop: 8 }}>
+            {bulkUnlock.paths.map((filePath, index) => {
+              const failure = bulkUnlock.result?.failed.find(item => item.filePath === filePath)
+              const step = op.steps.find(item => item.id === `unlock-batch-file-${index}`)
+              const status = bulkUnlock.result
+                ? failure ? 'Failed' : bulkUnlock.result.unlocked.includes(filePath) ? 'Unlocked' : 'Skipped'
+                : step?.status === 'done' ? 'Unlocked' : step?.status === 'error' ? 'Failed' : step?.status === 'running' ? 'Unlocking…' : 'Queued'
+              return <div key={`${index}-${filePath}`} style={{ fontSize: 11, marginTop: 6, overflowWrap: 'anywhere', color: status === 'Failed' ? '#e8622f' : '#9aa3b7' }}>
+                <span>{filePath} — {status}</span>
+                {(failure || step?.status === 'error') && <div>{failure?.error ?? step?.detail}</div>}
+              </div>
+            })}
+          </div>
+          {bulkUnlock.result && <ActionBtn size="sm" onClick={() => setBulkUnlock(null)}>Dismiss results</ActionBtn>}
+        </section>
+      )}
 
       {/* ── Stats bar ── */}
       <div style={{ display: 'flex', gap: 16, padding: '12px 24px 0', flexShrink: 0 }}>

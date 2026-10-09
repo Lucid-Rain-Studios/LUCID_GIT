@@ -22,6 +22,8 @@ export interface UnlockTarget {
 export interface BulkUnlockResult {
   unlocked: string[]
   failed: Array<{ filePath: string; error: string }>
+  locks?: Lock[]
+  refreshError?: string
 }
 
 export interface Account {

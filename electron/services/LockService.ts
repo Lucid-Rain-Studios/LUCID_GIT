@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import os from 'node:os'
 import { BrowserWindow } from 'electron'
 import { exec, execWithStdin, gitAuthArgs, withGitTimeout } from '../util/dugite-exec'
 import { authService } from './AuthService'
@@ -33,6 +34,8 @@ export interface UnlockTarget {
 export interface BulkUnlockResult {
   unlocked: string[]
   failed: Array<{ filePath: string; error: string }>
+  locks?: Lock[]
+  refreshError?: string
 }
 
 type ProgressCallback = (step: OperationStep) => void
@@ -52,7 +55,8 @@ class LockService {
   // processes touching one repo can interleave writes and leave the file
   // structurally invalid ("gob: encoded unsigned integer out of range"), after
   // which every lock operation in that repo fails until the cache is deleted.
-  // Every git-lfs invocation for a repo therefore runs through this queue.
+  // Shared-cache invocations run through this queue; bulk workers hold one
+  // slot together and use separate temporary storage directories.
   private lfsQueues = new Map<string, Promise<void>>()
 
   /**
@@ -118,13 +122,15 @@ class LockService {
     }
   }
 
-  private async listLocksUnguarded(repoPath: string): Promise<Lock[]> {
-    const token = await authService.getCurrentToken()
-    const remoteUrl = await gitService.getRemoteUrl(repoPath)
+  private async listLocksUnguarded(repoPath: string, context?: { token: string | null; remoteUrl: string | null; verify: boolean }): Promise<Lock[]> {
+    const token = context ? context.token : await authService.getCurrentToken()
+    const remoteUrl = context ? context.remoteUrl : await gitService.getRemoteUrl(repoPath)
     const accountId = authService.listAccounts().currentAccountId
-    const { stdout } = await exec([...gitAuthArgs(token, remoteUrl), 'lfs', 'locks', '--json'], repoPath)
+    const { stdout } = await exec([...gitAuthArgs(token, remoteUrl), 'lfs', 'locks', '--json', ...(context?.verify ? ['--verify'] : [])], repoPath)
     try {
-      const raw = JSON.parse(stdout) as Array<{
+      const parsed = JSON.parse(stdout)
+      const raw = (context?.verify && Array.isArray(parsed.ours) && Array.isArray(parsed.theirs)
+        ? [...parsed.ours, ...parsed.theirs] : parsed) as Array<{
         id: string
         path: string
         owner: { name: string }
@@ -190,51 +196,86 @@ class LockService {
   async unlockFiles(repoPath: string, targets: UnlockTarget[], actorLogin = '', actorName = '', onProgress?: ProgressCallback): Promise<BulkUnlockResult> {
     if (targets.length === 0) return { unlocked: [], failed: [] }
 
-    // Keychain access and Git authentication setup happen once for the entire batch.
-    // The unlocks themselves run strictly one at a time: concurrent `git lfs
-    // unlock` against a single repo corrupts `lockcache.db` (see `lfsQueues`),
-    // and git-lfs offers no way to make it safe.
     onProgress?.({ id: 'unlock-batch', label: 'Preparing unlocks', status: 'running', progress: 5, current: 0, total: targets.length })
     const token = await authService.getCurrentToken()
     const remoteUrl = await gitService.getRemoteUrl(repoPath)
-    const unlocked: string[] = []
-    const failed: BulkUnlockResult['failed'] = []
-    // One repair allowance for the whole batch, shared by every file in it.
-    const cacheRepair: CacheRepairState = { attempted: false }
-
     return this.withLfsLock(repoPath, async () => {
-      for (let index = 0; index < targets.length; index++) {
-        const target = targets[index]
-        try {
-          await this.unlockFileWithToken(repoPath, target.filePath, target.force ?? false, target.lockId, token, actorLogin, actorName, cacheRepair, remoteUrl)
-          unlocked.push(target.filePath.replace(/\\/g, '/'))
-        } catch (error) {
-          const message = String(error)
-          failed.push({ filePath: target.filePath, error: message })
-          // A corrupt lock cache is repo-wide, and by this point one repair has
-          // already been tried and failed. Every remaining file would fail the
-          // same way, so stop instead of grinding through hundreds of doomed
-          // unlocks (the incident log shows 105 of them in five seconds).
-          if (this.isLockCacheCorruptError(message)) {
-            for (const remaining of targets.slice(index + 1)) {
-              failed.push({ filePath: remaining.filePath, error: `Skipped: ${message}` })
+      // Each worker owns its LFS storage, so concurrent CLIs never rewrite the
+      // same lockcache.db. Keep the repository queue held through reconciliation.
+      const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'lucid-unlock-'))
+      const result: BulkUnlockResult = { unlocked: [], failed: [] }
+      let next = 0, completed = 0
+      try {
+        const locks = targets.some(target => !target.lockId)
+          ? await this.listLocksUnguarded(repoPath) : []
+        const work = targets.map(target => ({ ...target, filePath: target.filePath.replace(/\\/g, '/'),
+          lockId: target.lockId ?? locks.find(lock => lock.path === target.filePath.replace(/\\/g, '/'))?.id }))
+        const worker = async (number: number) => {
+          const storage = path.join(root, String(number))
+          await fs.promises.mkdir(storage)
+          while (next < work.length) {
+            const index = next++, target = work[index]
+            const id = `unlock-batch-file-${index}`
+            onProgress?.({ id, label: 'Unlocking file', status: 'running', detail: target.filePath })
+            try {
+              const args = [...gitAuthArgs(token, remoteUrl), '-c', `lfs.storage=${storage}`,
+                'lfs', 'unlock', ...(target.force ? ['--force'] : []),
+                ...(target.lockId ? [`--id=${target.lockId}`] : [target.filePath])]
+              try {
+                // Git LFS checks file status; suppress optional index writes too.
+                await execWithStdin(args, repoPath, '', { GIT_OPTIONAL_LOCKS: '0' })
+              } catch (error) {
+                if (!/Lock not found/i.test(String(error))) throw error
+              }
+              this.recordUnlock(repoPath, target.filePath, target.force ?? false, target.lockId, actorLogin, actorName)
+              result.unlocked.push(target.filePath)
+              onProgress?.({ id, label: 'File unlocked', status: 'done', detail: target.filePath })
+            } catch (error) {
+              const message = String(error)
+              result.failed.push({ filePath: target.filePath, error: message })
+              onProgress?.({ id, label: 'Unlock failed', status: 'error', detail: `${target.filePath}: ${message}` })
             }
-            onProgress?.({
-              id: 'unlock-batch', label: 'Unlock stopped', status: 'error',
-              progress: 100, current: targets.length, total: targets.length,
-              detail: 'Git LFS lock cache is unusable — clear the lock cache, then retry',
-            })
-            break
+            completed++
+            onProgress?.({ id: 'unlock-batch', label: 'Unlocking files', status: 'running',
+              progress: Math.round(5 + completed / work.length * 85), current: completed, total: work.length })
           }
         }
-        const completed = index + 1
-        onProgress?.({
-          id: 'unlock-batch', label: 'Unlocking files', status: completed === targets.length ? 'done' : 'running',
-          progress: Math.round(5 + (completed / targets.length) * 95), current: completed, total: targets.length,
-          detail: target.filePath.replace(/\\/g, '/'),
-        })
+        // allSettled drains every process before touching shared state or cleanup.
+        const workers = await Promise.allSettled(Array.from({ length: Math.min(4, work.length) }, (_, i) => worker(i)))
+        const setupError = workers.find(worker => worker.status === 'rejected')
+        if (setupError?.status === 'rejected') {
+          for (const target of work.slice(next)) result.failed.push({ filePath: target.filePath, error: String(setupError.reason) })
+        }
+        onProgress?.({ id: 'unlock-batch', label: 'Refreshing locks', status: 'running', progress: 95, current: completed, total: work.length })
+        this.authoritative.delete(repoPath)
+        try {
+          // Verification rebuilds the real local ownership cache as well as the
+          // displayed list. A plain listing would leave stale owned lock IDs.
+          const refreshed = await withGitTimeout(async () => {
+            try {
+              return await this.listLocksUnguarded(repoPath, { token, remoteUrl, verify: true })
+            } catch (error) {
+              // Repair an already damaged shared cache once, after every worker
+              // has drained. Never delete a cache out from under a live process.
+              if (!this.isLockCacheCorruptError(String(error))) throw error
+              await gitService.lfsLocksMaintenance(repoPath, true)
+              return this.listLocksUnguarded(repoPath, { token, remoteUrl, verify: true })
+            }
+          }, 30_000, 'lock:batch-refresh')
+          result.locks = refreshed
+          this.prevLocks.set(repoPath, refreshed)
+          this.broadcastLocks(repoPath, refreshed)
+        } catch (error) {
+          result.refreshError = `Lock data is stale: ${String(error)}`
+          this.broadcastLocks(repoPath, this.prevLocks.get(repoPath) ?? [], result.refreshError)
+        }
+        onProgress?.({ id: 'unlock-batch', label: result.failed.length || result.refreshError ? 'Unlock batch needs attention' : 'Files unlocked',
+          status: result.failed.length || result.refreshError ? 'error' : 'done', progress: 100,
+          current: work.length, total: work.length, detail: result.refreshError ?? `${result.unlocked.length} unlocked, ${result.failed.length} failed` })
+        return result
+      } finally {
+        await fs.promises.rm(root, { recursive: true, force: true })
       }
-      return { unlocked, failed }
     })
   }
 
@@ -303,6 +344,10 @@ class LockService {
         throw error
       }
     }
+    this.recordUnlock(repoPath, normalized, force, resolvedLockId, actorLogin, actorName)
+  }
+
+  private recordUnlock(repoPath: string, normalized: string, force: boolean, resolvedLockId: string | undefined, actorLogin: string, actorName: string): void {
     const now = Date.now()
     const lockedAt = this.lockTimestamps.get(`${repoPath}::${resolvedLockId}`) ?? now
     this.lockTimestamps.delete(`${repoPath}::${resolvedLockId}`)
@@ -436,8 +481,7 @@ class LockService {
       '',
       onProgress,
     )
-    await this.refresh(repoPath)
-    onProgress?.({ id: 'unlock-folder', label: 'Folder unlocked', status: 'done', progress: 100, current: mine.length, total: mine.length })
+    onProgress?.({ id: 'unlock-folder', label: 'Folder unlock finished', status: result.failed.length || result.refreshError ? 'error' : 'done', detail: result.refreshError ?? `${result.unlocked.length} unlocked, ${result.failed.length} failed`, progress: 100, current: mine.length, total: mine.length })
     return { unlocked: result.unlocked.length, failed: result.failed.length }
   }
 
