@@ -10,8 +10,8 @@ import { confirmsMapOwnership, discoverExternalActors, emptyExternalReview, esti
 import { withRepoSlot } from '../util/repo-gate'
 import type { BlueprintComparison, BlueprintDocument, BlueprintRequest, BlueprintSide } from '../blueprintTypes'
 
-const EXTRACTOR_VERSION = '9-uassetapi-3228c1e8'
-const READER_VERSION = 9
+const EXTRACTOR_VERSION = '10-uassetapi-3228c1e8'
+const READER_VERSION = 10
 const MAX_BYTES = 256 * 1024 * 1024
 const MAX_CACHE_BYTES = 256 * 1024 * 1024
 const sha = (b: string | Buffer) => crypto.createHash('sha256').update(b).digest('hex')

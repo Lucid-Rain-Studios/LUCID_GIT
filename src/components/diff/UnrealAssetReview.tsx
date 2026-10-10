@@ -1,3 +1,7 @@
+import { MapPreview } from './MapPreview'
+import { mapPositions } from '../../lib/mapReview'
+import { stateTreeLinks } from '../../lib/stateTreeReview'
+import { StateTreePreview } from './StateTreePreview'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Maximize2, Minimize2, RotateCcw } from 'lucide-react'
@@ -13,11 +17,12 @@ import './UnrealAssetReview.css'
 const markers = { added: '+', removed: '−', modified: '~', unknown: '?' }
 const className = (object: UnrealAssetObject) => object.classPath.split('.').pop() ?? object.classPath
 
-function ObjectInspector({ object, change }: { object?: UnrealAssetObject; change?: AssetObjectChange }) {
+function ObjectInspector({ object, change, objects, onSelect }: { object?: UnrealAssetObject; change?: AssetObjectChange; objects: UnrealAssetObject[]; onSelect(object: UnrealAssetObject): void }) {
   if (!object) return <div className="uar-empty">Select an object or change to inspect its saved values.</div>
   return <section className="uar-inspector" aria-label="Saved object details">
     <strong>{object.name}</strong><small>{object.classPath}</small><small>{object.serializedPath ?? object.path}</small>
     {object.sourcePackage && <small>Source package: {object.sourcePackage}</small>}
+    {stateTreeLinks(object, objects).map(link => <div className="uar-object-link" key={link.label}><small>{link.label}: {link.description}</small>{link.object && <button className="lg-toolbar-control" onClick={() => onSelect(link.object!)}>Inspect {link.label.toLowerCase()}</button>}</div>)}
     {change?.ambiguous && <p role="status">Identity is ambiguous. This is not a confirmed addition or removal.</p>}
     {change?.properties.map(property => <div className="uar-property" key={property.path}><small>{property.path}</small><div className="uar-values"><pre className="uar-before">{displayValue(property.before, property.beforePresent)}</pre><span>→</span><pre className="uar-after">{displayValue(property.after, property.afterPresent)}</pre></div></div>)}
     {change?.opaqueChanged && <p className="uar-warning">Native payload changed. Its meaning has not been decoded.</p>}
@@ -25,38 +30,6 @@ function ObjectInspector({ object, change }: { object?: UnrealAssetObject; chang
     {object.opaqueBytes > 0 && <small>{object.opaqueBytes.toLocaleString()} native bytes · not interpreted</small>}
     {object.diagnostics.map(message => <p className="uar-warning" key={message}>{message}</p>)}
   </section>
-}
-
-function StateTreePreview({ objects, onSelect }: { objects: UnrealAssetObject[]; onSelect(object: UnrealAssetObject): void }) {
-  const states = objects.filter(object => className(object).includes('StateTreeState'))
-  const paths = new Set(states.map(state => state.path))
-  const children = new Map(states.map(state => [state.path, state.properties.Children && typeof state.properties.Children === 'object' ? Object.values(state.properties.Children).filter((child): child is string => typeof child === 'string' && paths.has(child)) : []]))
-  const nested = new Set([...children.values()].flat()), byPath = new Map(states.map(state => [state.path, state]))
-  const visited = new Set<string>(), rows: Array<{ state: UnrealAssetObject; depth: number }> = []
-  function walk(state: UnrealAssetObject, depth: number) {
-    if (visited.has(state.path)) return
-    visited.add(state.path); rows.push({ state, depth })
-    if (depth < 24) for (const child of children.get(state.path) ?? []) walk(byPath.get(child)!, depth + 1)
-  }
-  states.filter(state => !nested.has(state.path)).forEach(state => walk(state, 0))
-  states.filter(state => !visited.has(state.path)).forEach(state => walk(state, 0))
-  if (!rows.length) return <div className="uar-empty">No decoded editor states in this package. Inspect the serialized objects in Contents.</div>
-  return <div className="uar-tree" aria-label="Decoded StateTree children"><p className="uar-caption">Saved state hierarchy · select a state to inspect tasks, transitions and bindings</p>{rows.map(({ state, depth }) => <button key={state.path} className="uar-tree-state" style={{ marginLeft: Math.min(depth, 6) * 16 }} onClick={() => onSelect(state)}><span>{typeof state.properties.Name === 'string' ? state.properties.Name : typeof (state.properties.Name as { Name?: unknown })?.Name === 'string' ? String((state.properties.Name as { Name: string }).Name) : state.name}</span><small>{className(state)}</small></button>)}</div>
-}
-
-function MapPreview({ objects, changes, side, onSelect }: { objects: UnrealAssetObject[]; changes: AssetObjectChange[]; side: 'left' | 'right'; onSelect(object: UnrealAssetObject): void }) {
-  const positions = objects.flatMap(object => {
-    const saved = object.properties.RelativeLocation as Record<string, unknown> | undefined
-    const position = (saved?.RelativeLocation ?? saved) as { X?: unknown; Y?: unknown } | undefined
-    const x = typeof position?.X === 'number' || typeof position?.X === 'string' ? Number(position.X) : NaN
-    const y = typeof position?.Y === 'number' || typeof position?.Y === 'string' ? Number(position.Y) : NaN
-    return Number.isFinite(x) && Number.isFinite(y) ? [{ object, x, y }] : []
-  }).slice(0, 1000)
-  const changed = new Map(changes.filter(item => item[side]).map(item => [item[side]!.path, item.kind]))
-  const xs = positions.map(p => p.x), ys = positions.map(p => p.y)
-  const minX = Math.min(...xs), minY = Math.min(...ys), width = Math.max(100, Math.max(...xs) - minX), height = Math.max(100, Math.max(...ys) - minY)
-  if (!positions.length) return <div className="uar-empty">No serialized component positions are decoded. Inherited transforms are not resolved.</div>
-  return <section className="uar-map"><p className="uar-caption">Schematic · up to 1,000 component-relative XY positions in cm. This is not a reconstructed world.</p><div className="uar-map-field" aria-label="Serialized component-relative positions">{positions.map(({ object, x, y }) => <button className={changed.has(object.path) ? 'uar-' + changed.get(object.path) : ''} key={object.path} aria-label={`${object.name}: X ${x}, Y ${y} cm`} title={`${object.name}: (${x}, ${y}) cm`} style={{ left: `${8 + 80 * (x - minX) / width}%`, top: `${8 + 80 * (y - minY) / height}%` }} onClick={() => onSelect(object)}>{changed.has(object.path) ? markers[changed.get(object.path)!] + ' ' : ''}{object.name}</button>)}</div></section>
 }
 
 /** Shared package review using existing immutable revision/LFS documents. */
@@ -74,6 +47,7 @@ export function UnrealAssetReview(props: BlueprintDiffProps) {
   const [view, setView] = useState<'changes' | 'contents' | 'preview'>('changes')
   const [side, setSide] = useState<'left' | 'right'>('right')
   const [selected, setSelected] = useState(''), [filter, setFilter] = useState('')
+  const [mapCamera, setMapCamera] = useState({ zoom: 1, x: 0, y: 0 })
   const [visible, setVisible] = useState(250), [expanded, setExpanded] = useState(false)
   useEffect(() => setVisible(250), [filePath, view, side, filter])
   const fullButton = useRef<HTMLButtonElement>(null), wasExpanded = useRef(false)
@@ -81,7 +55,7 @@ export function UnrealAssetReview(props: BlueprintDiffProps) {
   useEffect(() => {
     let cancelled = false
     const requestId = crypto.randomUUID()
-    setResult(null); setError(''); setSelected(''); setFilter('')
+    setResult(null); setError(''); setSelected(''); setFilter(''); setMapCamera({ zoom: 1, x: 0, y: 0 })
     ipc.blueprintCompare(repoPath, { filePath, oldPath, leftRef, rightRef, requestId, externalActors: includeActors, force: retry > 0 }).then(data => {
       if (cancelled) return
       setResult(data)
@@ -98,6 +72,7 @@ export function UnrealAssetReview(props: BlueprintDiffProps) {
   const changes = useMemo(() => result && !single ? assetChanges(result) : [], [result, single])
   const selectedSide = result?.[side], assetDocument = selectedSide?.document
   const objects = useMemo(() => result ? reviewObjects(result, side) : [], [result, side])
+  const allMapObjects = useMemo(() => result ? (['left', 'right'] as const).flatMap(key => mapPositions(reviewObjects(result, key)).slice(0, 1000).map(point => point.object)) : [], [result])
   const change = changes.find(item => item.key === selected)
   const object = view === 'changes' ? change?.right ?? change?.left : objects.find(item => item.path === selected)
   const matching = (text: string) => text.toLowerCase().includes(filter.toLowerCase())
@@ -117,15 +92,15 @@ export function UnrealAssetReview(props: BlueprintDiffProps) {
     <div className="uar-revisions">{(['left', 'right'] as const).filter(key => !single || key === 'right').map(key => <span key={key}>{labels[key]} <code>{revisionName(key === 'left' ? leftRef : rightRef)}</code></span>)}<small>Read-only</small></div>
     <nav className="uar-tabs" aria-label="Unreal asset view">{(['changes', 'contents', 'preview'] as const).map(tab => <button key={tab} className="lg-toolbar-control" aria-pressed={view === tab} onClick={() => { setView(tab); setSelected(tab === 'changes' ? changes.find(item => item.left?.path === object?.path || item.right?.path === object?.path)?.key ?? '' : object?.path ?? '') }} disabled={single && tab === 'changes'}>{tab[0].toUpperCase() + tab.slice(1)}</button>)}</nav>
     {error ? <div className="uar-empty" role="alert">{error}</div> : !result ? <div className="uar-empty" role="status">Reading saved asset revisions…</div> : <>
-      {view !== 'changes' && <div className="uar-view-tools"><div>{(['left', 'right'] as const).filter(key => !single || key === 'right').map(key => <button key={key} className="lg-toolbar-control" aria-pressed={side === key} onClick={() => { setSide(key); setSelected('') }}>{labels[key]}</button>)}</div><small>{objects.length.toLocaleString()} package objects</small></div>}
+      {view !== 'changes' && <div className="uar-view-tools"><div>{(['left', 'right'] as const).filter(key => !single || key === 'right').map(key => <button key={key} className="lg-toolbar-control" aria-pressed={side === key} onClick={() => { const next = reviewObjects(result, key); const matches = object ? next.filter(candidate => object.id ? candidate.id === object.id : candidate.path === object.path && !candidate.id) : []; setSide(key); setSelected(matches.length === 1 ? matches[0].path : '') }}>{labels[key]}</button>)}</div><small>{objects.length.toLocaleString()} package objects</small></div>}
       {hasGraphs && <div className="uar-graph" style={{ display: view === 'preview' ? 'flex' : 'none' }}><BlueprintDiff {...props} files={undefined} comparison={result} onRetry={() => setRetry(value => value + 1)}/></div>}
       {!(view === 'preview' && hasGraphs) && <div className="uar-workspace"><section className="uar-content">
         {(view === 'contents' || view === 'changes') && <input className="uar-filter" aria-label="Filter asset objects" placeholder="Filter names, classes or paths…" value={filter} onChange={event => setFilter(event.target.value)}/>}
         {view === 'changes' && <><div className="uar-counts">{(['added', 'removed', 'modified', 'unknown'] as const).map(kind => <span className={'uar-' + kind} key={kind}>{markers[kind]} {counts(kind)} {kind}</span>)}</div>{!canCompare ? <div className="uar-empty">Comparison unavailable. {result.left.reason ?? result.right.reason ?? 'One side has no decoded inventory.'} Unknown content is not treated as absent.</div> : changes.length === 0 ? <div className="uar-empty">No differences in decoded objects/properties. Other package data may still differ.</div> : filteredChanges.slice(0, visible).map(item => <button className={'uar-row uar-' + item.kind} key={item.key} aria-pressed={selected === item.key} onClick={() => setSelected(item.key)}><span>{markers[item.kind]}</span><span>{(item.right ?? item.left)!.name}<small>{className((item.right ?? item.left)!)}{(item.right ?? item.left)!.sourcePackage && ' · ' + (item.right ?? item.left)!.sourcePackage}</small></span><small>{item.kind}{item.opaqueChanged ? ' · native data' : ''}</small></button>)}</>}
         {view === 'contents' && (selectedSide?.status !== 'ready' ? <div className="uar-empty">{selectedSide?.status === 'absent' ? 'File absent in this revision.' : selectedSide?.reason}</div> : rows.slice(0, visible).map(item => <button className="uar-row" key={item.path} aria-pressed={selected === item.path} onClick={() => selectObject(item)}><span>{item.name}<small>{className(item)} · {item.sourcePackage ?? item.outer}</small></span><small>{Object.keys(item.properties).length} fields{!item.decoded ? ' · incomplete' : ''}</small></button>))}
-        {view === 'preview' && (selectedSide?.status !== 'ready' ? <div className="uar-empty">{selectedSide?.status === 'absent' ? 'File absent in this revision.' : selectedSide?.reason}</div> : assetDocument?.assetReview?.family === 'statetree' ? <StateTreePreview objects={objects} onSelect={selectObject}/> : assetDocument?.assetReview?.family === 'map' ? <MapPreview objects={objects} changes={changes} side={side} onSelect={selectObject}/> : <div className="uar-empty">{assetDocument?.assetReview?.family === 'mesh' ? 'Mesh geometry is not decoded by the installed reader.' : 'No visual decoder is available for this asset class.'} Saved objects and properties are available in Contents.</div>)}
+        {view === 'preview' && (selectedSide?.status !== 'ready' ? <div className="uar-empty">{selectedSide?.status === 'absent' ? 'File absent in this revision.' : selectedSide?.reason}</div> : assetDocument?.assetReview?.family === 'statetree' ? <StateTreePreview objects={objects} changes={changes} side={side} onSelect={selectObject}/> : assetDocument?.assetReview?.family === 'map' ? <MapPreview objects={objects} allObjects={allMapObjects} changes={changes} side={side} selected={selected} camera={mapCamera} onCamera={setMapCamera} onSelect={selectObject}/> : <div className="uar-empty">{assetDocument?.assetReview?.family === 'mesh' ? 'Mesh geometry is not decoded by the installed reader.' : 'No visual decoder is available for this asset class.'} Saved objects and properties are available in Contents.</div>)}
         {(view === 'contents' ? rows.length : view === 'changes' ? filteredChanges.length : 0) > visible && <button className="lg-toolbar-control" onClick={() => setVisible(value => value + 250)}>Show 250 more objects</button>}
-      </section><ObjectInspector object={object} change={view === 'changes' ? change : changes.find(item => item[side]?.path === object?.path)}/></div>}
+      </section><ObjectInspector object={object} objects={objects} onSelect={item => { setView('contents'); selectObject(item) }} change={view === 'changes' ? change : changes.find(item => item[side]?.path === object?.path)}/></div>}
       <footer className="uar-coverage"><strong>Coverage</strong>{result.externalActors && <span>Actor additions/removals refer to the selected map scope. Data layers and asset references are saved fields only; inherited values and world transforms remain unresolved.</span>}{[...new Set([...(result.left.document?.assetReview?.coverage ?? []), ...(result.right.document?.assetReview?.coverage ?? [])])].map(message => <span key={message}>{message}</span>)}{result.left.status === 'unavailable' && <span>{labels.left}: {result.left.reason}</span>}{result.right.status === 'unavailable' && <span>{labels.right}: {result.right.reason}</span>}</footer>
     </>}
   </div>

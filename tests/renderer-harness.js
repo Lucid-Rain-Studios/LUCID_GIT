@@ -33,6 +33,7 @@ function component(file, mocks = {}, globals = {}) {
   vm.runInNewContext(source + exposed, {
     module, exports: module.exports,
     require: name => name === 'react' ? React : mocks[name] || (
+      name === './stateTreeReview' ? component('src/lib/stateTreeReview.ts', {}, globals).exports :
       ['../util/network', '../util/git-paths', '../util/json-store', '../util/external-actors', '@/lib/staging'].includes(name)
         ? component(name === '@/lib/staging' ? 'src/lib/staging.ts' : 'electron/util/' + name.split('/').pop() + '.ts', {}, globals).exports
         : name.startsWith('node:') || ['fs', 'path', 'crypto'].includes(name) ? require(name)

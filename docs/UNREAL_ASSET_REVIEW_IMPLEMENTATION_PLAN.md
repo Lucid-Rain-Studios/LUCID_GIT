@@ -1,6 +1,6 @@
 # Unreal asset contents, changes and previews
 
-Created: 2026-10-09. Status: shared review host, initial package/property readers and bounded changed-external-actor review implemented; full asset-type acceptance remains partial. See [implementation evidence](UNREAL_ASSET_REVIEW_IMPLEMENTATION.md).
+Created: 2026-10-09. Status: shared review host, initial package/property readers and bounded changed-external-actor review and initial authored StateTree review implemented; full asset-type acceptance remains partial. See [implementation evidence](UNREAL_ASSET_REVIEW_IMPLEMENTATION.md).
 
 ## Approved outcome
 
@@ -125,8 +125,12 @@ Exit: external package changes are readable as map changes without mixing revisi
 - [ ] Decode editor state hierarchy, stable state/task/transition identities, schema, evaluators/global tasks, parameters, enter/transition conditions, targets, task instance data and property bindings for verified profiles.
 - [ ] Handle versioned instanced structs/property bags and custom task payloads explicitly; do not substitute compiled runtime state indices for authored identities.
 - [ ] Compare state addition/removal/reparenting, task order, transition order/conditions/targets, parameters and binding paths.
-- [ ] Add a dedicated hierarchy preview with selection, expand/collapse and linked property details. Keep StateTree presentation distinct from Klee's Blueprint canvas.
+- [x] Add a dedicated hierarchy preview with selection, expand/collapse and linked property details. Keep StateTree presentation distinct from Klee's Blueprint canvas.
 - [ ] Verify custom task, linked subtree, changed binding and partial-payload fixtures against editor ground truth; no unsupported field can appear unchanged solely because it was omitted.
+
+Follow-up 2026-10-10: binding endpoint names/matching and same-revision object navigation are implemented. Duplicate/ambiguous endpoints remain incomplete; type validation, custom property bags and linked assets remain outside coverage.
+
+Initial supported profile: the local UE 5.8.0 ST_Shooter editor package preserves array entries and instanced struct types, exposes states/tasks/conditions/transitions/global tasks/bindings through the shared inspector, and compares GUID-matched authored task edits/order. Opaque property bags/custom payloads and linked-subtree/editor acceptance keep the broader items unchecked. Reader 10 invalidates earlier lossy StateTree cache documents.
 
 Exit: the ST_Guard-style mockup is backed by real states, transitions and inspectable before/after data.
 
@@ -160,6 +164,8 @@ Exit: real supported meshes show correct geometry and revision-specific material
 - [ ] Add verified lights/material approximations; report limits for landscapes, foliage, splines, procedural actors, construction-script-generated components, dynamic Blueprint behavior and unsupported bulk data.
 - [ ] Verify ordinary and OFPA maps against editor placement/bounds. A lightweight reconstruction must not claim faithful Unreal lighting/shaders or execute Blueprint logic.
 
+Follow-up 2026-10-10: schematic markers are dots with hover/focus names; drag/scroll/keyboard camera controls, Fit, Focus selected, coincident-object selection and a shared camera across sides/tabs are implemented. Browser checks cover the interaction and narrow panes. Full actor/world transform composition, geometry/bounds and editor placement acceptance keep the broader checklist items unchecked.
+
 Exit: map previews locate real changes and correctly reconstruct supported placement, with explicit omission counts. The mockup's warehouse scene is a layout reference, not reusable asset geometry.
 
 ### Phase 7 — Release acceptance and extension points
@@ -189,4 +195,4 @@ When implementation begins, update the appropriate finding's note with actual ch
 
 ## Next implementation task
 
-The user accepted the initial app/interface. Phase 2 now supports bounded changed-package OFPA review. Complete its editor/count and representative-large-map acceptance before declaring full World Partition support. The next implementation slice is Phase 3: verify a real saved StateTree profile and extend authored states, transitions, tasks and bindings through the existing review host. Geometry remains a separately gated provider spike.
+The user accepted the initial interface and external-actor implementation. Phase 3 now has an initial real UE 5.8 authored StateTree slice. Its next unfinished work is faithful property-bag/custom-payload decoding, linked subtrees and editor-ground-truth binding/transition fixtures. Phase 2 large-map measurements and Phase 4 complex AnimGraph/state-machine acceptance also remain open. Geometry remains a separately gated provider spike.

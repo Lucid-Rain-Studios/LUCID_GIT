@@ -1,4 +1,5 @@
 import type { BlueprintComparison, UnrealAssetObject } from '../../electron/blueprintTypes'
+import { stateTreeEntries, stateTreeComparisonObjects } from './stateTreeReview'
 
 export const isUnrealPackage = (path: string) => /\.(uasset|umap)$/i.test(path)
 export const revisionName = (ref: string) => ({ WORKING: 'Working tree', INDEX: 'Index', HEAD: 'HEAD', ABSENT: 'Absent' }[ref] ?? ref.slice(0, 7) + (ref.endsWith('^1') ? ' parent' : ''))
@@ -28,9 +29,10 @@ export function propertyChanges(left: Record<string, unknown>, right: Record<str
   return changes
 }
 export function reviewObjects(comparison: BlueprintComparison, side: 'left' | 'right'): UnrealAssetObject[] {
-  const base = comparison[side].document?.assetReview?.objects ?? []
+  const document = comparison[side].document?.assetReview
+  const base = document?.objects ?? []
   const external = comparison.externalActors?.packages.flatMap(pair => packageObjects(pair[side])) ?? []
-  return [...base, ...external]
+  return [...base, ...(document?.family === 'statetree' ? stateTreeEntries(base).entries : []), ...external]
 }
 function packageObjects(side: BlueprintComparison['left']): UnrealAssetObject[] {
   return side.status === 'ready' ? (side.document?.assetReview?.objects ?? []).map(object => ({ ...object, serializedPath: object.path, sourcePackage: side.path, path: side.path + ' :: ' + object.path })) : []
@@ -46,7 +48,8 @@ export function assetChanges(comparison: BlueprintComparison): AssetObjectChange
 }
 function packageChanges(comparison: BlueprintComparison): AssetObjectChange[] {
   if (![comparison.left, comparison.right].every(side => side.status === 'absent' || side.status === 'ready' && side.document?.assetReview)) return []
-  const left = comparison.left.document?.assetReview?.objects ?? [], right = comparison.right.document?.assetReview?.objects ?? []
+  const contents = (side: BlueprintComparison['left']) => side.document?.assetReview?.family === 'statetree' ? stateTreeComparisonObjects(side.document.assetReview.objects) : side.document?.assetReview?.objects ?? []
+  const left = contents(comparison.left), right = contents(comparison.right)
   const counts = (objects: UnrealAssetObject[], key: 'id' | 'path') => { const map = new Map<string, number>(); for (const object of objects) if (object[key]) map.set(object[key], (map.get(object[key]) ?? 0) + 1); return map }
   const li = counts(left, 'id'), ri = counts(right, 'id'), lp = counts(left, 'path'), rp = counts(right, 'path')
   const rightIds = new Map(right.filter(o => o.id && ri.get(o.id) === 1).map(o => [o.id, o]))
