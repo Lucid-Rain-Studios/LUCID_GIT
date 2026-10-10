@@ -3,6 +3,8 @@ import { Canvas2D } from '../third_party/klee/src/canvas'
 import { BlueprintParser } from '../third_party/klee/src/parser/blueprint-parser'
 import { Constants } from '../third_party/klee/src/constants'
 import { NodeParserRegistry } from '../third_party/klee/src/parser/node-parser-registry'
+import { NodeConnectionControl } from '../third_party/klee/src/controls/node-connection.control'
+import { wireId } from '../src/lib/blueprintGraph'
 
 // The pinned upstream discovery uses webpack require.context. Only reviewed core
 // parsers are bundled here; unknown classes keep Klee's generic node rendering.
@@ -29,7 +31,7 @@ export function createKleeCanvas(element, text, options = {}) {
   const nodes = new BlueprintParser().parseBlueprint(text)
   scene.load(nodes); scene.updateLayout()
   let camera = options.camera ?? { x: 0, y: 0, zoom: 1 }, disposed = false, drag = null
-  let selected = '', changes = options.changes ?? {}, frame = 0
+  let selected = '', changes = options.changes ?? {}, wireChanges = options.wireChanges ?? {}, frame = 0
   const originalRefresh = scene.refresh.bind(scene)
   scene.refresh = () => draw()
   scene.camera.prepareViewport = () => {
@@ -49,16 +51,39 @@ export function createKleeCanvas(element, text, options = {}) {
     context.stroke(); context.setTransform(dpr * camera.zoom, 0, 0, dpr * camera.zoom, dpr * ox, dpr * oy)
   }
   const nodeId = node => /NodeGuid=([^\r\n]+)/.exec(node.sourceText)?.[1]?.trim() ?? ''
+  const identities = new Map(nodes.map(node => [/Name="([^"\r\n]+)"/.exec(node.sourceText)?.[1], nodeId(node)]))
+  // Pinned Klee exposes these TypeScript-private fields in its JS controls.
+  // Adapt each instance; leave the upstream checkout and other canvases intact.
+  for (const connection of scene._controls) {
+    if (!(connection instanceof NodeConnectionControl)) continue
+    const originalDraw = connection.onDraw.bind(connection)
+    const start = connection.pinStart.pinProperty, end = connection.pinEnd.pinProperty
+    const id = wireId(identities.get(start.nodeName), start.id, identities.get(end.nodeName), end.id)
+    connection.onDraw = canvas => {
+      const change = wireChanges[id]
+      if (!change) { originalDraw(canvas); return }
+      const from = connection.pinStart.getPinAbsolutePosition(), to = connection.pinEnd.getPinAbsolutePosition()
+      const curve = (Math.hypot(to.x - from.x, to.y - from.y) - 12) * .4
+      const style = getComputedStyle(element)
+      const color = style.getPropertyValue(({ added: '--lg-success', removed: '--lg-error', modified: '--lg-warning' })[change]).trim() || ({ added: '#2dbd6e', removed: '#e84040', modified: '#f5a623' })[change]
+      canvas.save().strokeStyle(color).lineWidth(start.category === 'exec' ? 2.5 : 1.5)
+        .setLineDash(change === 'removed' ? [6 / camera.zoom, 4 / camera.zoom] : [])
+        .beginPath().moveTo(from.x, from.y).lineTo(from.x + 6, from.y)
+        .bezierCurveTo(from.x + curve + 6, from.y, to.x - curve - 6, to.y, to.x - 6, to.y)
+        .lineTo(to.x, to.y).stroke()
+      canvas.fillStyle(color).font(Constants.NODE_FONT).fillText(({ added: '+ Wire', removed: '− Wire', modified: '~ Wire' })[change], (from.x + to.x) / 2, (from.y + to.y) / 2 - 6).restore()
+    }
+  }
   function draw() {
     if (disposed) return
     originalRefresh()
     for (const node of nodes) {
       const id = nodeId(node), change = changes[id]
       if (!change && selected !== id) continue
-      context.save(); context.strokeStyle = selected === id ? getComputedStyle(element).getPropertyValue('--lg-accent').trim() || '#4a9eff' : ({ added: '#2dbd6e', removed: '#e84040', modified: '#f5a623', moved: '#9c8de3' })[change]
+      context.save(); context.strokeStyle = selected === id ? getComputedStyle(element).getPropertyValue('--lg-accent').trim() || '#4a9eff' : ({ added: '#2dbd6e', removed: '#e84040', modified: '#f5a623', moved: '#9c8de3', commented: '#f5a623' })[change]
       context.lineWidth = 2 / camera.zoom; if (change === 'removed') context.setLineDash([6 / camera.zoom, 4 / camera.zoom])
       context.strokeRect(node.position.x - 3, node.position.y - 3, node.size.x + 6, node.size.y + 6)
-      if (change) { context.fillStyle = context.strokeStyle; context.font = Constants.NODE_FONT; context.fillText(({added:'+ Added',removed:'− Removed',modified:'~ Modified',moved:'↔ Layout'})[change], node.position.x, node.position.y - 10) }
+      if (change) { context.fillStyle = context.strokeStyle; context.font = Constants.NODE_FONT; context.fillText(({added:'+ Added',removed:'− Removed',modified:'~ Modified',moved:'↔ Layout',commented:'✎ Comment'})[change], node.position.x, node.position.y - 10) }
       context.restore()
     }
   }
@@ -85,5 +110,5 @@ export function createKleeCanvas(element, text, options = {}) {
   const observer = new ResizeObserver(resize); observer.observe(element); resize()
   const appearance = new MutationObserver(() => { scene.updateLayout(); resize() }); appearance.observe(document.documentElement, { attributes: true, attributeFilter: ['style','class'] })
   if (!options.camera) fit()
-  return { setCamera, getCamera: () => ({ ...camera }), fit, bounds, setChanges: next => { changes = next; renderSoon() }, select: (id, focus = false) => { selected = id; if(focus){const n=nodes.find(n=>nodeId(n)===id);if(n)setCamera({...camera,x:n.position.x+n.size.x/2,y:n.position.y+n.size.y/2},true)}renderSoon() }, destroy: () => { disposed = true; cancelAnimationFrame(frame); observer.disconnect(); appearance.disconnect(); for(const [name,fn]of Object.entries(events))element.removeEventListener(name,fn);scene.unload();element.width=1;element.height=1 } }
+  return { setCamera, getCamera: () => ({ ...camera }), fit, bounds, setChanges: next => { changes = next; renderSoon() }, setWireChanges: next => { wireChanges = next; renderSoon() }, select: (id, focus = false) => { selected = id; if(focus){const n=nodes.find(n=>nodeId(n)===id);if(n)setCamera({...camera,x:n.position.x+n.size.x/2,y:n.position.y+n.size.y/2},true)}renderSoon() }, destroy: () => { disposed = true; cancelAnimationFrame(frame); observer.disconnect(); appearance.disconnect(); for(const [name,fn]of Object.entries(events))element.removeEventListener(name,fn);scene.unload();element.width=1;element.height=1 } }
 }

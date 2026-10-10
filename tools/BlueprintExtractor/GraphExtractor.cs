@@ -10,7 +10,7 @@ using UAssetAPI.UnrealTypes;
 // source is embedded or required at runtime. Unsupported versions/tails are explicit.
 static class GraphExtractor
 {
-    const int ReaderVersion = 6;
+    const int ReaderVersion = 8;
     static string Name(UAsset a, int index) => index switch {
         > 0 when index <= a.Exports.Count => a.Exports[index - 1].ObjectName.ToString(),
         < 0 when -index <= a.Imports.Count => a.Imports[-index - 1].ObjectName.ToString(),
@@ -33,6 +33,15 @@ static class GraphExtractor
             return new JArray(array.Select(p => Simplify(a, p)));
         }
         if (token is JObject o && o["Value"] != null) {
+            if ((o.Value<string>("$type") ?? "").Contains("RawStructPropertyData") && o.Value<string>("StructType") == "EdGraphPinType") {
+                // Native type properties contain package-local FName/object indexes.
+                // Resolve them just like pin types before semantic comparison.
+                using var stream = new MemoryStream(Convert.FromBase64String(o.Value<string>("Value")!));
+                using var reader = new AssetBinaryReader(stream, a);
+                var type = PinType(reader);
+                if (stream.Position != stream.Length) throw new InvalidDataException("Unparsed EdGraphPinType property data.");
+                return type;
+            }
             if ((o.Value<string>("$type") ?? "").Contains("ObjectPropertyData"))
                 return ObjectPath(a, o.Value<int>("Value"));
             return Simplify(a, o["Value"]!);
@@ -147,9 +156,11 @@ static class GraphExtractor
     }
     public static object Extract(UAsset a) {
         var graphs = new JArray(); var diagnostics = new List<string>();
-        if (a.IsFilterEditorOnly) return new { schemaVersion = 1, readerVersion = ReaderVersion, status = "unsupported", engineVersion = a.GetEngineVersion().ToString(), graphs, diagnostics = new[] { "Cooked assets have stripped editor graph data." } };
         var blueprint = a.Exports.FirstOrDefault(e => Name(a, e.ClassIndex.Index) is "Blueprint" or "WidgetBlueprint" or "AnimBlueprint");
-        if (blueprint == null) return new { schemaVersion = 1, readerVersion = ReaderVersion, status = "unsupported", engineVersion = a.GetEngineVersion().ToString(), graphs, diagnostics = new[] { "This asset does not contain an editor Blueprint." } };
+        var primary = blueprint ?? a.Exports.FirstOrDefault(e => e.OuterIndex.Index == 0 && Name(a, e.ClassIndex.Index) != "MetaData");
+        var assetClass = primary == null ? "" : ObjectPath(a, primary.ClassIndex.Index);
+        if (a.IsFilterEditorOnly) return new { schemaVersion = 1, readerVersion = ReaderVersion, assetClass, status = "unsupported", engineVersion = a.GetEngineVersion().ToString(), graphs, diagnostics = new[] { "Cooked assets have stripped editor graph data." } };
+        if (blueprint == null) return new { schemaVersion = 1, readerVersion = ReaderVersion, assetClass, status = "unsupported", engineVersion = a.GetEngineVersion().ToString(), graphs, diagnostics = new[] { "This asset does not contain an editor Blueprint." } };
         var totalNodes = 0;
         for (var gi = 0; gi < a.Exports.Count; gi++) {
             if (a.Exports[gi] is not NormalExport graph || Name(a, graph.ClassIndex.Index) != "EdGraph") continue;
@@ -188,7 +199,7 @@ static class GraphExtractor
             graphs.Add(new JObject { ["id"] = GuidOf(gp, "GraphGuid"), ["name"] = graph.ObjectName.ToString(), ["path"] = ObjectPath(a, gi + 1), ["nodes"] = graphNodes, ["complete"] = graphDiagnostics.Count == 0, ["diagnostics"] = JArray.FromObject(graphDiagnostics) });
             diagnostics.AddRange(graphDiagnostics);
         }
-        return new { schemaVersion = 1, readerVersion = ReaderVersion, status = graphs.Count == 0 ? "unsupported" : diagnostics.Count == 0 ? "complete" : "partial", engineVersion = $"{a.RecordedEngineVersion.Major}.{a.RecordedEngineVersion.Minor}.{a.RecordedEngineVersion.Patch}", graphs, diagnostics = graphs.Count == 0 ? new[] { "No supported K2 Blueprint graphs are stored in this asset." } : diagnostics.ToArray() };
+        return new { schemaVersion = 1, readerVersion = ReaderVersion, assetClass, status = graphs.Count == 0 ? "unsupported" : diagnostics.Count == 0 ? "complete" : "partial", engineVersion = $"{a.RecordedEngineVersion.Major}.{a.RecordedEngineVersion.Minor}.{a.RecordedEngineVersion.Patch}", graphs, diagnostics = graphs.Count == 0 ? new[] { "No supported K2 Blueprint graphs are stored in this asset." } : diagnostics.ToArray() };
     }
 }
 

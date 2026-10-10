@@ -1,7 +1,8 @@
 import type { BlueprintGraph, BlueprintNode } from '@/ipc'
 
-export type NodeChange = 'added' | 'removed' | 'modified' | 'moved'
-export interface GraphChange { id: string; kind: NodeChange; title: string; left?: BlueprintNode; right?: BlueprintNode }
+export type NodeChange = 'added' | 'removed' | 'modified' | 'moved' | 'commented'
+export interface GraphChange { id: string; kind: NodeChange; title: string; left?: BlueprintNode; right?: BlueprintNode; commentChanged?: boolean; layoutChanged?: boolean }
+export interface WireChange { id: string; kind: 'added' | 'removed' | 'modified'; category: string }
 export interface GraphPair { key: string; name: string; left?: BlueprintGraph; right?: BlueprintGraph; matchedByName: boolean }
 
 export function pairGraphs(left: BlueprintGraph[], right: BlueprintGraph[]): GraphPair[] {
@@ -24,11 +25,15 @@ function canonical(value: unknown): string {
 }
 function semantic(node: BlueprintNode) {
   const properties = Object.fromEntries(Object.entries(node.properties).filter(([key]) => !['NodePosX', 'NodePosY', 'NodeWidth', 'NodeHeight', 'NodeGuid', 'NodeComment'].includes(key)))
+  const referenced = new Set(node.pins.flatMap(pin => [pin.parent, pin.passThrough, ...(Array.isArray(pin.subPins) ? pin.subPins : []), ...pin.links.filter(link => link.node === node.id).map(link => link.pin)]).filter(value => typeof value === 'string'))
   const pins = node.pins.map(pin => {
     const { links, ...rest } = pin
-    return { ...rest, tooltip: undefined, links: links.map(link => ({ node: link.node, pin: link.pin })).sort((a, b) => canonical(a).localeCompare(canonical(b))) }
-  }).sort((a, b) => a.id.localeCompare(b.id))
-  return canonical({ class: node.classPath, comment: node.comment, properties, pins })
+    // Reconstructing a Blueprint can regenerate an unused hidden pin's GUID.
+    // Its type/default/flags still matter; a connected or referenced ID does too.
+    const unusedHidden = !!(pin.flags & 1) && !links.length && !(Array.isArray(pin.subPins) && pin.subPins.length) && !pin.parent && !pin.passThrough && !referenced.has(pin.id)
+    return { ...rest, id: unusedHidden ? undefined : pin.id, tooltip: undefined, links: links.map(link => ({ node: link.node, pin: link.pin })).sort((a, b) => canonical(a).localeCompare(canonical(b))) }
+  }).sort((a, b) => canonical(a).localeCompare(canonical(b)))
+  return canonical({ class: node.classPath, properties, pins })
 }
 export function graphChanges(pair: GraphPair): GraphChange[] {
   const result: GraphChange[] = [], right = new Map(pair.right?.nodes.map(n => [n.id, n]) ?? [])
@@ -38,11 +43,37 @@ export function graphChanges(pair: GraphPair): GraphChange[] {
     if (r) right.delete(l.id)
     if (!r) result.push({ id: l.id || l.name, kind: 'removed', title: l.title, left: l })
     else if (!l.complete || !r.complete) continue // Unknown pin data is not a diff.
-    else if (semantic(l) !== semantic(r)) result.push({ id: l.id, kind: 'modified', title: r.title, left: l, right: r })
-    else if (l.x !== r.x || l.y !== r.y || l.width !== r.width || l.height !== r.height) result.push({ id: l.id, kind: 'moved', title: r.title, left: l, right: r })
+    else {
+      const commentChanged = l.comment !== r.comment
+      const layoutChanged = l.x !== r.x || l.y !== r.y || l.width !== r.width || l.height !== r.height
+      const kind = semantic(l) !== semantic(r) ? 'modified' : commentChanged ? 'commented' : layoutChanged ? 'moved' : undefined
+      if (kind) result.push({ id: l.id, kind, title: r.title, left: l, right: r, commentChanged, layoutChanged })
+    }
   }
   for (const r of right.values()) if (r.id) result.push({ id: r.id, kind: 'added', title: r.title, right: r })
   return result
+}
+
+// Undirected endpoint identity deduplicates reciprocal serialized pin links.
+export function wireId(node: string, pin: string, otherNode: string, otherPin: string): string {
+  return JSON.stringify([[node, pin], [otherNode, otherPin]].sort((a, b) => canonical(a).localeCompare(canonical(b))))
+}
+export function wireChanges(pair: GraphPair): WireChange[] {
+  if (pair.left?.complete === false || pair.right?.complete === false) return []
+  const connections = (graph?: BlueprintGraph) => {
+    const result = new Map<string, string>(), nodes = new Map(graph?.nodes.map(n => [n.id, n]) ?? [])
+    for (const node of nodes.values()) for (const pin of node.pins) for (const link of pin.links) {
+      const target = link.node ? nodes.get(link.node) : undefined
+      if (!node.complete || !target?.complete || !target.pins.some(p => p.id === link.pin)) continue
+      const id = wireId(node.id, pin.id, target.id, link.pin)
+      if (pin.direction === 'output' || !result.has(id)) result.set(id, pin.type.category)
+    }
+    return result
+  }
+  const left = connections(pair.left), right = connections(pair.right)
+  return [...Array.from(left, ([id, category]) => ({ id, category, kind: 'removed' as const })).filter(c => !right.has(c.id)),
+    ...Array.from(right, ([id, category]) => ({ id, category, kind: 'added' as const })).filter(c => !left.has(c.id)),
+    ...Array.from(right, ([id, category]) => ({ id, category, kind: 'modified' as const })).filter(c => left.has(c.id) && left.get(c.id) !== c.category)]
 }
 const quote = (value: string) => JSON.stringify(value).replace(/\\n/g, '\\n').replace(/\\r/g, '')
 function unreal(value: unknown): string {

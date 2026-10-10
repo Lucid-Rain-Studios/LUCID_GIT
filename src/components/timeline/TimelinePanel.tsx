@@ -2365,7 +2365,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
 
       {/* ── Right column ──────────────────────────────────────────────────── */}
       <FileDetailsSidePanel
-        blueprintFiles={centerFile?.kind === 'commit' && selectedCommit ? commitFiles.filter(f => /\.uasset$/i.test(f.path)).map(file => ({ path: file.path, selected: centerFile?.kind === 'commit' && centerFile.file.path === file.path, onSelect: () => selectCenterFile({ kind: 'commit', file, commitHash: selectedCommit.hash }) })) : fileStatus.filter(f => /\.uasset$/i.test(f.path)).map(file => ({ path: file.path, selected: centerFile?.kind === 'working' && centerFile.file.path === file.path && centerFile.file.staged === file.staged, label: `${file.staged ? 'Staged' : 'Unstaged'} � ${file.path}`, onSelect: () => selectCenterFile({ kind: 'working', file }) }))}
+        blueprintFiles={centerFile?.kind === 'commit' && selectedCommit ? commitFiles.filter(f => /\.uasset$/i.test(f.path)).map(file => ({ path: file.path, selected: centerFile?.kind === 'commit' && centerFile.file.path === file.path, onSelect: () => selectCenterFile({ kind: 'commit', file, commitHash: selectedCommit.hash }) })) : fileStatus.filter(f => /\.uasset$/i.test(f.path)).map(file => ({ path: file.path, selected: centerFile?.kind === 'working' && centerFile.file.path === file.path && centerFile.file.staged === file.staged, stage: file.staged ? 'Staged' : 'Unstaged', onSelect: () => selectCenterFile({ kind: 'working', file }) }))}
         filePath={centerFile?.file.path ?? null}
         hash={centerFile?.kind === 'commit' ? centerFile.commitHash : centerFile?.file.staged ? 'INDEX' : 'WORKING'}
         repoPath={repoPath}

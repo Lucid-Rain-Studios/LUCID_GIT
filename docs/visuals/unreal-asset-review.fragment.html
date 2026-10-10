@@ -1,0 +1,146 @@
+<div id="lucid-asset-concept" aria-label="Lucid Git asset review concept">
+<style>
+#lucid-asset-concept{color-scheme:light dark;--lg-bg:light-dark(#f4f5f7,#17191e);--lg-panel:light-dark(#fff,#1e2127);--lg-raised:light-dark(#eef0f4,#272b33);--lg-line:light-dark(#d9dde5,#343943);--lg-text:light-dark(#252b35,#e5e8ef);--lg-dim:light-dark(#657080,#99a3b4);--lg-accent:light-dark(#5146bf,#a599f4);--lg-good:light-dark(#24764a,#78cda1);--lg-bad:light-dark(#ae414e,#e98d98);--lg-warn:light-dark(#936012,#e6b772);font:13px/1.5 Inter,Segoe UI,sans-serif;color:var(--lg-text);background:var(--lg-bg);border:1px solid var(--lg-line);border-radius:10px;overflow:hidden}
+#lucid-asset-concept *{box-sizing:border-box}
+#lucid-asset-concept button,#lucid-asset-concept select{font:inherit;color:inherit;background:var(--lg-panel);border:1px solid var(--lg-line);border-radius:5px;padding:6px 10px}
+#lucid-asset-concept button:hover{background:var(--lg-raised)}
+#lucid-asset-concept button[aria-pressed=true]{background:var(--lg-raised);color:var(--lg-accent);border-color:var(--lg-accent)}
+#lucid-asset-concept .lg-top{display:flex;align-items:center;gap:16px;padding:14px 110px 14px 18px;border-bottom:1px solid var(--lg-line);flex-wrap:wrap}
+#lucid-asset-concept .lg-brand{font-weight:600;letter-spacing:2px;font-size:14px}
+#lucid-asset-concept .lg-branch{color:var(--lg-dim);display:flex;align-items:center;gap:7px}
+#lucid-asset-concept .lg-tag{font-size:11px;padding:2px 7px;border:1px solid var(--lg-line);border-radius:4px;color:var(--lg-dim)}
+#lucid-asset-concept .lg-shell{display:grid;grid-template-columns:220px minmax(0,1fr)}
+#lucid-asset-concept .lg-sidebar{background:var(--lg-panel);border-right:1px solid var(--lg-line);padding:18px 10px}
+#lucid-asset-concept .lg-eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:1.1px;color:var(--lg-dim);margin:0 8px 9px}
+#lucid-asset-concept .lg-commit{padding:10px 8px;margin-bottom:18px;border-bottom:1px solid var(--lg-line)}
+#lucid-asset-concept .lg-commit strong{display:block;font-weight:500;margin-bottom:4px}
+#lucid-asset-concept .lg-muted{color:var(--lg-dim)}
+#lucid-asset-concept .lg-small{font-size:11px}
+#lucid-asset-concept .lg-file{display:flex;width:100%;text-align:left;align-items:center;gap:9px;margin:4px 0;border-color:transparent;padding:10px 8px}
+#lucid-asset-concept .lg-file span{min-width:0;overflow-wrap:anywhere}
+#lucid-asset-concept .lg-file small{display:block;color:var(--lg-dim);font-size:11px}
+#lucid-asset-concept .lg-file i{flex-shrink:0;width:16px;height:16px}
+#lucid-asset-concept .lg-file b{margin-left:auto;color:var(--lg-warn);font-weight:500}
+#lucid-asset-concept .lg-side-foot{margin:26px 8px 0;color:var(--lg-dim);font-size:11px}
+#lucid-asset-concept .lg-main{min-width:0}
+#lucid-asset-concept .lg-title{padding:20px 22px 14px}
+#lucid-asset-concept h2{font-size:19px;font-weight:500;margin:0 0 4px;overflow-wrap:anywhere}
+#lucid-asset-concept .lg-path{font-size:11px;color:var(--lg-dim);overflow-wrap:anywhere}
+#lucid-asset-concept .lg-revisions{display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap}
+#lucid-asset-concept .lg-revision{background:var(--lg-panel);border:1px solid var(--lg-line);border-radius:5px;padding:5px 9px;font-size:12px}
+#lucid-asset-concept .lg-revision code{color:var(--lg-accent)}
+#lucid-asset-concept .lg-tabs{display:flex;gap:4px;padding:0 22px;border-bottom:1px solid var(--lg-line);flex-wrap:wrap}
+#lucid-asset-concept .lg-tabs button{border:0;border-radius:0;background:transparent;padding:10px 13px;color:var(--lg-dim);border-bottom:2px solid transparent}
+#lucid-asset-concept .lg-tabs button[aria-pressed=true]{color:var(--lg-text);border-bottom-color:var(--lg-accent);background:transparent}
+#lucid-asset-concept .lg-pane{padding:18px 22px;min-height:420px}
+#lucid-asset-concept .lg-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+#lucid-asset-concept .lg-toolbar strong{font-weight:500}
+#lucid-asset-concept .lg-stats{display:flex;gap:12px;font-size:12px;flex-wrap:wrap}
+#lucid-asset-concept .lg-added{color:var(--lg-good)}
+#lucid-asset-concept .lg-removed{color:var(--lg-bad)}
+#lucid-asset-concept .lg-changed{color:var(--lg-warn)}
+#lucid-asset-concept .lg-review{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:15px}
+#lucid-asset-concept .lg-list{border:1px solid var(--lg-line);border-radius:6px;overflow:hidden;background:var(--lg-panel)}
+#lucid-asset-concept .lg-list-label{padding:8px 12px;border-bottom:1px solid var(--lg-line);color:var(--lg-dim);font-size:11px}
+#lucid-asset-concept .lg-row{display:flex;align-items:center;gap:8px;width:100%;text-align:left;border:0;border-bottom:1px solid var(--lg-line);border-radius:0;padding:12px;background:transparent}
+#lucid-asset-concept .lg-row:last-child{border-bottom:0}
+#lucid-asset-concept .lg-row span:nth-child(2){min-width:0;overflow-wrap:anywhere}
+#lucid-asset-concept .lg-row small{display:block;color:var(--lg-dim);font-size:11px}
+#lucid-asset-concept .lg-row em{margin-left:auto;font-style:normal;font-size:11px}
+#lucid-asset-concept .lg-detail{background:var(--lg-panel);border:1px solid var(--lg-line);border-radius:6px;padding:14px;min-width:0}
+#lucid-asset-concept .lg-detail h3{font-weight:500;font-size:13px;margin:0 0 14px;overflow-wrap:anywhere}
+#lucid-asset-concept .lg-prop{padding:10px 0;border-top:1px solid var(--lg-line)}
+#lucid-asset-concept .lg-prop-name{color:var(--lg-dim);font-size:11px;margin-bottom:6px}
+#lucid-asset-concept .lg-prop-values{display:grid;grid-template-columns:1fr 20px 1fr;gap:6px;align-items:start;font-size:12px;overflow-wrap:anywhere}
+#lucid-asset-concept .lg-prop-values code{font:inherit;font-family:Consolas,monospace}
+#lucid-asset-concept .lg-note{margin-top:14px;padding:10px 12px;background:var(--lg-raised);color:var(--lg-dim);font-size:11px;border-radius:5px}
+#lucid-asset-concept .lg-status{padding:9px 22px;border-top:1px solid var(--lg-line);display:flex;gap:10px;justify-content:space-between;flex-wrap:wrap;font-size:11px;color:var(--lg-dim);background:var(--lg-panel)}
+#lucid-asset-concept .lg-preview{border:1px solid var(--lg-line);border-radius:6px;background:var(--lg-panel);overflow:hidden}
+#lucid-asset-concept .lg-preview-head{display:flex;gap:14px;justify-content:space-between;padding:9px 12px;border-bottom:1px solid var(--lg-line);font-size:11px;flex-wrap:wrap}
+#lucid-asset-concept .lg-scene{width:100%;height:300px;display:block;background:radial-gradient(ellipse at center,var(--lg-raised),var(--lg-bg))}
+#lucid-asset-concept .lg-scene text{font:12px Segoe UI,sans-serif;fill:var(--lg-text)}
+#lucid-asset-concept .lg-scene .lg-grid{stroke:var(--lg-line);stroke-width:1;fill:none}
+#lucid-asset-concept .lg-scene .lg-wall{fill:var(--lg-raised);stroke:var(--lg-dim);stroke-width:1}
+#lucid-asset-concept .lg-scene .lg-mark{stroke:var(--lg-warn);fill:color-mix(in srgb,var(--lg-warn) 15%,transparent);stroke-width:2}
+#lucid-asset-concept .lg-scene .lg-plus{stroke:var(--lg-good);fill:color-mix(in srgb,var(--lg-good) 15%,transparent);stroke-width:2}
+#lucid-asset-concept .lg-scene .lg-minus{stroke:var(--lg-bad);fill:none;stroke-width:2;stroke-dasharray:5 4}
+#lucid-asset-concept .lg-legend{display:flex;gap:16px;flex-wrap:wrap;padding:10px 12px;font-size:11px;border-top:1px solid var(--lg-line)}
+#lucid-asset-concept .lg-inventory{width:100%;border-collapse:collapse;font-size:12px}
+#lucid-asset-concept .lg-inventory th{text-align:left;color:var(--lg-dim);font-size:11px;font-weight:400;padding:10px 8px}
+#lucid-asset-concept .lg-inventory td{padding:12px 8px;border-top:1px solid var(--lg-line);overflow-wrap:anywhere}
+#lucid-asset-concept .lg-graph{display:flex;align-items:center;justify-content:center;gap:18px;min-height:260px;flex-wrap:wrap;padding:22px;background-image:radial-gradient(var(--lg-line) 1px,transparent 1px);background-size:18px 18px}
+#lucid-asset-concept .lg-node{background:var(--lg-panel);border:1px solid var(--lg-line);border-radius:6px;min-width:145px;max-width:100%;font-size:12px}
+#lucid-asset-concept .lg-node-head{background:var(--lg-raised);padding:9px 12px;border-bottom:1px solid var(--lg-line);border-radius:5px 5px 0 0}
+#lucid-asset-concept .lg-node-body{padding:12px;display:grid;gap:8px}
+#lucid-asset-concept .lg-node.changed{border-color:var(--lg-warn)}
+#lucid-asset-concept .lg-graph-arrow{color:var(--lg-accent);font-size:23px}
+#lucid-asset-concept .lg-tree{display:grid;gap:8px;padding:20px;min-height:270px;background:var(--lg-panel)}
+#lucid-asset-concept .lg-tree-item{padding:10px 14px;border:1px solid var(--lg-line);border-radius:5px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+#lucid-asset-concept .lg-tree-item.child{margin-left:22px}
+#lucid-asset-concept .lg-tree-item.deep{margin-left:44px}
+#lucid-asset-concept .lg-tree-item.selected{border-color:var(--lg-warn);background:color-mix(in srgb,var(--lg-warn) 8%,var(--lg-panel))}
+#lucid-asset-concept .lg-tree-item small{color:var(--lg-dim);font-size:11px}
+#lucid-asset-concept .lg-control{display:flex;align-items:center;gap:7px;font-size:12px}
+@media(max-width:760px){#lucid-asset-concept .lg-shell{grid-template-columns:1fr}#lucid-asset-concept .lg-sidebar{border-right:0;border-bottom:1px solid var(--lg-line);padding:12px}#lucid-asset-concept .lg-commit,#lucid-asset-concept .lg-side-foot{display:none}#lucid-asset-concept .lg-files{display:grid;grid-template-columns:1fr 1fr}#lucid-asset-concept .lg-review{grid-template-columns:1fr}#lucid-asset-concept .lg-title,#lucid-asset-concept .lg-pane{padding:16px}#lucid-asset-concept .lg-tabs{padding:0 6px}#lucid-asset-concept .lg-top{gap:10px}#lucid-asset-concept .lg-pane{min-height:420px}}
+@media(max-width:440px){#lucid-asset-concept .lg-files{grid-template-columns:1fr}#lucid-asset-concept .lg-file{padding:7px 8px}#lucid-asset-concept .lg-file small{display:none}#lucid-asset-concept .lg-top{padding:14px}#lucid-asset-concept .lg-inventory th:last-child,#lucid-asset-concept .lg-inventory td:last-child{display:none}#lucid-asset-concept .lg-graph{flex-direction:column}#lucid-asset-concept .lg-graph-arrow{transform:rotate(90deg)}}
+@media(pointer:coarse){#lucid-asset-concept button{min-height:44px}}
+</style>
+<header class="lg-top"><span class="lg-brand">LUCID GIT</span><span class="lg-branch"><i data-lucide="git-branch" aria-hidden="true"></i> feature / warehouse</span><span class="lg-tag">Concept · sample data</span></header>
+<div class="lg-shell">
+<aside class="lg-sidebar"><p class="lg-eyebrow">Timeline · asset review</p><div class="lg-commit"><strong>Refine warehouse gameplay</strong><span class="lg-muted lg-small">a92d7c1 · 4 changed assets</span></div><p class="lg-eyebrow">Changed files</p><nav class="lg-files" aria-label="Sample assets">
+<button class="lg-file cursor-interaction" data-asset="map" aria-pressed="true"><i data-lucide="map" aria-hidden="true"></i><span>Warehouse.umap<small>Maps / Warehouse</small></span><b>M</b></button>
+<button class="lg-file cursor-interaction" data-asset="mesh" aria-pressed="false"><i data-lucide="box" aria-hidden="true"></i><span>SM_LoadingDoor<small>Meshes / Architecture</small></span><b>M</b></button>
+<button class="lg-file cursor-interaction" data-asset="tree" aria-pressed="false"><i data-lucide="list-tree" aria-hidden="true"></i><span>ST_Guard<small>AI / StateTrees</small></span><b>M</b></button>
+<button class="lg-file cursor-interaction" data-asset="anim" aria-pressed="false"><i data-lucide="workflow" aria-hidden="true"></i><span>ABP_Guard<small>Animation / Blueprints</small></span><b>M</b></button>
+</nav><div class="lg-side-foot">Saved asset revisions<br>Read-only comparison</div></aside>
+<main class="lg-main"><div class="lg-title"><h2 id="lg-name">Warehouse.umap</h2><div class="lg-path" id="lg-path">Content / Maps / Warehouse.umap</div><div class="lg-revisions"><span class="lg-revision">Base <code>83bf214</code></span><span class="lg-muted">→</span><span class="lg-revision">Selected <code>a92d7c1</code></span><span class="lg-tag" id="lg-type">Level + external actors</span></div></div>
+<nav class="lg-tabs" aria-label="Asset view"><button class="cursor-interaction" data-view="changes" aria-pressed="true">Changes</button><button class="cursor-interaction" data-view="contents" aria-pressed="false">Contents</button><button class="cursor-interaction" data-view="preview" aria-pressed="false">Preview</button></nav>
+<div class="lg-pane" id="lg-pane"></div><footer class="lg-status"><span id="lg-coverage">Coverage: actor properties · geometry excluded</span><span>Illustrative data · proposed feature</span></footer></main>
+</div>
+<script>
+(()=>{
+const root=document.getElementById('lucid-asset-concept');
+const assets={
+map:{name:'Warehouse.umap',path:'Content / Maps / Warehouse.umap',type:'Level + external actors',unit:'actors',count:'42 actors · 5 changed',coverage:'Coverage: actor properties · geometry excluded',note:'Includes changes from external actor packages. Landscape and generated lighting are outside this sample.',rows:[
+{name:'SM_LoadingDoor_12',kind:'StaticMeshActor',state:'changed',props:[['Location.X','120 cm','180 cm'],['Material[0]','MI_DoorClean','MI_DoorDirty'],['Collision profile','BlockAll','BlockAllDynamic']]},
+{name:'BP_GuardSpawner_3',kind:'Blueprint actor',state:'added',props:[['Actor','—','BP_GuardSpawner_3'],['Spawn count','—','3'],['Location','—','(420, 160, 0) cm']]},
+{name:'PointLight_7',kind:'PointLight',state:'removed',props:[['Actor','PointLight_7','—'],['Intensity','2,500 lm','—']]},
+{name:'BP_ExitTrigger',kind:'Blueprint actor',state:'changed',props:[['Box extent','(80, 80, 120)','(140, 80, 120)'],['Required key','None','LoadingBayKey']]},
+{name:'WorldSettings',kind:'World configuration',state:'changed',props:[['Default GameMode','BP_TestGameMode','BP_WarehouseGameMode']]}]},
+mesh:{name:'SM_LoadingDoor.uasset',path:'Content / Meshes / Architecture / SM_LoadingDoor.uasset',type:'Static mesh',unit:'sections',count:'3 changed properties',coverage:'Coverage: metadata + sample geometry · material appearance approximate',note:'Mesh preview is illustrative. Unreal shader appearance and Nanite data need separately verified support.',rows:[
+{name:'Material slot 0',kind:'Materials',state:'changed',props:[['Assigned material','MI_DoorClean','MI_DoorDirty'],['Slot name','DoorSurface','DoorSurface']]},
+{name:'LOD settings',kind:'Build settings',state:'changed',props:[['LOD count','2','3'],['LOD 2 screen size','—','0.08']]},
+{name:'Collision',kind:'Body setup',state:'changed',props:[['Collision complexity','Project default','Use simple as complex'],['Simple collision shapes','1 box','1 box']]}]},
+tree:{name:'ST_Guard.uasset',path:'Content / AI / StateTrees / ST_Guard.uasset',type:'StateTree',unit:'states',count:'6 states · 3 changed',coverage:'Coverage: sample hierarchy, tasks, transitions and bindings',note:'Editor state hierarchy is reviewed separately from compiled runtime data. Unsupported task payloads would be labeled.',rows:[
+{name:'Chase → Attack',kind:'Transition condition',state:'changed',props:[['Distance threshold','200 cm','150 cm'],['Target state','Attack','Attack']]},
+{name:'Investigate',kind:'New child state',state:'added',props:[['Parent state','—','Active'],['Task','—','MoveToLastKnownLocation'],['On completion','—','Patrol']]},
+{name:'Patrol',kind:'Task binding',state:'changed',props:[['MoveTo.Speed','Parameters.WalkSpeed','Parameters.PatrolSpeed'],['PatrolSpeed','—','180 cm/s']]}]},
+anim:{name:'ABP_Guard.uasset',path:'Content / Animation / Blueprints / ABP_Guard.uasset',type:'Animation Blueprint',unit:'nodes',count:'Locomotion · 3 changed nodes',coverage:'Coverage: sample AnimGraph + state machine · runtime behavior unverified',note:'Event graphs, pose graphs and transition rules have separate views. This sample shows saved graph changes.',rows:[
+{name:'BlendSpace Player',kind:'AnimGraph / Locomotion',state:'changed',props:[['BlendSpace','BS_GuardMovement','BS_GuardMovement_v2'],['Play rate','1.0','1.15']]},
+{name:'Idle → Walk',kind:'State machine transition',state:'changed',props:[['Speed threshold','10 cm/s','20 cm/s'],['Blend duration','0.2 s','0.15 s']]},
+{name:'Layered Blend Per Bone',kind:'AnimGraph / UpperBody',state:'added',props:[['Branch filter','—','spine_01'],['Blend depth','—','3']]}]}
+};
+let state={asset:'map',view:'changes',row:0,revision:'selected',wire:false};
+const saved=window.openai?.widgetState?.modelContent;
+if(saved&&assets[saved.asset]&&['changes','contents','preview'].includes(saved.view)){state.asset=saved.asset;state.view=saved.view;}
+const names={added:'Added',removed:'Removed',changed:'Changed'},marks={added:'+',removed:'−',changed:'~'};
+const cls=s=>'lg-'+s;
+const prop=p=>`<div class="lg-prop"><div class="lg-prop-name">${p[0]}</div><div class="lg-prop-values"><code class="lg-removed">${p[1]}</code><span class="lg-muted">→</span><code class="lg-added">${p[2]}</code></div></div>`;
+function counts(a){return ['added','removed','changed'].map(s=>`<span class="${cls(s)}">${marks[s]} ${a.rows.filter(r=>r.state===s).length} ${names[s].toLowerCase()}</span>`).join('');}
+function changes(a){const selected=a.rows[state.row];return `<div class="lg-toolbar"><strong>${a.count}</strong><div class="lg-stats">${counts(a)}</div></div><div class="lg-review"><div class="lg-list"><div class="lg-list-label">Changed ${a.unit}</div>${a.rows.map((r,i)=>`<button class="lg-row cursor-interaction" data-row="${i}" aria-pressed="${state.row===i}"><span class="${cls(r.state)}">${marks[r.state]}</span><span>${r.name}<small>${r.kind}</small></span><em class="${cls(r.state)}">${names[r.state]}</em></button>`).join('')}</div><section class="lg-detail" aria-label="Selected change"><h3>${selected.name}</h3><div class="lg-prop-values lg-small lg-muted"><span>BASE</span><span></span><span>SELECTED</span></div>${selected.props.map(prop).join('')}</section></div><div class="lg-note">${a.note}</div>`;}
+function contents(a){let rows;if(state.asset==='map'){rows=[['Warehouse','World','/Game/Maps/Warehouse'],['SM_LoadingDoor_12','StaticMeshActor','SM_LoadingDoor'],['BP_GuardSpawner_3','Blueprint actor','BP_GuardSpawner'],['BP_ExitTrigger','Blueprint actor','BP_ExitTrigger'],['SM_Crate_01','StaticMeshActor','SM_Crate'],['DirectionalLight','DirectionalLight','PersistentLevel']];}else if(state.asset==='mesh'){rows=[['LOD 0','24,120 triangles','2 material slots'],['LOD 1','8,040 triangles','2 material slots'],['LOD 2','2,010 triangles','2 material slots'],['DoorSurface','Material slot','MI_DoorDirty'],['Frame','Material slot','MI_MetalFrame'],['Collision','1 box','Simple as complex']];}else if(state.asset==='tree'){rows=[['Root','State','Parameters + schema'],['Active / Patrol','State','MoveTo · wait'],['Active / Investigate','State','MoveToLastKnownLocation'],['Active / Chase','State','MoveToTarget'],['Active / Attack','State','PerformAttack'],['Disabled','State','Stop movement']];}else{rows=[['EventGraph','K2 graph','Update animation'],['AnimGraph','Pose graph','Locomotion + upper body'],['Locomotion','State machine','Idle · walk · run'],['Idle → Walk','Transition rule','Speed > 20'],['UpperBody','Pose branch','Layered Blend Per Bone'],['Skeleton','Reference','SK_Guard_Skeleton']];}return `<div class="lg-toolbar"><strong>Selected revision contents</strong><span class="lg-muted lg-small">Sample inventory</span></div><table class="lg-inventory"><thead><tr><th>Name</th><th>Type / detail</th><th>Reference / contents</th></tr></thead><tbody>${rows.map(r=>`<tr>${r.map(v=>`<td>${v}</td>`).join('')}</tr>`).join('')}</tbody></table><div class="lg-note">${a.note}</div>`;}
+function mapScene(){return `<svg class="lg-scene" viewBox="0 0 600 300" role="img" aria-label="Schematic warehouse map with added spawner, removed light and moved door"><g class="lg-grid"><path d="M40 250L320 85L575 220M40 220L320 55L575 190M40 190L320 25L575 160M80 270L350 110M140 280L400 125M200 290L450 150M260 295L500 170"/></g><path class="lg-wall" d="M130 190L315 80L500 180L315 285Z"/><path class="lg-wall" d="M130 190L130 135L315 25L315 80Z"/><path class="lg-wall" d="M315 80L315 25L500 125L500 180Z"/><path class="lg-wall" d="M215 175L260 149L286 163L241 190Z M215 175V146L260 120V149M260 120L286 134V163"/><path class="lg-minus" d="M358 230L400 205L400 165L358 190Z"/><path class="lg-mark" d="M405 201L447 176L447 136L405 161Z"/><path d="M397 222L419 210" stroke="var(--lg-warn)" stroke-width="2"/><circle class="lg-plus" cx="322" cy="186" r="15"/><path d="M316 186H328M322 180V192" stroke="var(--lg-good)" stroke-width="2"/><circle class="lg-minus" cx="185" cy="211" r="10"/><text x="306" y="221">+ Spawner</text><text x="429" y="240">~ Door moved</text><text x="120" y="245">− Light</text></svg>`;}
+function meshScene(){const old=state.revision==='base';return `<svg class="lg-scene" viewBox="0 0 600 300" role="img" aria-label="Illustrative loading door mesh preview"><g class="lg-grid"><path d="M50 270L320 180L550 260M100 285L350 200M220 295L420 220M340 295L490 240M70 245L320 160L570 240"/></g><g fill="${state.wire?'none':old?'var(--lg-dim)':'var(--lg-warn)'}" stroke="var(--lg-dim)" stroke-width="1.5"><path d="M218 246L218 56L350 24L350 214Z"/><path d="M350 24L373 38L373 230L350 214Z"/><path d="M218 246L240 260L373 230L350 214Z"/></g><g fill="none" stroke="var(--lg-line)" stroke-width="2"><path d="M228 70L340 43M228 90L340 63M228 110L340 83M228 130L340 103M228 150L340 123M228 170L340 143M228 190L340 163M228 210L340 183M228 230L340 203"/></g><text x="400" y="85">LOD 0</text><text x="400" y="108">24,120 triangles</text><text x="400" y="131">2 material slots</text></svg>`;}
+function treeScene(){return `<div class="lg-tree"><div class="lg-tree-item">⌄ Root <small>Guard context</small></div><div class="lg-tree-item child">⌄ Active <small>Enter: IsAlive</small></div><div class="lg-tree-item deep">Patrol <small>MoveTo · PatrolSpeed</small></div><div class="lg-tree-item deep selected">+ Investigate <small>MoveToLastKnownLocation</small></div><div class="lg-tree-item deep">Chase <small>Target visible → Attack</small></div><div class="lg-tree-item deep selected">~ Attack <small>Distance &lt; 150 cm</small></div></div>`;}
+function animScene(){return `<div class="lg-graph" role="img" aria-label="Sample pose flow from blend space through layered blend to output pose"><div class="lg-node changed"><div class="lg-node-head">~ BlendSpace Player</div><div class="lg-node-body"><span>BS_GuardMovement_v2</span><span class="lg-muted">Speed · Direction</span><span>Play rate <span class="lg-changed">1.15</span></span></div></div><span class="lg-graph-arrow">→</span><div class="lg-node changed"><div class="lg-node-head">+ Layered Blend Per Bone</div><div class="lg-node-body"><span>Base pose · Upper body</span><span class="lg-muted">spine_01 · depth 3</span></div></div><span class="lg-graph-arrow">→</span><div class="lg-node"><div class="lg-node-head">Output Pose</div><div class="lg-node-body">Final animation pose</div></div></div>`;}
+function preview(a){let controls='';if(state.asset==='mesh'){controls=`<div class="lg-control"><button data-revision="base" class="cursor-interaction" aria-pressed="${state.revision==='base'}">Base</button><button data-revision="selected" class="cursor-interaction" aria-pressed="${state.revision==='selected'}">Selected</button><label><input id="lg-wire" type="checkbox" ${state.wire?'checked':''}> Wireframe</label></div>`;}const scene=state.asset==='map'?mapScene():state.asset==='mesh'?meshScene():state.asset==='tree'?treeScene():animScene();return `<div class="lg-toolbar"><strong>${state.asset==='map'?'Spatial changes':state.asset==='mesh'?'Mesh comparison':state.asset==='tree'?'State hierarchy':'AnimGraph · Locomotion'}</strong>${controls}</div><div class="lg-preview"><div class="lg-preview-head"><span>${state.asset==='map'?'Warehouse · schematic scene':state.asset==='mesh'?'SM_LoadingDoor · '+(state.revision==='base'?'base':'selected')+' revision':a.name}</span><span class="lg-muted">Illustrative preview</span></div>${scene}<div class="lg-legend"><span class="lg-added">+ Added</span><span class="lg-removed">− Removed</span><span class="lg-changed">~ Changed</span></div></div><div class="lg-note">${a.note}</div>`;}
+function render(){const a=assets[state.asset];root.querySelector('#lg-name').textContent=a.name;root.querySelector('#lg-path').textContent=a.path;root.querySelector('#lg-type').textContent=a.type;root.querySelector('#lg-coverage').textContent=a.coverage;root.querySelectorAll('[data-asset]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.asset===state.asset));root.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.view===state.view));root.querySelector('#lg-pane').innerHTML=state.view==='changes'?changes(a):state.view==='contents'?contents(a):preview(a);}
+function save(){window.openai?.setWidgetState?.({modelContent:{asset:state.asset,view:state.view},privateContent:{row:state.row,revision:state.revision,wire:state.wire}})?.catch(()=>{});}
+root.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.asset){state.asset=b.dataset.asset;state.row=0;}else if(b.dataset.view){state.view=b.dataset.view;}else if(b.dataset.row!==undefined){state.row=Number(b.dataset.row);}else if(b.dataset.revision){state.revision=b.dataset.revision;}else return;render();save();});
+root.addEventListener('change',e=>{if(e.target.id==='lg-wire'){state.wire=e.target.checked;render();save();}});
+window.addEventListener('openai:set_globals',e=>{const s=e.detail?.globals?.widgetState?.modelContent;if(s&&assets[s.asset]&&['changes','contents','preview'].includes(s.view)){state.asset=s.asset;state.view=s.view;state.row=0;render();}});
+render();
+const tweaks={detailSpacing:14};if(globalThis.Tweak){const tweak=new Tweak({container:root,onChange:()=>{root.querySelector('.lg-pane').style.padding=tweaks.detailSpacing+'px';}});tweak.addSlider(tweaks,'detailSpacing',{label:'Review pane spacing',min:10,max:26,unit:'px'});}
+})();
+</script>
+</div>

@@ -68,4 +68,34 @@ catch (TargetInvocationException ex) when (ex.InnerException is InvalidDataExcep
 if (retained.Count != decoded.Count) throw new Exception("Unknown suffix discarded decoded pins.");
 Console.WriteLine("8 native cast/pin retention checks passed.");
 
+// Package name-table indexes are storage details, not a Select type change.
+var simplify = typeof(GraphExtractor).GetMethod("Simplify", BindingFlags.Static | BindingFlags.NonPublic)!;
+(UAsset asset, Newtonsoft.Json.Linq.JObject property) TypeProperty(string category, bool padding) {
+    var asset = new UAsset(EngineVersion.VER_UE5_4);
+    asset.ClearNameIndexList(); asset.Exports = new(); asset.Imports = new();
+    if (padding) asset.AddNameReference(new FString("UnrelatedAddedName"));
+    var categoryIndex = asset.AddNameReference(new FString(category));
+    var noneIndex = asset.AddNameReference(new FString("None"));
+    using var stream = new MemoryStream();
+    using (var writer = new AssetBinaryWriter(stream, Encoding.UTF8, true, asset)) {
+        writer.Write(categoryIndex); writer.Write(0); writer.Write(noneIndex); writer.Write(0);
+        writer.Write(0); writer.Write((byte)0); // Object and container.
+        writer.WriteBooleanInt(false); writer.WriteBooleanInt(false);
+        writer.Write(0); writer.Write(noneIndex); writer.Write(0); writer.Write(Guid.Empty);
+        writer.WriteBooleanInt(false);
+        if (asset.GetCustomVersion<UAssetAPI.CustomVersions.FReleaseObjectVersion>() >= UAssetAPI.CustomVersions.FReleaseObjectVersion.PinTypeIncludesUObjectWrapperFlag) writer.WriteBooleanInt(false);
+        if (asset.GetCustomVersion<UAssetAPI.CustomVersions.FUE5ReleaseStreamObjectVersion>() >= UAssetAPI.CustomVersions.FUE5ReleaseStreamObjectVersion.SerializeFloatPinDefaultValuesAsSinglePrecision) writer.WriteBooleanInt(false);
+    }
+    return (asset, new Newtonsoft.Json.Linq.JObject { ["$type"] = "UAssetAPI.PropertyTypes.Structs.RawStructPropertyData, UAssetAPI", ["StructType"] = "EdGraphPinType", ["Name"] = "IndexPinType", ["Value"] = Convert.ToBase64String(stream.ToArray()) });
+}
+Newtonsoft.Json.Linq.JToken Normalize((UAsset asset, Newtonsoft.Json.Linq.JObject property) value) => (Newtonsoft.Json.Linq.JToken)simplify.Invoke(null, [value.asset, value.property])!;
+var firstType = TypeProperty("bool", false); var shiftedType = TypeProperty("bool", true);
+if (firstType.property.Value<string>("Value") == shiftedType.property.Value<string>("Value")) throw new Exception("Fixture indexes did not shift.");
+if (!Newtonsoft.Json.Linq.JToken.DeepEquals(Normalize(firstType), Normalize(shiftedType))) throw new Exception("Name indexes became a type change.");
+if (Newtonsoft.Json.Linq.JToken.DeepEquals(Normalize(firstType), Normalize(TypeProperty("int", true)))) throw new Exception("Actual type change was lost.");
+shiftedType.property["Value"] = Convert.ToBase64String(Convert.FromBase64String(shiftedType.property.Value<string>("Value")!).Concat(new byte[] { 99 }).ToArray());
+try { Normalize(shiftedType); throw new Exception("Unknown type suffix was silently accepted."); }
+catch (TargetInvocationException ex) when (ex.InnerException is InvalidDataException) { }
+Console.WriteLine("3 native pin-type property normalization checks passed.");
+
 

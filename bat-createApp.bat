@@ -70,6 +70,12 @@ if errorlevel 1 (
   echo ERROR: Build failed.
   goto :fail
 )
+echo Publishing the current self-contained Blueprint reader...
+call npm run blueprint:publish
+if errorlevel 1 (
+  echo ERROR: Blueprint reader publish failed. Portable packaging cancelled.
+  goto :fail
+)
 echo.
 
 :: -- [3/3] Package as a portable executable -------------------------------------

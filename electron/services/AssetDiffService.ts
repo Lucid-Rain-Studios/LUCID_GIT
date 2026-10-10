@@ -126,6 +126,8 @@ async function dirSizeBytes(dir: string): Promise<number> {
 // ── Service ───────────────────────────────────────────────────────────────────
 
 class AssetDiffService {
+  private lfsReads = new Map<string, Promise<Buffer>>()
+  private lfsFailures = new Map<string, { reason: string; until: number }>()
   private async identity(repoPath: string, filePath: string, ref: string): Promise<{ key: string; ref: string }> {
     if (ref === 'WORKING') {
       const stat = await fs.promises.stat(path.join(repoPath, filePath), { bigint: true }).catch(() => null)
@@ -158,6 +160,7 @@ class AssetDiffService {
     ref: string,
     destDir: string,
     side: 'left' | 'right',
+    retryLfs?: Set<string>,
   ): Promise<{ blobPath: string | null; sizeBytes: number; reason?: string }> {
     const ext      = path.extname(filePath)
     const destFile = path.join(destDir, `${side}${ext}`)
@@ -188,11 +191,7 @@ class AssetDiffService {
       try {
         const declared = Number(pointer.match(/size (\d+)/)?.[1] ?? 0)
         if (declared > PREVIEW_MAX_BYTES) return { blobPath: null, sizeBytes: declared, reason: 'LFS asset exceeds the 256 MB preview limit' }
-        const [token, remoteUrl] = await Promise.all([
-          authService.getCurrentToken(), gitService.getRemoteUrl(repoPath),
-        ])
-        binary = await execBinary([...gitAuthArgs(token, remoteUrl), 'lfs', 'smudge', '--', filePath], repoPath, binary)
-        if (binary.subarray(0, LFS_POINTER.length).toString() === LFS_POINTER) throw new Error('LFS content unavailable')
+        binary = await this.resolveLfsPointer(repoPath, filePath, binary, retryLfs)
       } catch (error) {
         const sizeMatch = pointer.match(/size (\d+)/)
         return { blobPath: null, sizeBytes: sizeMatch ? parseInt(sizeMatch[1]) : 0, reason: 'LFS content unavailable: ' + String(error) }
@@ -207,16 +206,36 @@ class AssetDiffService {
   }
 
   /** Resolve a captured pointer without checking out or modifying its worktree file. */
-  async resolveLfsPointer(repoPath: string, filePath: string, pointer: Buffer): Promise<Buffer> {
+  async resolveLfsPointer(repoPath: string, filePath: string, pointer: Buffer, retryLfs?: Set<string>): Promise<Buffer> {
     const text = pointer.toString('utf8')
     const oid = text.match(/^oid sha256:([a-f0-9]{64})$/m)?.[1]
     const size = Number(text.match(/^size (\d+)$/m)?.[1])
     if (!oid || !Number.isSafeInteger(size) || size < 0) throw new Error('Invalid LFS pointer.')
     if (size > PREVIEW_MAX_BYTES) throw new Error('LFS asset exceeds the 256 MB preview limit.')
     const [token, remoteUrl] = await Promise.all([authService.getCurrentToken(), gitService.getRemoteUrl(repoPath)])
-    const content = await execBinary([...gitAuthArgs(token, remoteUrl), 'lfs', 'smudge', '--', filePath], repoPath, pointer)
-    if (content.length !== size || crypto.createHash('sha256').update(content).digest('hex') !== oid) throw new Error('LFS content is unavailable or does not match the selected pointer.')
-    return content
+    const key = crypto.createHash('sha256').update(JSON.stringify([path.resolve(repoPath), remoteUrl, oid, size, token ?? ''])).digest('hex')
+    const force = retryLfs !== undefined && !retryLfs.has('lfs:' + key)
+    retryLfs?.add('lfs:' + key)
+    if (force) this.lfsFailures.delete(key)
+    const failed = this.lfsFailures.get(key)
+    if (failed && failed.until > Date.now()) throw new Error(failed.reason)
+    this.lfsFailures.delete(key)
+    const existing = this.lfsReads.get(key)
+    if (existing) return existing
+    const pending = (async () => {
+      try {
+        const content = await execBinary([...gitAuthArgs(token, remoteUrl), 'lfs', 'smudge', '--', filePath], repoPath, pointer)
+        if (content.length !== size || crypto.createHash('sha256').update(content).digest('hex') !== oid) throw new Error('LFS content is unavailable or does not match the selected pointer.')
+        return content
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        this.lfsFailures.set(key, { reason, until: Date.now() + 15_000 })
+        while (this.lfsFailures.size > 32) this.lfsFailures.delete(this.lfsFailures.keys().next().value!)
+        throw error
+      }
+    })().finally(() => this.lfsReads.delete(key))
+    this.lfsReads.set(key, pending)
+    return pending
   }
 
   /**

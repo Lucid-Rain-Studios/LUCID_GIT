@@ -6,10 +6,11 @@ export interface KleeCanvas {
   bounds(): { x: number; y: number; width: number; height: number }
   select(id: string, focus?: boolean): void
   setChanges(changes: Record<string, string>): void
+  setWireChanges(changes: Record<string, 'added' | 'removed' | 'modified'>): void
   destroy(): void
 }
 interface KleeModule {
-  createKleeCanvas(canvas: HTMLCanvasElement, text: string, options: { camera?: BlueprintCamera; changes: Record<string, string>; onCamera(camera: BlueprintCamera): void; onSelect(id: string): void }): KleeCanvas
+  createKleeCanvas(canvas: HTMLCanvasElement, text: string, options: { camera?: BlueprintCamera; changes: Record<string, string>; wireChanges?: Record<string, 'added' | 'removed' | 'modified'>; onCamera(camera: BlueprintCamera): void; onSelect(id: string): void }): KleeCanvas
 }
 let loading: Promise<KleeModule> | undefined
 export function loadKlee(): Promise<KleeModule> {

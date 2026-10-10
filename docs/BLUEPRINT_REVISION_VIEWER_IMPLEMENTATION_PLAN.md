@@ -63,7 +63,7 @@ Checked boxes describe implementation verified within the evidence scope below. 
 - [x] Locate the actual timeline file-selection route, diff contracts, revision retrieval, LFS recovery, cache, cancellation, and app fullscreen conventions.
 - [x] Read both functional and UI audit reports with scoped authorization; record applicable `LG-` and `UI-` IDs without assuming a baseline defect is still present.
 - [x] Select and pin dependency versions and document licenses, notices, supported platforms, and helper packaging.
-- [ ] Build a read-only extraction spike for one simple and one representative complex editor-saved Blueprint from the target UE version.
+- [x] Build a read-only extraction spike for one simple and one representative complex editor-saved Blueprint from the target UE version.
 - [ ] Extract event graphs, function graphs, macro graphs, collapsed graphs, node identities/classes, saved positions, comments, pin identities/types/defaults, and both execution and data links.
 - [x] Detect custom node/pin serialization and unsupported exports; return explicit diagnostics instead of silently dropping objects.
 - [x] Convert one extracted graph into Klee-compatible text or an explicitly supported renderer input. Do not assume JSON can be passed directly to Klee.
@@ -78,8 +78,8 @@ Exit condition: real `.uasset` bytes render a faithfully connected graph locally
 - [x] For a normal commit, compare that commit with the parent selected by existing timeline semantics. For a root commit, use an absent base. Preserve existing merge-parent selection; show which parent is being compared.
 - [x] If the existing timeline exposes staged or working-tree comparisons, reuse its modes: HEAD versus index for staged changes, index versus working tree for unstaged changes. Do not substitute local files for a historical revision.
 - [x] Handle renamed paths, added files, deleted files, and graphs present on only one side.
-- [ ] Recognize Git LFS pointer bytes before extraction. Resolve exact object IDs through the existing authenticated recovery path; avoid repository-wide downloads, repeated fetches, and indefinite retries.
-- [ ] Keep missing or offline objects distinct from unsupported assets and parser failures. Allow deliberate retry of a missing side.
+- [x] Recognize Git LFS pointer bytes before extraction. Resolve exact object IDs through the existing authenticated recovery path; avoid repository-wide downloads, repeated fetches, and indefinite retries. Verified with real Git LFS and an authenticated loopback endpoint plus app credential-scoping regressions; no private remote contacted.
+- [x] Keep missing or offline objects distinct from unsupported assets and parser failures. Allow deliberate retry of a missing side.
 - [ ] Materialize revision bytes and any required companion package files into an app-managed temporary area without checkout, index writes, or workspace changes. If required companions cannot be obtained, report that explicitly.
 - [x] Capture working-tree content consistently; invalidate by content identity when the file changes and prevent stale results from replacing a newer selection.
 
@@ -94,7 +94,7 @@ Exit condition: each comparison side displays the selected revision's bytes, inc
 - [x] Cache normalized documents by asset content hash, companion identities, engine/mapping configuration, extractor version, and schema version. Bound memory/disk usage and evict old entries.
 - [x] Deduplicate matching in-flight reads/extractions; cancellation by one viewer must not abort work still needed by another consumer.
 - [x] Cancel obsolete subscriptions when switching files or revisions. Suppress stale responses. Preserve existing watcher debounce and safe read preemption.
-- [ ] Avoid repeated full asset scans, repeated extraction during pan/zoom, and full JSON IPC transfers when reopening cached content. Measure representative payload sizes.
+- [x] Avoid repeated full asset scans, repeated extraction during pan/zoom, and full JSON IPC transfers when reopening cached content. Measure representative payload sizes.
 - [ ] Bundle the .NET helper appropriately for each supported release platform; verify packaged execution and license notices without relying on a developer-installed runtime.
 
 Exit condition: typed read requests return bounded, diagnosable graph data; repeated viewing reuses work and rapid selection stays responsive.
@@ -104,9 +104,9 @@ Exit condition: typed read requests return bounded, diagnosable graph data; repe
 - [x] Match graphs by serialized stable identity where available, then a documented path/name strategy. Represent added and removed graphs explicitly.
 - [x] Match nodes by stable node GUID and pins by stable pin identity. Use conservative, qualified fallbacks when identities change; expose ambiguous matches.
 - [x] Compare node presence, serialized properties/defaults, pin types/defaults, and connection endpoints. Keep execution links and data links distinguishable.
-- [ ] Report saved layout moves and comment changes separately from logical/property changes.
+- [x] Report saved layout moves and comment changes separately from logical/property changes.
 - [x] Preserve actual authored positions on each side. Synchronized cameras must not silently rearrange either graph.
-- [ ] Label added, removed, and modified nodes/wires with text or shapes as well as color. Keep change counts traceable to concrete items.
+- [x] Label added, removed, and modified nodes/wires with text or shapes as well as color. Keep change counts traceable to concrete items.
 - [x] Treat byte changes with no supported graph changes honestly: show that graph comparison found no differences and that other asset data may have changed.
 - [x] When either side is partial, show its diagnostics and restrict comparison claims to verified data; offer the existing binary view.
 
@@ -114,7 +114,7 @@ Exit condition: fixtures for node additions/removals, default edits, rewiring, l
 
 ### Phase 5 — Timeline UI and read-only interaction
 
-- [ ] On timeline `.uasset` selection, detect actual asset class rather than relying on filename prefixes. Open supported Blueprint graph comparisons in the changes area by default.
+- [x] On timeline `.uasset` selection, detect actual asset class rather than relying on filename prefixes. Open supported Blueprint graph comparisons in the changes area by default. Serialized export classes, renamed real Blueprint/material/sound fixtures, changes-area routing, one-sided comparisons and stale-response regressions verified; installed-app acceptance remains separate.
 - [x] Display base/selected revision labels, hashes or working-tree identity, and the asset path. Use “Working tree” only for actual working-tree comparisons.
 - [ ] Add paired graph selection for Event Graphs, functions, and macros, with explicit absent-side states. Navigate collapsed graphs and supported internal references within the extracted document.
 - [x] Add independent or synchronized pan/zoom, fit graph, selection, node/property inspection, and previous/next change navigation.
@@ -139,13 +139,13 @@ Exit condition: full-screen review works in the packaged app and restores both U
 
 ### Phase 7 — Acceptance, packaging, and audit updates
 
-- [ ] Verify an actual timeline commit click, graph selection, change navigation, fullscreen entry, Escape exit, and return to the same selected file in the running app.
+- [x] Verify an actual timeline commit click, graph selection, change navigation, fullscreen entry, Escape exit, and return to the same selected file in the running app. User-verified during the live acceptance check; no automated desktop run is claimed.
 - [ ] Test root commits, chosen merge parents, renames, additions, deletions, and graph additions/removals. Test staged/unstaged modes if exposed by the existing timeline.
-- [ ] Test locally available LFS, authenticated recovery, unavailable remote objects, and offline operation; confirm no repeated fetch loop.
+- [x] Test locally available LFS, authenticated recovery, unavailable remote objects, and offline operation; confirm no repeated fetch loop. Controlled authenticated endpoint covers download, rejected credentials, missing objects, cached offline operation and missing offline content, with repository-state preservation.
 - [ ] Test rapid file/revision switching, cancelled requests, deduplicated consumers, large Blueprints, helper timeouts, and malformed assets.
 - [ ] Confirm read-only invariants: asset hashes, index state, worktree status, node positions, pin links, and defaults remain unchanged after all supported interactions and attempted mutation shortcuts.
 - [ ] Validate each supported UE version with real editor-saved fixtures. Publish a tested compatibility matrix; distinguish validated support from best-effort parsing.
-- [ ] Verify packaged helper startup and graph rendering on supported platforms, with Unreal closed and no development tooling installed.
+- [ ] Verify packaged helper startup and graph rendering on supported platforms, with Unreal closed and no development tooling installed. Windows assembled-package helper startup is verified through exact Index/Working WashGun reads (23 graphs each, reader 7 matches packaged main). Live portable-app graph review and other-platform acceptance remain pending.
 - [ ] Record extraction/render timings, cache reuse, resource usage, and canvas cleanup on representative small and large graphs. Set measured budgets before release rather than inventing targets.
 - [ ] Check accessibility, legibility, zoom, narrow-window behavior, and full-screen visuals in the live app. Preserve production styling; do not treat the HTML concept as acceptance evidence.
 - [x] For applicable findings that are fully resolved, update the functional/UI resolution notes, check only verified items, and regenerate the relevant reports using their existing generators. Keep `LG-` and `UI-` IDs separate, preserve Undo and optimization work, and leave partial findings unchecked.

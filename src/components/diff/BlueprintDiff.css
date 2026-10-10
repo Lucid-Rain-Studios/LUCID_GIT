@@ -333,6 +333,17 @@
 .bp-navigation summary::-webkit-details-marker { display:none; }
 .bp-navigation summary:focus-visible { outline:2px solid var(--lg-accent); }
 .bp-navigation-panel { position:absolute; top:calc(100% + 6px); left:0; z-index:20; width:min(320px,80cqw); padding:12px; display:flex; flex-direction:column; gap:8px; background:var(--lg-bg-elevated); border:1px solid var(--lg-border-strong); border-radius:var(--lg-radius); box-shadow:0 8px 24px rgba(0,0,0,.35); }
+.bp-navigation-panel { max-height:calc(100cqh - 65px); overflow:auto; }
+.bp-choice { min-width:0; }
+.bp-choice>button,.bp-choice-list>button { width:100%; justify-content:flex-start; min-height:32px; color:var(--lg-text-primary); text-align:left; }
+.bp-choice-name { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bp-choice-detail { flex-shrink:0; margin-left:auto; font-size:11px; }
+.bp-choice-prefix { flex-shrink:0; color:var(--lg-text-secondary); font-size:11px; padding-right:6px; border-right:1px solid var(--lg-border-strong); }
+.bp-choice-list { margin-top:4px; padding:4px; max-height:min(240px,45cqh); overflow:auto; border:1px solid var(--lg-border-strong); border-radius:var(--lg-radius); background:var(--lg-bg-secondary); }
+.bp-choice-list>button { background:transparent; border-color:transparent; gap:8px; }
+.bp-choice-list>button[aria-selected=true],.bp-choice-list>button:focus-visible { background:rgba(var(--lg-accent-rgb),.1); }
+.bp-choice-check { flex-shrink:0; color:var(--lg-accent); }
+.bp-choice-check.hidden { visibility:hidden; }
 .bp-navigation:not([open])>.bp-navigation-panel { display:none; }
 .bp-navigation-panel label { font-weight:600; }
 .bp-navigation-panel select { width:100%; max-width:none; min-width:0; flex:none; }
@@ -340,3 +351,6 @@
 .bp-active-graph { flex:1; min-width:60px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
 .bp-toolbar { position:relative; z-index:3; }
 .bp-info,.bp-warning,.bp-footer { flex-shrink:0; }
+.bp-comment-diff { display:flex; flex-direction:column; gap:6px; margin:12px 0; }
+.bp-comment-diff span { color:var(--lg-text-secondary); }
+.bp-comment-diff pre { white-space:pre-wrap; overflow-wrap:anywhere; }

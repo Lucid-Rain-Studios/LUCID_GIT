@@ -38,6 +38,7 @@ export interface BlueprintGraph {
 export interface BlueprintDocument {
   schemaVersion: 1
   readerVersion?: number
+  assetClass?: string
   status: 'complete' | 'partial' | 'unsupported'
   engineVersion: string
   graphs: BlueprintGraph[]
@@ -49,9 +50,11 @@ export interface BlueprintSide {
   status: 'ready' | 'absent' | 'unavailable'
   reason?: string
   contentHash?: string
+  documentKey?: string
   document?: BlueprintDocument
 }
 export interface BlueprintRequest {
+  knownDocuments?: string[]
   force?: boolean
   filePath: string
   oldPath?: string

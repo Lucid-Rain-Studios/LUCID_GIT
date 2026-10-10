@@ -11,9 +11,12 @@ import { useRepoStore } from '@/stores/repoStore'
 
 function BlueprintAssetPanel({ request, files, ...props }: { files?: BlueprintFileChoice[]; request: Omit<BlueprintRequest, 'requestId'>; repoPath: string; filePath: string; hash: string; remoteUrl: string | null }) {
   const [details, setDetails] = useState(false)
+  const [unsupported, setUnsupported] = useState<string | null>(null)
   const project = useRepoStore(state => state.repoPath === props.repoPath ? state.unrealProject : null)
-  return details ? <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}><button className="lg-toolbar-control" onClick={() => setDetails(false)}>Back to Blueprint graph</button><AssetPanel {...props} /></div>
-    : <BlueprintDiff files={files} project={project} repoPath={props.repoPath} request={request} onFallback={() => setDetails(true)} />
+  return details || unsupported ? <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+    {unsupported ? <div role="status" style={{ padding: '10px 12px', color: 'var(--lg-text-secondary)', fontFamily: 'var(--lg-font-ui)', fontSize: 12, borderBottom: '1px solid var(--lg-border)' }}>{unsupported}</div> : <button className="lg-toolbar-control" onClick={() => setDetails(false)}>Back to Blueprint graph</button>}
+    <AssetPanel {...props} />
+  </div> : <BlueprintDiff files={files} project={project} repoPath={props.repoPath} request={request} onFallback={() => setDetails(true)} onUnsupported={setUnsupported} />
 }
 
 export function isPreviewAsset(filePath: string): boolean {

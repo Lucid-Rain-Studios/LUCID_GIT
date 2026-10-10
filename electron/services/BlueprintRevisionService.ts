@@ -8,8 +8,8 @@ import { execSafe, withGitTimeout } from '../util/dugite-exec'
 import { withRepoSlot } from '../util/repo-gate'
 import type { BlueprintComparison, BlueprintDocument, BlueprintRequest, BlueprintSide } from '../blueprintTypes'
 
-const EXTRACTOR_VERSION = '6-uassetapi-3228c1e8'
-const READER_VERSION = 6
+const EXTRACTOR_VERSION = '8-uassetapi-3228c1e8'
+const READER_VERSION = 8
 const MAX_BYTES = 256 * 1024 * 1024
 const MAX_CACHE_BYTES = 256 * 1024 * 1024
 const sha = (b: string | Buffer) => crypto.createHash('sha256').update(b).digest('hex')
@@ -46,6 +46,7 @@ export class BlueprintRevisionService {
     if (!req || typeof repoPath !== 'string') throw new Error('Invalid Blueprint request.')
     validatePath(req.filePath); validatePath(req.oldPath ?? req.filePath)
     validateRef(req.leftRef); validateRef(req.rightRef)
+    if (req.knownDocuments !== undefined && (!Array.isArray(req.knownDocuments) || req.knownDocuments.length > 8 || req.knownDocuments.some(key => typeof key !== 'string' || !/^[a-f0-9]{64}$/.test(key)))) throw new Error('Invalid Blueprint document cache keys.')
     const repo = await fs.realpath(repoPath)
     const refreshKeys = req.force === true ? new Set<string>() : undefined
     return withGitTimeout(async () => {
@@ -54,7 +55,14 @@ export class BlueprintRevisionService {
       if (signal?.aborted) throw new Error('Blueprint review cancelled.')
       const right = await this.side(repo, req.filePath, req.rightRef, signal, refreshKeys)
       if (signal?.aborted) throw new Error('Blueprint review cancelled.')
-      return { left, right }
+      const known = req.knownDocuments ? new Set(req.force ? [] : req.knownDocuments) : undefined
+      const transfer = (side: BlueprintSide): BlueprintSide => {
+        if (!known || !side.documentKey || !side.document) return side
+        if (known.has(side.documentKey)) return { ...side, document: undefined }
+        known.add(side.documentKey)
+        return side
+      }
+      return { left: transfer(left), right: transfer(right) }
     }, 120_000, 'Blueprint revision read')
   }
 
@@ -135,22 +143,22 @@ export class BlueprintRevisionService {
       // after release, so a graph reader cannot delay staging or checkout.
       const snapshot = await withRepoSlot(repo, 'read', async (): Promise<BlueprintSide | { contentHash: string; key: string; blobPath: string }> => {
       const before = ref === 'WORKING' ? await fs.stat(path.join(repo, file), { bigint: true }) : null
-      const blob = await assetDiffService.extractBlob(repo, file, resolved, temporary, 'left')
+      const blob = await assetDiffService.extractBlob(repo, file, resolved, temporary, 'left', refreshKeys)
       if (!blob.blobPath) return { ref, path: file, status: 'unavailable', reason: blob.reason ?? 'Revision content is unavailable.' }
       let bytes: Buffer = await fs.readFile(blob.blobPath)
       if (bytes.subarray(0, 42).toString().startsWith('version https://git-lfs.github.com/spec/v1')) {
-        bytes = await assetDiffService.resolveLfsPointer(repo, file, bytes)
+        bytes = await assetDiffService.resolveLfsPointer(repo, file, bytes, refreshKeys)
         await fs.writeFile(blob.blobPath, bytes)
       }
       // Resolve companion exports from exactly the same revision/path.
       const companion = file.replace(/\.uasset$/i, '.uexp')
       let companionHash = ''
       if (companionRef !== 'ABSENT') {
-        const extra = await assetDiffService.extractBlob(repo, companion, companionRef, temporary, 'left')
+        const extra = await assetDiffService.extractBlob(repo, companion, companionRef, temporary, 'left', refreshKeys)
         if (!extra.blobPath) return { ref, path: file, status: 'unavailable', reason: extra.reason ?? 'Companion exports are unavailable.' }
         let extraBytes: Buffer = await fs.readFile(extra.blobPath)
         if (extraBytes.subarray(0, 42).toString().startsWith('version https://git-lfs.github.com/spec/v1')) {
-          extraBytes = await assetDiffService.resolveLfsPointer(repo, companion, extraBytes)
+          extraBytes = await assetDiffService.resolveLfsPointer(repo, companion, extraBytes, refreshKeys)
           await fs.writeFile(extra.blobPath, extraBytes)
         }
         companionHash = sha(extraBytes)
@@ -171,7 +179,7 @@ export class BlueprintRevisionService {
       const force = refreshKeys !== undefined && !refreshKeys.has(snapshot.key)
       refreshKeys?.add(snapshot.key)
       const document = await this.extract(snapshot.key, snapshot.blobPath, force)
-      return { ref, path: file, status: 'ready', contentHash: snapshot.contentHash, document }
+      return { ref, path: file, status: 'ready', contentHash: snapshot.contentHash, documentKey: snapshot.key, document }
     } catch (error) {
       return { ref, path: file, status: 'unavailable', reason: error instanceof Error ? error.message : String(error) }
     } finally { await fs.rm(temporary, { recursive: true, force: true }).catch(() => {}) }

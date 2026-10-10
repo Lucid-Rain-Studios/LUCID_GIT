@@ -1,6 +1,7 @@
 // Typed wrappers around window.lucidGit.*
 import type { IndexDiagnosis, IndexRepairResult, IndexRecoveryBlockers, IndexLockRecoveryResult, RecoveryGitTask } from '../electron/indexRecoveryTypes'
 import type { BlueprintRequest, BlueprintComparison } from '../electron/blueprintTypes'
+import { createBlueprintClient } from './lib/blueprintClient'
 export type { BlueprintRequest, BlueprintComparison, BlueprintDocument, BlueprintGraph, BlueprintNode, BlueprintPin, BlueprintSide } from '../electron/blueprintTypes'
 export type { IndexDiagnosis, IndexRepairResult, IndexRecoveryBlockers, IndexLockRecoveryResult, RecoveryGitTask } from '../electron/indexRecoveryTypes'
 // This file is the single source of truth for the renderer-side IPC contract.
@@ -1032,4 +1033,4 @@ function wrapApi<T extends LucidGitAPI>(api: T): T {
 
 export const logUiError = logRendererEvent
 
-export const ipc: LucidGitAPI = wrapApi(window.lucidGit)
+export const ipc: LucidGitAPI = wrapApi({ ...window.lucidGit, blueprintCompare: createBlueprintClient((repo, request) => window.lucidGit.blueprintCompare(repo, request)) })
