@@ -48,7 +48,7 @@ export function PRReviewWorkspace({ pr, repoPath, ghSlug, summary, loading, erro
   const isAsset = !!active && isPreviewAsset(active.path)
   const activePath = active?.path
   const activeOldPath = active?.oldPath
-  const isBlueprint = !!active && /\.uasset$/i.test(active.path) && unsupportedPath !== active.path
+  const isBlueprint = !!active && /\.(uasset|umap)$/i.test(active.path) && unsupportedPath !== active.path
   const select = (file: BranchDiffFile) => { setSelectedPath(file.path); setDetails(false) }
   const closeMenu = () => { setMenu(null); menuOrigin.current?.focus() }
   const openMenu = (event: React.MouseEvent<HTMLElement>, file: BranchDiffFile) => {
@@ -113,7 +113,7 @@ export function PRReviewWorkspace({ pr, repoPath, ghSlug, summary, loading, erro
               }}>
               <span className={needsChoice ? 'pr-conflict-tone' : 'pr-review-status'}>{needsChoice ? choices[file.path] ? '✓' : '!' : file.status}</span>
               <span><strong>{file.path.split('/').pop()}</strong><small>{file.path.slice(0, file.path.lastIndexOf('/')) || '/'}</small>
-                {/\.uasset$/i.test(file.path) && <small className="pr-blueprint-tone">◇ BP Graph View</small>}
+                {/\.(uasset|umap)$/i.test(file.path) && <small className="pr-blueprint-tone">◇ Unreal Asset Review</small>}
                 {needsChoice && <small className={choices[file.path] ? 'pr-chosen-tone' : 'pr-conflict-tone'}>{choices[file.path] ? `Keep ${choices[file.path] === 'head' ? pr.headBranch : pr.baseBranch}` : 'Conflict · Needs a choice'}</small>}
               </span>
             </button>
@@ -122,7 +122,7 @@ export function PRReviewWorkspace({ pr, repoPath, ghSlug, summary, loading, erro
         })}
         {!loading && !error && !files.some(file => file.path.toLowerCase().includes(filter.toLowerCase())) && <p className="pr-review-message">{files.length ? 'No matching files' : 'No changed files'}</p>}
       </div>
-      <div className="pr-review-files-note">Blueprint assets open in BP Graph View.<br />Other assets open in Binary details.</div>
+      <div className="pr-review-files-note">Unreal packages open in Asset Review.<br />Select Contents, Changes or Preview.</div>
     </aside>
     <section className="pr-review-selected" aria-label="Selected file review">
       {!active ? <div className="pr-review-empty">{loading ? 'Loading review…' : 'Select a file to review'}</div> : <>
@@ -132,7 +132,7 @@ export function PRReviewWorkspace({ pr, repoPath, ghSlug, summary, loading, erro
         </header>
         {conflict && <div className="pr-review-conflict"><span>! {conflict.autoResolved ? 'Auto-resolved · Review choice' : conflict.conflictType === 'binary' ? 'Binary conflict' : conflict.conflictType === 'delete-modify' ? 'Delete / modify conflict' : 'Text conflict'}</span><small>Choose file revision</small><div><ConflictChoices path={active.path} pr={pr} choices={choices} busy={busy} onChoose={onChoose} /></div></div>}
         <button className="pr-review-collapse" aria-expanded={!collapsed} aria-controls="pr-file-preview" onClick={() => setCollapsed(!collapsed)}>
-          {collapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} />}{isBlueprint ? 'BP Graph View' : isAsset ? 'Binary details' : 'File diff'}
+          {collapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} />}{isBlueprint ? 'Unreal Asset Review' : isAsset ? 'Binary details' : 'File diff'}
         </button>
         <div id="pr-file-preview" className="pr-review-preview" style={{ display: collapsed || details ? 'none' : 'flex' }}>
           {loading || error ? <p className="pr-review-message">{error || 'Loading review…'}</p> : <>
@@ -140,7 +140,7 @@ export function PRReviewWorkspace({ pr, repoPath, ghSlug, summary, loading, erro
             <FileDetailsSidePanel repoPath={repoPath} filePath={active.path} hash={selectedRevision} remoteUrl={remoteUrl}
               diff={diffState?.key === previewKey ? diffState.diff : undefined} diffLoading={!isAsset && diffState?.key !== previewKey}
               blueprintRequest={{ filePath: active.path, oldPath: active.oldPath, leftRef: pr.baseSha, rightRef: pr.headSha }}
-              blueprintFiles={files.filter(file => /\.uasset$/i.test(file.path)).map(file => ({ path: file.path, selected: file.path === active.path, onSelect: () => select(file) }))}
+              blueprintFiles={files.filter(file => /\.(uasset|umap)$/i.test(file.path)).map(file => ({ path: file.path, selected: file.path === active.path, onSelect: () => select(file) }))}
               revisionLabels={{ left: `Current ${pr.baseBranch}`, right: `Incoming ${pr.headBranch}` }}
               onBlueprintUnsupported={() => setUnsupportedPath(active.path)} blame={[]} blameLoading={false} />
           </>}

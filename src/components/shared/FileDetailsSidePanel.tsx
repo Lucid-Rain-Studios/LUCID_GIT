@@ -5,7 +5,9 @@ import { TextDiff } from '@/components/diff/TextDiff'
 import { FilePathText } from '@/components/ui/FilePathText'
 import { CommitContextMenu } from '@/components/shared/CommitContextMenu'
 import { CommitFilesModal } from '@/components/shared/CommitFilesModal'
-import { BlueprintDiff, type BlueprintFileChoice } from '@/components/diff/BlueprintDiff'
+import { type BlueprintFileChoice } from '@/components/diff/BlueprintDiff'
+import { UnrealAssetReview } from '@/components/diff/UnrealAssetReview'
+import { isUnrealPackage } from '@/lib/unrealAssetReview'
 import type { BlueprintRequest } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 
@@ -14,9 +16,9 @@ export function BlueprintAssetPanel({ request, files, single = false, revisionLa
   const [unsupported, setUnsupported] = useState<string | null>(null)
   const project = useRepoStore(state => state.repoPath === props.repoPath ? state.unrealProject : null)
   return details || unsupported ? <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
-    {unsupported ? <div role="status" style={{ padding: '10px 12px', color: 'var(--lg-text-secondary)', fontFamily: 'var(--lg-font-ui)', fontSize: 12, borderBottom: '1px solid var(--lg-border)' }}>{unsupported}</div> : <button className="lg-toolbar-control" onClick={() => setDetails(false)}>Back to Blueprint graph</button>}
+    {unsupported ? <div role="status" style={{ padding: '10px 12px', color: 'var(--lg-text-secondary)', fontFamily: 'var(--lg-font-ui)', fontSize: 12, borderBottom: '1px solid var(--lg-border)' }}>{unsupported}</div> : <button className="lg-toolbar-control" onClick={() => setDetails(false)}>Back to Unreal asset review</button>}
     <AssetPanel {...props} />
-  </div> : <BlueprintDiff single={single} files={files} project={project} repoPath={props.repoPath} request={request} revisionLabels={revisionLabels} onFallback={() => setDetails(true)} onUnsupported={reason => { setUnsupported(reason); onBlueprintUnsupported?.(reason) }} />
+  </div> : <UnrealAssetReview single={single} files={files} project={project} repoPath={props.repoPath} request={request} revisionLabels={revisionLabels} onFallback={() => setDetails(true)} onUnsupported={reason => { setUnsupported(reason); onBlueprintUnsupported?.(reason) }} />
 }
 
 export function isPreviewAsset(filePath: string): boolean {
@@ -371,8 +373,13 @@ export function FileDetailsSidePanel({
     )
   }
 
+  if (isUnrealPackage(filePath)) {
+    const request = blueprintRequest ?? { filePath, leftRef: 'ABSENT', rightRef: hash }
+    return <BlueprintAssetPanel key={[repoPath, filePath, request.oldPath, request.leftRef, request.rightRef].join('|')} single={blueprintRequest ? blueprintSingle : true} request={request} files={blueprintFiles} repoPath={repoPath} filePath={filePath} hash={hash} remoteUrl={remoteUrl} revisionLabels={revisionLabels} onBlueprintUnsupported={onBlueprintUnsupported} />
+  }
+
   if (isPreviewAsset(filePath)) {
-    if (/\.uasset$/i.test(filePath) && blueprintRequest) return <BlueprintAssetPanel key={[repoPath, filePath, blueprintRequest.oldPath, blueprintRequest.leftRef, blueprintRequest.rightRef].join('|')} single={blueprintSingle} request={blueprintRequest} files={blueprintFiles} repoPath={repoPath} filePath={filePath} hash={hash} remoteUrl={remoteUrl} revisionLabels={revisionLabels} onBlueprintUnsupported={onBlueprintUnsupported} />
+
     return <AssetPanel repoPath={repoPath} filePath={filePath} hash={hash} remoteUrl={remoteUrl} />
   }
 

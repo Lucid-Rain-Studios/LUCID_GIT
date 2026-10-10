@@ -9,7 +9,7 @@ import { BlueprintChoice } from './BlueprintChoice'
 import './BlueprintDiff.css'
 
 export interface BlueprintFileChoice { path: string; label?: string; stage?: 'Staged' | 'Unstaged'; selected?: boolean; onSelect(): void }
-interface Props { single?: boolean; files?: BlueprintFileChoice[]; project?: UEProject | null; repoPath: string; request: Omit<BlueprintRequest, 'requestId'>; revisionLabels?: { left: string; right: string }; onFallback(): void; onUnsupported?(reason: string): void }
+export interface BlueprintDiffProps { onRetry?(): void; comparison?: BlueprintComparison; single?: boolean; files?: BlueprintFileChoice[]; project?: UEProject | null; repoPath: string; request: Omit<BlueprintRequest, 'requestId'>; revisionLabels?: { left: string; right: string }; onFallback(): void; onUnsupported?(reason: string): void }
 const tone: Record<NodeChange, string> = { added: 'var(--lg-success)', removed: 'var(--lg-error)', modified: 'var(--lg-warning)', moved: '#9c8de3', commented: 'var(--lg-warning)' }
 const mark: Record<NodeChange, string> = { added: '+', removed: '−', modified: '~', moved: '↔', commented: '✎' }
 const label = (ref: string) => ref === 'WORKING' ? 'Working tree' : ref === 'INDEX' ? 'Index' : ref === 'ABSENT' ? 'Absent revision' : ref === 'HEAD' ? 'HEAD' : ref.replace(/\^1$/, '').slice(0, 7) + (ref.endsWith('^1') ? ' parent' : '')
@@ -67,7 +67,7 @@ function Inspector({ change, node }: { change?: GraphChange; node?: BlueprintNod
   </div>
 }
 
-export function BlueprintDiff({ files, project, repoPath, request, revisionLabels, onFallback, onUnsupported, single = false }: Props) {
+export function BlueprintDiff({ onRetry, comparison, files, project, repoPath, request, revisionLabels, onFallback, onUnsupported, single = false }: BlueprintDiffProps) {
   const [result, setResult] = useState<BlueprintComparison | null>(null), [error, setError] = useState<string | null>(null), [retry, setRetry] = useState(0)
   const [expanded, setExpanded] = useState(false), [graphKey, setGraphKey] = useState(''), [selected, setSelected] = useState(''), [sync, setSync] = useState(true), [highlight, setHighlight] = useState(true), [inspector, setInspector] = useState(false)
   const navigation = useRef<HTMLDetailsElement>(null)
@@ -81,7 +81,8 @@ export function BlueprintDiff({ files, project, repoPath, request, revisionLabel
     let cancelled = false
     const requestId = crypto.randomUUID()
     setResult(null); setError(null); setSelected(''); setGraphKey(''); leftCamera.current = undefined; rightCamera.current = undefined
-    ipc.blueprintCompare(repoPath, { filePath, oldPath, leftRef, rightRef, requestId, force: retry > 0 }).then(data => {
+    const read = comparison && retry === 0 ? Promise.resolve(comparison) : ipc.blueprintCompare(repoPath, { filePath, oldPath, leftRef, rightRef, requestId, force: retry > 0 })
+    read.then(data => {
       if (cancelled) return
       setResult(data)
       const present = [data.left, data.right].filter(side => side.status !== 'absent')
@@ -91,8 +92,8 @@ export function BlueprintDiff({ files, project, repoPath, request, revisionLabel
         unsupportedCallback.current?.([classes ? 'Asset class: ' + classes + '.' : '', reasons, 'Showing binary details.'].filter(Boolean).join(' '))
       }
     }).catch(e => { if (!cancelled) setError(String(e.message ?? e)) })
-    return () => { cancelled = true; void ipc.blueprintCancel(requestId).catch(() => {}) }
-  }, [repoPath, filePath, oldPath, leftRef, rightRef, retry])
+    return () => { cancelled = true; if (!comparison || retry > 0) void ipc.blueprintCancel(requestId).catch(() => {}) }
+  }, [repoPath, filePath, oldPath, leftRef, rightRef, retry, comparison])
   const pairs = useMemo(() => pairGraphs(result?.left.document?.graphs ?? [], result?.right.document?.graphs ?? []), [result])
   const pair = pairs.find(p => p.key === graphKey) ?? pairs.find(p => p.name === 'EventGraph') ?? pairs[0]
   const comparable = !!result && [result.left, result.right].every(side => side.status === 'absent' || side.status === 'ready' && side.document?.status !== 'unsupported')
@@ -163,9 +164,9 @@ export function BlueprintDiff({ files, project, repoPath, request, revisionLabel
       <button className="lg-toolbar-control" onClick={onFallback}>Binary details</button>
     </div>
     {project && <div className="bp-info" title={`${project.uprojectPath}\nEngine association: ${project.engineAssociation || project.engineVersion}`}>{project.name} · {project.engineVersion === 'Unknown' ? 'Engine version unknown' : `UE ${project.engineVersion}`} · {single ? 'Read-only graph view' : 'Read-only revision review'}</div>}
-    {!result && <div className="bp-empty" role={error ? 'alert' : 'status'}>{error ?? 'Reading Blueprint revisions…'}{error && <button onClick={() => setRetry(v => v+1)}><RotateCcw size={14}/> Retry</button>}</div>}
+    {!result && <div className="bp-empty" role={error ? 'alert' : 'status'}>{error ?? 'Reading Blueprint revisions…'}{error && <button onClick={() => onRetry ? onRetry() : setRetry(v => v+1)}><RotateCcw size={14}/> Retry</button>}</div>}
     {result && <>
-      {(result.left.status === 'unavailable' || result.right.status === 'unavailable' || pair?.left?.complete === false || pair?.right?.complete === false) && <div className="bp-warning" role="status">{single ? 'Some asset data is unavailable or incomplete. Connections may be incomplete.' : 'Some revision data is unavailable or incomplete. Change highlights cover decoded nodes only.'}<details><summary>Details</summary>{Array.from(new Set([result.left.reason, result.right.reason, ...(pair?.left?.diagnostics??[]), ...(pair?.right?.diagnostics??[])].filter(Boolean))).map((s,i)=><div key={i}>{s}</div>)}</details><button onClick={() => setRetry(v => v+1)}>Retry reading</button></div>}
+      {(result.left.status === 'unavailable' || result.right.status === 'unavailable' || pair?.left?.complete === false || pair?.right?.complete === false) && <div className="bp-warning" role="status">{single ? 'Some asset data is unavailable or incomplete. Connections may be incomplete.' : 'Some revision data is unavailable or incomplete. Change highlights cover decoded nodes only.'}<details><summary>Details</summary>{Array.from(new Set([result.left.reason, result.right.reason, ...(pair?.left?.diagnostics??[]), ...(pair?.right?.diagnostics??[])].filter(Boolean))).map((s,i)=><div key={i}>{s}</div>)}</details><button onClick={() => onRetry ? onRetry() : setRetry(v => v+1)}>Retry reading</button></div>}
       {pair?.matchedByName && <div className="bp-info">Graphs matched by name because their saved identities differ.</div>}
       <div className="bp-body"><div className="bp-revisions">{!single && <GraphPane revisionLabel={revisionLabels?.left} side={result.left} graph={pair?.left} changes={leftChanges} wires={leftWires} selected={selected} canvasRef={left} saved={leftCamera} onCamera={camera => cameraChanged('left',camera)} onSelect={id=>select(id)}/>}<GraphPane revisionLabel={revisionLabels?.right} side={result.right} graph={pair?.right} changes={rightChanges} wires={rightWires} selected={selected} canvasRef={right} saved={rightCamera} onCamera={camera=>cameraChanged('right',camera)} onSelect={id=>select(id)}/></div>
       {inspector && <aside className="bp-sidebar"><header>{single ? "Nodes" : "Graph changes"} <span>{single ? pair?.right?.nodes.length : changes.length}</span></header>{!single && <div className="bp-change-list">{changes.length ? changes.map(c=><button key={c.id} className={selected===c.id?'selected':''} onClick={()=>select(c.id,true)}><span style={{color:tone[c.kind]}}>{mark[c.kind]}</span><div>{c.title}<small>{[c.kind === 'modified' ? 'Properties, pins or connections changed' : c.kind === 'commented' ? 'Comment changed' : c.kind === 'moved' ? 'Saved layout changed' : 'Node '+c.kind, c.commentChanged && c.kind !== 'commented' ? 'Comment changed' : '', c.layoutChanged && c.kind !== 'moved' ? 'Saved layout changed' : ''].filter(Boolean).join(' / ')}</small></div></button>) : <p>{pair && (!comparable||pair.left?.complete===false||pair.right?.complete===false) ? 'Comparison is incomplete.' : pair ? 'No decoded graph changes. Other asset data may still differ.' : 'No supported graph to compare.'}</p>}</div>}<Inspector change={chosen} node={node}/>

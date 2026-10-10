@@ -26,7 +26,7 @@ export function useBlueprintFileMenu(repoPath: string, extra?: (close: () => voi
   }, [target])
   return {
     onContextMenu: (event: React.MouseEvent, filePath: string) => {
-      if (!/\.uasset$/i.test(filePath)) return
+      if (!/\.(uasset|umap)$/i.test(filePath)) return
       origin.current = event.currentTarget as HTMLElement
       event.preventDefault(); event.stopPropagation(); setTarget({ x: event.clientX, y: event.clientY, path: filePath })
     },

@@ -17,6 +17,6 @@ export function createBlueprintClient(read: (repo: string, request: BlueprintReq
       while (documents.size > 8) documents.delete(documents.keys().next().value!)
       return { ...side, document }
     }
-    return { left: hydrate(result.left), right: hydrate(result.right) }
+    return { ...result, left: hydrate(result.left), right: hydrate(result.right), ...(result.externalActors ? { externalActors: { ...result.externalActors, packages: result.externalActors.packages.map(p => ({ left: hydrate(p.left), right: hydrate(p.right) })) } } : {}) }
   }
 }

@@ -21,6 +21,8 @@ test-results/
 
 # Local dependency checkouts and Blueprint extractor build products
 /third_party/
+/CUE4Parse/
+/threenative-asset-mcp/
 /tools/BlueprintExtractor/bin/
 /tools/BlueprintExtractor/obj/
 /.blueprint-build/

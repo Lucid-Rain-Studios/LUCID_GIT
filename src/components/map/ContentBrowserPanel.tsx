@@ -491,10 +491,10 @@ export function ContentBrowserPanel({ repoPath, onNavigate }: ContentBrowserPane
           filePath={selectedFile}
           hash="WORKING"
           blueprintSingle
-          blueprintRequest={selectedFile && /\.uasset$/i.test(selectedFile) ? { filePath: selectedFile, leftRef: 'ABSENT', rightRef: 'WORKING' } : undefined}
+          blueprintRequest={selectedFile && /\.(uasset|umap)$/i.test(selectedFile) ? { filePath: selectedFile, leftRef: 'ABSENT', rightRef: 'WORKING' } : undefined}
           blame={blame}
           blameLoading={blameLoading}
-          mode={selectedFile && /\.uasset$/i.test(selectedFile) ? 'preview' : 'details'}
+          mode={selectedFile && /\.(uasset|umap)$/i.test(selectedFile) ? 'preview' : 'details'}
           emptyMessage="Select a file for details"
           remoteUrl={remoteUrl}
         />

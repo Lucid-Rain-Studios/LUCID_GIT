@@ -5,18 +5,20 @@ import crypto from 'node:crypto'
 import { execFile, type ChildProcess } from 'node:child_process'
 import { assetDiffService } from './AssetDiffService'
 import { execSafe, withGitTimeout } from '../util/dugite-exec'
+import { owningMapCandidate } from '../util/external-actors'
+import { confirmsMapOwnership, discoverExternalActors, emptyExternalReview, estimatedCaptureBytes, mutableActorStamp } from './ExternalActorReview'
 import { withRepoSlot } from '../util/repo-gate'
 import type { BlueprintComparison, BlueprintDocument, BlueprintRequest, BlueprintSide } from '../blueprintTypes'
 
-const EXTRACTOR_VERSION = '8-uassetapi-3228c1e8'
-const READER_VERSION = 8
+const EXTRACTOR_VERSION = '9-uassetapi-3228c1e8'
+const READER_VERSION = 9
 const MAX_BYTES = 256 * 1024 * 1024
 const MAX_CACHE_BYTES = 256 * 1024 * 1024
 const sha = (b: string | Buffer) => crypto.createHash('sha256').update(b).digest('hex')
 
 function validatePath(file: string) {
-  if (typeof file !== 'string' || !file || file.includes('\0') || path.isAbsolute(file) || file.split(/[\\/]/).some(p => p === '..' || p.toLowerCase() === '.git') || !/\.uasset$/i.test(file))
-    throw new Error('Select a repository-relative .uasset path.')
+  if (typeof file !== 'string' || !file || file.includes('\0') || path.isAbsolute(file) || file.split(/[\\/]/).some(p => p === '..' || p.toLowerCase() === '.git') || !/\.(uasset|umap)$/i.test(file))
+    throw new Error('Select a repository-relative .uasset or .umap path.')
 }
 function validateRef(ref: string) {
   if (!['HEAD', 'INDEX', 'WORKING', 'ABSENT'].includes(ref) && !/^[a-f0-9]{40}(?:\^1)?$/i.test(ref)) throw new Error('Invalid Blueprint revision.')
@@ -44,6 +46,7 @@ export class BlueprintRevisionService {
   async compare(repoPath: string, req: BlueprintRequest, signal?: AbortSignal): Promise<BlueprintComparison> {
     if (this.stopping) throw new Error('Blueprint reader is shutting down.')
     if (!req || typeof repoPath !== 'string') throw new Error('Invalid Blueprint request.')
+    if (req.externalActors !== undefined && typeof req.externalActors !== 'boolean') throw new Error('Invalid external actor review scope.')
     validatePath(req.filePath); validatePath(req.oldPath ?? req.filePath)
     validateRef(req.leftRef); validateRef(req.rightRef)
     if (req.knownDocuments !== undefined && (!Array.isArray(req.knownDocuments) || req.knownDocuments.length > 8 || req.knownDocuments.some(key => typeof key !== 'string' || !/^[a-f0-9]{64}$/.test(key)))) throw new Error('Invalid Blueprint document cache keys.')
@@ -51,10 +54,74 @@ export class BlueprintRevisionService {
     const refreshKeys = req.force === true ? new Set<string>() : undefined
     return withGitTimeout(async () => {
       if (signal?.aborted) throw new Error('Blueprint review cancelled.')
-      const left = await this.side(repo, req.oldPath ?? req.filePath, req.leftRef, signal, refreshKeys)
+      const maps = [req.oldPath ?? req.filePath, req.filePath]
+      const refs = [req.leftRef, req.rightRef]
+      if (req.externalActors) for (let i = 0; i < refs.length; i++) {
+        if (refs[i] === 'HEAD' || refs[i].endsWith('^1')) {
+          const frozen = await execSafe(['rev-parse', '--verify', refs[i] + '^{commit}'], repo)
+          if (frozen.exitCode === 0) refs[i] = frozen.stdout.trim()
+        }
+      }
+      let manifest: Awaited<ReturnType<typeof discoverExternalActors>> | undefined, stamp = '', discoveryError = ''
+      if (req.externalActors) try {
+        await withRepoSlot(repo, 'read', async () => {
+          manifest = await discoverExternalActors(repo, maps[0], maps[1], refs[0], refs[1], signal)
+          stamp = await mutableActorStamp(repo, maps, manifest.packages.flatMap(p => [p.leftPath, p.rightPath]), refs)
+        })
+      } catch (error) { discoveryError = error instanceof Error ? error.message : String(error) }
+      const left = await this.side(repo, maps[0], refs[0], signal, refreshKeys)
       if (signal?.aborted) throw new Error('Blueprint review cancelled.')
-      const right = await this.side(repo, req.filePath, req.rightRef, signal, refreshKeys)
+      const right = await this.side(repo, maps[1], refs[1], signal, refreshKeys)
       if (signal?.aborted) throw new Error('Blueprint review cancelled.')
+      const owningMaps: BlueprintComparison['owningMaps'] = {}
+      for (const [index, side] of [left, right].entries()) {
+        const owner = owningMapCandidate(maps[index])
+        if (owner && confirmsMapOwnership(side, owner)) {
+          const snapshot = await withRepoSlot(repo, 'read', () => this.resolveSide(repo, owner, refs[index], signal))
+          if (!('status' in snapshot)) owningMaps[index === 0 ? 'left' : 'right'] = owner
+        }
+      }
+      let externalActors: BlueprintComparison['externalActors']
+      if (req.externalActors) {
+        externalActors = emptyExternalReview(discoveryError || 'Changed external actor packages only; unchanged actors and full-world dependencies are not loaded.')
+        if (manifest && !discoveryError) {
+          externalActors.total = manifest.total; externalActors.omitted = manifest.omitted
+          let remaining = 64 * 1024 * 1024, output = 0
+          for (const [index, entry] of manifest.packages.entries()) {
+            if (signal?.aborted) throw new Error('Asset review cancelled.')
+            validatePath(entry.leftPath); validatePath(entry.rightPath)
+            if (remaining <= 0 || output >= 16 * 1024 * 1024) {
+              externalActors.omitted += manifest.packages.length - index
+              externalActors.diagnostics.push('External actor byte/output budget reached. Review remaining packages individually.'); break
+            }
+            const captured = []
+            for (let i = 0; i < 2; i++) {
+              const root = i === 0 ? left : right, file = i === 0 ? entry.leftPath : entry.rightPath
+              let actor: BlueprintSide
+              if (root.status === 'unavailable' || root.status === 'ready' && root.document?.assetClass !== '/Script/Engine.World') {
+                actor = { ref: refs[i], path: file, status: 'unavailable', reason: 'The owning map is not a decoded World package.' }
+              } else {
+                actor = await this.side(repo, file, refs[i], signal, refreshKeys, remaining)
+                remaining -= actor.sourceBytes ?? 0
+                if (actor.status === 'ready' && (root.status === 'absent' || !confirmsMapOwnership(actor, maps[i]))) actor = { ...actor, status: 'unavailable', document: undefined, reason: 'Map ownership is unresolved or the owning map is absent in this revision.' }
+              }
+              captured.push(actor)
+            }
+            const bytes = Buffer.byteLength(JSON.stringify(captured))
+            if (output + bytes > 16 * 1024 * 1024) {
+              externalActors.omitted += manifest.packages.length - index
+              externalActors.diagnostics.push('External actor output exceeds the 16 MB aggregate budget. Review remaining packages individually.'); break
+            }
+            output += bytes; externalActors.packages.push({ left: captured[0], right: captured[1] })
+          }
+          const current = await withRepoSlot(repo, 'read', () => mutableActorStamp(repo, maps, manifest!.packages.flatMap(p => [p.leftPath, p.rightPath]), refs))
+          if (stamp !== current) externalActors = { ...externalActors, packages: [], omitted: manifest.total, diagnostics: ['The index or selected package files changed during capture. Retry; actor changes have been discarded.'] }
+          else {
+            const after = await withRepoSlot(repo, 'read', () => discoverExternalActors(repo, maps[0], maps[1], refs[0], refs[1], signal))
+            if (JSON.stringify(after) !== JSON.stringify(manifest)) externalActors = { ...externalActors, packages: [], omitted: after.total, total: after.total, diagnostics: ['External actor membership changed during capture. Retry; actor changes have been discarded.'] }
+          }
+        }
+      }
       const known = req.knownDocuments ? new Set(req.force ? [] : req.knownDocuments) : undefined
       const transfer = (side: BlueprintSide): BlueprintSide => {
         if (!known || !side.documentKey || !side.document) return side
@@ -62,26 +129,31 @@ export class BlueprintRevisionService {
         known.add(side.documentKey)
         return side
       }
-      return { left: transfer(left), right: transfer(right) }
+      return { left: transfer(left), right: transfer(right), ...(Object.keys(owningMaps).length ? { owningMaps } : {}), ...(externalActors ? { externalActors: { ...externalActors, packages: externalActors.packages.map(p => ({ left: transfer(p.left), right: transfer(p.right) })) } } : {}) }
     }, 120_000, 'Blueprint revision read')
   }
 
-  private async side(repo: string, file: string, ref: string, signal?: AbortSignal, refreshKeys?: Set<string>): Promise<BlueprintSide> {
+  private async side(repo: string, file: string, ref: string, signal?: AbortSignal, refreshKeys?: Set<string>, byteLimit = MAX_BYTES): Promise<BlueprintSide> {
     const snapshot = await withRepoSlot(repo, 'read', () => this.resolveSide(repo, file, ref, signal))
     if ('status' in snapshot) return snapshot
     const { identity, resolved, companionIdentity, companionResolved } = snapshot
+    if (byteLimit < MAX_BYTES) {
+      const estimate = await withRepoSlot(repo, 'read', async () => await estimatedCaptureBytes(repo, file, resolved) + await estimatedCaptureBytes(repo, file.replace(/\.(uasset|umap)$/i, '.uexp'), companionResolved))
+      if (estimate > byteLimit) return { ref, path: file, status: 'unavailable', reason: 'External actor package exceeds the remaining 64 MB capture budget.' }
+    }
     const key = sha([repo, file, ref, identity, companionIdentity, EXTRACTOR_VERSION].join('\0'))
     if (refreshKeys) this.identities.delete(key)
     let promise = this.identities.get(key)
     if (!promise) {
-      promise = this.loadSide(repo, file, resolved, ref, companionResolved, companionIdentity, refreshKeys)
+      promise = this.loadSide(repo, file, resolved, ref, companionResolved, companionIdentity, refreshKeys, byteLimit)
       this.identities.set(key, promise)
       void promise.then(side => {
         if (side.status === 'unavailable') this.identities.delete(key)
         while (this.identities.size > 8) this.identities.delete(this.identities.keys().next().value!)
       }, () => { this.identities.delete(key) })
     }
-    return promise
+    const result = await promise
+    return (result.sourceBytes ?? 0) > byteLimit ? { ref, path: file, status: 'unavailable', reason: 'External actor package exceeds the remaining 64 MB capture budget.' } : result
   }
 
   private async resolveSide(repo: string, file: string, ref: string, signal?: AbortSignal): Promise<BlueprintSide | { identity: string; resolved: string; companionIdentity: string; companionResolved: string }> {
@@ -111,7 +183,7 @@ export class BlueprintRevisionService {
       if (size.exitCode !== 0 || Number(size.stdout) > MAX_BYTES) return { ref, path: file, status: 'unavailable', reason: 'Revision content is unavailable or exceeds the 256 MB review limit.' }
     }
     if (signal?.aborted) throw new Error('Blueprint review cancelled.')
-    const companion = file.replace(/\.uasset$/i, '.uexp')
+    const companion = file.replace(/\.(uasset|umap)$/i, '.uexp')
     let companionIdentity = '', companionResolved = 'ABSENT'
     if (ref === 'WORKING') {
       const extraPath = await fs.realpath(path.join(repo, companion)).catch(() => null)
@@ -135,33 +207,37 @@ export class BlueprintRevisionService {
     return { identity, resolved, companionIdentity, companionResolved }
   }
 
-  private async loadSide(repo: string, file: string, resolved: string, ref: string, companionRef: string, companionIdentity: string, refreshKeys?: Set<string>): Promise<BlueprintSide> {
+  private async loadSide(repo: string, file: string, resolved: string, ref: string, companionRef: string, companionIdentity: string, refreshKeys?: Set<string>, byteLimit = MAX_BYTES): Promise<BlueprintSide> {
     await fs.mkdir(this.cacheDirectory, { recursive: true })
     const temporary = await fs.mkdtemp(path.join(this.cacheDirectory, 'read-'))
     try {
       // Only byte capture holds a repository read slot. CPU extraction runs
       // after release, so a graph reader cannot delay staging or checkout.
-      const snapshot = await withRepoSlot(repo, 'read', async (): Promise<BlueprintSide | { contentHash: string; key: string; blobPath: string }> => {
+      const snapshot = await withRepoSlot(repo, 'read', async (): Promise<BlueprintSide | { contentHash: string; key: string; blobPath: string; sourceBytes: number }> => {
       const before = ref === 'WORKING' ? await fs.stat(path.join(repo, file), { bigint: true }) : null
       const blob = await assetDiffService.extractBlob(repo, file, resolved, temporary, 'left', refreshKeys)
       if (!blob.blobPath) return { ref, path: file, status: 'unavailable', reason: blob.reason ?? 'Revision content is unavailable.' }
+      if ((await fs.stat(blob.blobPath)).size > byteLimit) throw new Error('External actor package exceeds the remaining capture budget.')
       let bytes: Buffer = await fs.readFile(blob.blobPath)
       if (bytes.subarray(0, 42).toString().startsWith('version https://git-lfs.github.com/spec/v1')) {
+        if (Number(/^size (\d+)$/m.exec(bytes.toString())?.[1] ?? 0) > byteLimit) throw new Error('External actor LFS object exceeds the remaining capture budget.')
         bytes = await assetDiffService.resolveLfsPointer(repo, file, bytes, refreshKeys)
         await fs.writeFile(blob.blobPath, bytes)
       }
       // Resolve companion exports from exactly the same revision/path.
-      const companion = file.replace(/\.uasset$/i, '.uexp')
-      let companionHash = ''
+      const companion = file.replace(/\.(uasset|umap)$/i, '.uexp')
+      let companionHash = '', sourceBytes = bytes.length
       if (companionRef !== 'ABSENT') {
         const extra = await assetDiffService.extractBlob(repo, companion, companionRef, temporary, 'left', refreshKeys)
         if (!extra.blobPath) return { ref, path: file, status: 'unavailable', reason: extra.reason ?? 'Companion exports are unavailable.' }
+        if ((await fs.stat(extra.blobPath)).size + sourceBytes > byteLimit) throw new Error('External actor exports exceed the remaining capture budget.')
         let extraBytes: Buffer = await fs.readFile(extra.blobPath)
         if (extraBytes.subarray(0, 42).toString().startsWith('version https://git-lfs.github.com/spec/v1')) {
+          if (Number(/^size (\d+)$/m.exec(extraBytes.toString())?.[1] ?? 0) + sourceBytes > byteLimit) throw new Error('External actor LFS exports exceed the remaining capture budget.')
           extraBytes = await assetDiffService.resolveLfsPointer(repo, companion, extraBytes, refreshKeys)
           await fs.writeFile(extra.blobPath, extraBytes)
         }
-        companionHash = sha(extraBytes)
+        companionHash = sha(extraBytes); sourceBytes += extraBytes.length
         if (companionRef === 'WORKING') {
           const stat = await fs.stat(path.join(repo, companion), { bigint: true })
           if (`${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}` !== companionIdentity) return { ref, path: file, status: 'unavailable', reason: 'Companion exports changed while being read. Retry the comparison.' }
@@ -173,13 +249,13 @@ export class BlueprintRevisionService {
       }
       const contentHash = sha(bytes)
       const key = sha(contentHash + companionHash + EXTRACTOR_VERSION)
-      return { contentHash, key, blobPath: blob.blobPath }
+      return { contentHash, key, blobPath: blob.blobPath, sourceBytes }
       })
       if ('status' in snapshot) return snapshot
       const force = refreshKeys !== undefined && !refreshKeys.has(snapshot.key)
       refreshKeys?.add(snapshot.key)
       const document = await this.extract(snapshot.key, snapshot.blobPath, force)
-      return { ref, path: file, status: 'ready', contentHash: snapshot.contentHash, documentKey: snapshot.key, document }
+      return { ref, path: file, status: 'ready', sourceBytes: snapshot.sourceBytes, contentHash: snapshot.contentHash, documentKey: snapshot.key, document }
     } catch (error) {
       return { ref, path: file, status: 'unavailable', reason: error instanceof Error ? error.message : String(error) }
     } finally { await fs.rm(temporary, { recursive: true, force: true }).catch(() => {}) }

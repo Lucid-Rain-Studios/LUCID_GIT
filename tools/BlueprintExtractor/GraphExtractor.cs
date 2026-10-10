@@ -10,13 +10,13 @@ using UAssetAPI.UnrealTypes;
 // source is embedded or required at runtime. Unsupported versions/tails are explicit.
 static class GraphExtractor
 {
-    const int ReaderVersion = 8;
+    const int ReaderVersion = 9;
     static string Name(UAsset a, int index) => index switch {
         > 0 when index <= a.Exports.Count => a.Exports[index - 1].ObjectName.ToString(),
         < 0 when -index <= a.Imports.Count => a.Imports[-index - 1].ObjectName.ToString(),
         0 => "None", _ => throw new InvalidDataException("Invalid object reference.")
     };
-    static string ObjectPath(UAsset a, int index, int depth = 0) {
+    internal static string ObjectPath(UAsset a, int index, int depth = 0) {
         if (index == 0) return "None";
         if (index > a.Exports.Count || index < -a.Imports.Count) throw new InvalidDataException("Invalid object reference.");
         if (depth > 32) throw new InvalidDataException("Cyclic object reference.");
@@ -53,7 +53,7 @@ static class GraphExtractor
         }
         return token.DeepClone();
     }
-    static JObject Props(UAsset a, NormalExport e) => (JObject)Simplify(a, JToken.Parse(a.SerializeJsonObject(e.Data)));
+    internal static JObject Props(UAsset a, NormalExport e) => (JObject)Simplify(a, JToken.Parse(a.SerializeJsonObject(e.Data)));
     static string GuidOf(JObject p, string key) => p[key]?[key]?.ToString().Replace("{", "").Replace("}", "").Replace("-", "").ToUpperInvariant() ?? "";
     static int Count(AssetBinaryReader r) { var n = r.ReadInt32(); if (n < 0 || n > 100000) throw new InvalidDataException("Invalid graph array size."); return n; }
     static string Guid(AssetBinaryReader r) => r.ReadGuid().ConvertToString().Replace("{", "").Replace("}", "").Replace("-", "");
@@ -159,13 +159,15 @@ static class GraphExtractor
         var blueprint = a.Exports.FirstOrDefault(e => Name(a, e.ClassIndex.Index) is "Blueprint" or "WidgetBlueprint" or "AnimBlueprint");
         var primary = blueprint ?? a.Exports.FirstOrDefault(e => e.OuterIndex.Index == 0 && Name(a, e.ClassIndex.Index) != "MetaData");
         var assetClass = primary == null ? "" : ObjectPath(a, primary.ClassIndex.Index);
-        if (a.IsFilterEditorOnly) return new { schemaVersion = 1, readerVersion = ReaderVersion, assetClass, status = "unsupported", engineVersion = a.GetEngineVersion().ToString(), graphs, diagnostics = new[] { "Cooked assets have stripped editor graph data." } };
-        if (blueprint == null) return new { schemaVersion = 1, readerVersion = ReaderVersion, assetClass, status = "unsupported", engineVersion = a.GetEngineVersion().ToString(), graphs, diagnostics = new[] { "This asset does not contain an editor Blueprint." } };
+        var savedVersion = a.RecordedEngineVersion.Major > 0 ? $"{a.RecordedEngineVersion.Major}.{a.RecordedEngineVersion.Minor}.{a.RecordedEngineVersion.Patch}" : "Unknown";
+        if (a.IsFilterEditorOnly) return new { schemaVersion = 1, readerVersion = ReaderVersion, assetClass, status = "unsupported", engineVersion = savedVersion, graphs, diagnostics = new[] { "Cooked assets have stripped editor graph data." } };
+        if (blueprint == null) return new { schemaVersion = 1, readerVersion = ReaderVersion, assetClass, status = "unsupported", engineVersion = savedVersion, graphs, diagnostics = new[] { "This asset does not contain an editor Blueprint." } };
         var totalNodes = 0;
         for (var gi = 0; gi < a.Exports.Count; gi++) {
-            if (a.Exports[gi] is not NormalExport graph || Name(a, graph.ClassIndex.Index) != "EdGraph") continue;
+            if (a.Exports[gi] is not NormalExport graph || !new[] { "EdGraph", "AnimationGraph", "AnimationStateMachineGraph", "AnimationTransitionGraph" }.Contains(Name(a, graph.ClassIndex.Index))) continue;
             var gp = Props(a, graph);
-            if (!(gp.Value<string>("Schema") ?? "").EndsWith("EdGraphSchema_K2")) continue;
+            var schema = gp.Value<string>("Schema") ?? "";
+            if (!new[] { "EdGraphSchema_K2", "AnimationGraphSchema", "AnimationStateMachineSchema", "AnimationTransitionSchema" }.Any(name => schema.EndsWith("." + name))) continue;
             var graphNodes = new JArray(); var graphDiagnostics = new List<string>();
             // Graph membership uses the explicit Nodes array, not an outer-index guess.
             var rawData = JArray.Parse(a.SerializeJsonObject(graph.Data));
@@ -199,7 +201,7 @@ static class GraphExtractor
             graphs.Add(new JObject { ["id"] = GuidOf(gp, "GraphGuid"), ["name"] = graph.ObjectName.ToString(), ["path"] = ObjectPath(a, gi + 1), ["nodes"] = graphNodes, ["complete"] = graphDiagnostics.Count == 0, ["diagnostics"] = JArray.FromObject(graphDiagnostics) });
             diagnostics.AddRange(graphDiagnostics);
         }
-        return new { schemaVersion = 1, readerVersion = ReaderVersion, assetClass, status = graphs.Count == 0 ? "unsupported" : diagnostics.Count == 0 ? "complete" : "partial", engineVersion = $"{a.RecordedEngineVersion.Major}.{a.RecordedEngineVersion.Minor}.{a.RecordedEngineVersion.Patch}", graphs, diagnostics = graphs.Count == 0 ? new[] { "No supported K2 Blueprint graphs are stored in this asset." } : diagnostics.ToArray() };
+        return new { schemaVersion = 1, readerVersion = ReaderVersion, assetClass, status = graphs.Count == 0 ? "unsupported" : diagnostics.Count == 0 ? "complete" : "partial", engineVersion = savedVersion, graphs, diagnostics = graphs.Count == 0 ? new[] { "No supported Blueprint or animation graphs are stored in this asset." } : diagnostics.ToArray() };
     }
 }
 

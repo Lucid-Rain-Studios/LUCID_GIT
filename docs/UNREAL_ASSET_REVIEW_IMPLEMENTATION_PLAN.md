@@ -1,6 +1,6 @@
 # Unreal asset contents, changes and previews
 
-Created: 2026-10-09. Status: planning complete; implementation and asset-type acceptance not started.
+Created: 2026-10-09. Status: shared review host, initial package/property readers and bounded changed-external-actor review implemented; full asset-type acceptance remains partial. See [implementation evidence](UNREAL_ASSET_REVIEW_IMPLEMENTATION.md).
 
 ## Approved outcome
 
@@ -85,7 +85,7 @@ Keep metadata extraction independent of expensive preview decoding. Load depende
 
 ## Delivery checklist
 
-Every unchecked item below requires implementation and evidence. The approved mockup is design evidence only. Record fixture versions/hashes, expected results, browser/runtime checks and limitations per phase in a companion implementation evidence document when work begins.
+Every unchecked item below requires further implementation or acceptance evidence; several are partially delivered as recorded in the companion evidence document. The approved mockup is design evidence only. Record fixture versions/hashes, expected results, browser/runtime checks and limitations per phase in a companion implementation evidence document when work begins.
 
 ### Phase 0 — Prove target profiles and freeze acceptance
 
@@ -99,22 +99,24 @@ Exit: per-family evidence says which fields and previews can be faithful, which 
 
 ### Phase 1 — Asset review host and map contents/changes
 
-- [ ] Extend package selection/capture to `.umap` and add a versioned asset document contract alongside existing Blueprint types. Keep current Blueprint callers and behavior working.
+- [x] Extend package selection/capture to `.umap` and add a versioned asset document contract alongside existing Blueprint types. Keep current Blueprint callers and behavior working.
 - [ ] Add the approved Changes / Contents / Preview navigation, real revision identities, capability footer and binary-details recovery to the existing details surface. Preserve file navigation, fullscreen state, inspector selection and cameras where applicable.
 - [ ] Implement traditional-map actor/component inventory, labels/classes, serialized transforms, attachments, mesh/material references and the supported world-settings subset.
 - [ ] Compare GUID/path-matched actors and typed properties; distinguish relative/world transforms, units, changed labels and unknown/inherited defaults.
-- [ ] Build selectable actor changes and before/after details. Contents supports either side; Preview shows a capability-specific unavailable state until a real preview provider exists.
+- [x] Build selectable actor changes and before/after details. Contents supports either side; Preview shows a capability-specific unavailable state until a real preview provider exists.
 - [ ] Verify root/merge-parent semantics, renames, added/deleted files, staged/unstaged review, missing LFS, malformed packages and out-of-order selection responses.
 
 Exit: a real Timeline map comparison shows correct actors and exact property edits with truthful coverage; existing Blueprint review still works. This is the first usable release slice.
 
 ### Phase 2 — World Partition / external actor review
 
-- [ ] Resolve map ownership and external package identities on both revisions. Group changed external actors under the map, retaining direct file selection and traceable source paths.
-- [ ] Enumerate selected revision actor packages using bounded/batched tree/index/worktree queries and cached ownership metadata. Support actor moves between maps, map renames and deleted owners conservatively.
-- [ ] Detect external-actor-only edits, additions/deletions, data-layer memberships and supported references without requiring a changed `.umap`.
-- [ ] Distinguish changed-actor review from full-world inventory; explicitly label partial inventory, missing dependencies and unresolved ownership.
+- [x] Resolve map ownership and external package identities on both revisions. Group changed external actors under the map, retaining direct file selection and traceable source paths.
+- [x] Enumerate selected revision actor packages using bounded/batched tree/index/worktree queries and cached ownership metadata. Support actor moves between maps, map renames and deleted owners conservatively.
+- [x] Detect external-actor-only edits, additions/deletions, data-layer memberships and supported references without requiring a changed `.umap`.
+- [x] Distinguish changed-actor review from full-world inventory; explicitly label partial inventory, missing dependencies and unresolved ownership.
 - [ ] Verify a real OFPA move/property edit with identical root `.umap` bytes; validate actor counts/ownership against Unreal and measure a representative large map.
+
+Supported initial profile: conventional Content/__ExternalActors__ storage with saved ActorGuid and PersistentLevel ownership. Ownership fields reuse immutable reader/document caches; Git manifests are rebuilt on demand. The final editor/count/large-map acceptance item remains open. See implementation evidence for limits and fixture results.
 
 Exit: external package changes are readable as map changes without mixing revision data or scanning all asset bytes on each click.
 
@@ -167,8 +169,8 @@ Exit: map previews locate real changes and correctly reconstruct supported place
 - [ ] Validate historical dependencies differing from the worktree, staged dependency edits, missing offline LFS, explicit retry and unchanged repository state (HEAD, index and worktree hashes).
 - [ ] Measure cold/warm latency, dependency count/bytes, output/IPC sizes, queue responsiveness, cache hit rate and peak memory/GPU usage on small and representative large fixtures. Record target budgets and observed results; tune bounds only with evidence.
 - [ ] Verify shipped helpers/native libraries/notices on supported Windows, macOS and Linux packages without developer runtimes or startup downloads. Publish profile-specific support rather than assuming platform parity.
-- [ ] Document supported class/save-version/provider combinations, known omissions and recovery. Keep optional engine integration separately scoped.
-- [ ] Review matching audit IDs, update only fully verified scopes and run the applicable generators. No acceptance box is checked solely because the mockup looks right.
+- [x] Document supported class/save-version/provider combinations, known omissions and recovery. Keep optional engine integration separately scoped.
+- [x] Review matching audit IDs, update only fully verified scopes and run the applicable generators. No acceptance box is checked solely because the mockup looks right.
 
 Exit: all four approved asset families have verified supported profiles and the approved UI is usable in the packaged app. Unsupported files remain inspectable through available metadata/binary details with recovery.
 
@@ -185,6 +187,6 @@ Planning does not resolve findings; no audit checkbox is changed by this documen
 
 When implementation begins, update the appropriate finding's note with actual changes, evidence and remaining limitations. Follow `AGENTS.md`: preserve IDs and Undo category, check only fully resolved findings, regenerate `audit/build-report.cjs` / `audit/build-ui-report.cjs` as applicable and report resolved IDs/progress.
 
-## First implementation task
+## Next implementation task
 
-Begin with Phase 0 map fixtures and Phase 1 traditional-map contents/changes. Prove actor identities, transforms and exact historical bytes, then integrate the approved Changes/Contents surface. External actor support follows before declaring World Partition map support. Research geometry in a bounded spike; do not delay the useful contents/change release while attempting full level rendering.
+The user accepted the initial app/interface. Phase 2 now supports bounded changed-package OFPA review. Complete its editor/count and representative-large-map acceptance before declaring full World Partition support. The next implementation slice is Phase 3: verify a real saved StateTree profile and extend authored states, transitions, tasks and bindings through the existing review host. Geometry remains a separately gated provider spike.

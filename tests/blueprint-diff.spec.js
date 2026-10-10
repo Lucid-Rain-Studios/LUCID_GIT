@@ -42,8 +42,8 @@ test('automatic binary fallback shows the detected class and manual fallback kee
 })
 
 test('timeline changes-area route detects every uasset regardless of naming and keys revision changes', () => {
-  const harness = component('src/components/shared/FileDetailsSidePanel.tsx', { '@/lib/binaryFormats': component('electron/util/binary-formats.ts').exports })
-  for (const filePath of ['Ordinary.UASSET', 'Content/Materials/M_VisualScript.uasset', 'Content/Blueprints/BP_Texture.uasset']) {
+  const harness = component('src/components/shared/FileDetailsSidePanel.tsx', { '@/lib/binaryFormats': component('electron/util/binary-formats.ts').exports, '@/lib/unrealAssetReview': component('src/lib/unrealAssetReview.ts').exports })
+  for (const filePath of ['Ordinary.UASSET', 'Content/Materials/M_VisualScript.uasset', 'Content/Blueprints/BP_Texture.uasset', 'Content/Level.umap']) {
     const request = { filePath, oldPath: 'Old.uasset', leftRef: 'HEAD', rightRef: 'INDEX' }
     const tree = harness.render('FileDetailsSidePanel', { repoPath: 'repo', filePath, blueprintRequest: request, blame: [], blameLoading: false })
     expect(tree.props.request).toBe(request)
@@ -247,13 +247,13 @@ test('graph dropdown identifies changes, presence and incomplete comparisons', (
 test('Blueprint file action accepts any uasset name, preserves revisions and excludes other files', () => {
   const opened=[],closed=[]
   const harness=component('src/components/shared/BlueprintFileAction.tsx',{'@/stores/assetViewerStore':{useAssetViewerStore:selector=>selector({openBlueprint:(...args)=>opened.push(args)})}})
-  for(const [filePath,revision] of [['Ordinary.UASSET',undefined],['Content/M_VisualScript.uasset','INDEX'],['Historical.uasset','a'.repeat(40)]]) {
+  for(const [filePath,revision] of [['Ordinary.UASSET',undefined],['Content/M_VisualScript.uasset','INDEX'],['Historical.uasset','a'.repeat(40)],['Content/World.umap','HEAD']]) {
     const item=harness.render('BlueprintFileAction',{repoPath:'repo',filePath,revision,onClose:()=>closed.push(true)})
-    expect(item.props.label).toBe('Open Blueprint graph');item.props.onClick()
+    expect(item.props.label).toBe('Open Unreal asset details');item.props.onClick()
     expect(opened.at(-1)).toEqual(['repo',filePath,revision??'WORKING'])
   }
-  expect(closed).toHaveLength(3)
-  for(const filePath of ['Readme.txt','BP_Test.umap','folder'])expect(harness.render('BlueprintFileAction',{repoPath:'repo',filePath,onClose(){}})).toBeNull()
+  expect(closed).toHaveLength(4)
+  for(const filePath of ['Readme.txt','World.ubulk','folder'])expect(harness.render('BlueprintFileAction',{repoPath:'repo',filePath,onClose(){}})).toBeNull()
 })
 
 test('asset viewer mode resets between graph and normal previews', () => {

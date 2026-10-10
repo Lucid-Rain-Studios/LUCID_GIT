@@ -43,17 +43,41 @@ export interface BlueprintDocument {
   engineVersion: string
   graphs: BlueprintGraph[]
   diagnostics: string[]
+  assetReview?: UnrealAssetDocument
+}
+export interface UnrealAssetObject {
+  sourcePackage?: string
+  serializedPath?: string
+  id: string
+  path: string
+  name: string
+  classPath: string
+  outer: string
+  properties: Record<string, unknown>
+  decoded: boolean
+  opaqueProperties?: string[]
+  opaqueBytes: number
+  opaqueHash: string
+  diagnostics: string[]
+}
+export interface UnrealAssetDocument {
+  family: 'map' | 'mesh' | 'statetree' | 'animation' | 'blueprint' | 'texture' | 'animation-sequence' | 'asset'
+  objects: UnrealAssetObject[]
+  coverage: string[]
+  cooked: boolean
 }
 export interface BlueprintSide {
   ref: string
   path: string
   status: 'ready' | 'absent' | 'unavailable'
   reason?: string
+  sourceBytes?: number
   contentHash?: string
   documentKey?: string
   document?: BlueprintDocument
 }
 export interface BlueprintRequest {
+  externalActors?: boolean
   knownDocuments?: string[]
   force?: boolean
   filePath: string
@@ -62,4 +86,16 @@ export interface BlueprintRequest {
   rightRef: string
   requestId: string
 }
-export interface BlueprintComparison { left: BlueprintSide; right: BlueprintSide }
+export interface ExternalActorPackage { left: BlueprintSide; right: BlueprintSide }
+export interface ExternalActorReview {
+  scope: 'changed-packages'
+  total: number
+  omitted: number
+  packages: ExternalActorPackage[]
+  diagnostics: string[]
+}
+export interface BlueprintComparison {
+  left: BlueprintSide; right: BlueprintSide
+  externalActors?: ExternalActorReview
+  owningMaps?: { left?: string; right?: string }
+}
