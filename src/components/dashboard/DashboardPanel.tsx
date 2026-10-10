@@ -1,3 +1,4 @@
+import { useBlueprintFileMenu } from '@/lib/useBlueprintFileMenu'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { ipc, SyncStatus, Lock, FileStatus, PullRequest, PotentialMergeConflictReport } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
@@ -346,6 +347,7 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
       {/* ── Status grid (3 columns) ─────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gridAutoRows: '1fr', gap: 14, marginTop: 16, flex: 1, minHeight: 300 }}>
         <LocalStatusCard
+          repoPath={repoPath}
           sync={effectiveSync} files={fileStatus}
           staged={staged} unstaged={unstaged}
           onNavigate={onNavigate}
@@ -752,11 +754,13 @@ function SuggestionsCard({ lastFetch, lastPull, sync, fileStatus, conflictReport
 
 // ── Local Status Card (sync + changes combined) ───────────────────────────────
 
-function LocalStatusCard({ sync, files, staged, unstaged, onNavigate }: {
+function LocalStatusCard({ repoPath, sync, files, staged, unstaged, onNavigate }: {
+  repoPath: string
   sync: SyncStatus | null
   files: FileStatus[]; staged: number; unstaged: number
   onNavigate: (tab: string) => void
 }) {
+  const graphMenu = useBlueprintFileMenu(repoPath)
   const behind      = sync?.behind ?? 0
   const ahead       = sync?.ahead  ?? 0
   const clean       = sync && behind === 0 && ahead === 0
@@ -765,6 +769,7 @@ function LocalStatusCard({ sync, files, staged, unstaged, onNavigate }: {
 
   return (
     <Card title="Local Status" icon={<SyncIcon />} onAction={() => onNavigate('timeline')} actionLabel="View All">
+      {graphMenu.menu}
       <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 9, overflowY: 'auto', flex: 1, minHeight: 0 }}>
         <div style={{ fontFamily: 'var(--lg-font-mono)', fontSize: 10, color: '#344057', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {sync?.hasUpstream ? `→ ${sync.remoteName}/${sync.remoteBranch}` : 'No upstream configured'}
@@ -799,7 +804,7 @@ function LocalStatusCard({ sync, files, staged, unstaged, onNavigate }: {
             {preview.map(f => {
               const { char, color } = fileStatusLabel(f)
               return (
-                <div key={f.path} style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
+                <div key={f.path} tabIndex={0} onContextMenu={e => graphMenu.onContextMenu(e, f.path)} style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
                   <span style={{
                     fontFamily: 'var(--lg-font-mono)', fontSize: 9, fontWeight: 700,
                     color, background: `${color}18`, border: `1px solid ${color}33`,
@@ -835,6 +840,7 @@ function LocksCard({ locks, currentLogin, repoPath, unlockFile, isAdmin }: {
   unlockFile: (repoPath: string, filePath: string, force?: boolean) => Promise<void>
   isAdmin: boolean
 }) {
+  const graphMenu = useBlueprintFileMenu(repoPath)
   const [tab, setTab]           = useState<'mine' | 'team'>('mine')
   const [unlocking, setUnlocking] = useState<string | null>(null)
 
@@ -850,6 +856,7 @@ function LocksCard({ locks, currentLogin, repoPath, unlockFile, isAdmin }: {
 
   return (
     <Card title="Active Locks" icon={<LockCardIcon />}>
+      {graphMenu.menu}
       {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: '1px solid #18202e', paddingLeft: 13, background: 'rgba(0,0,0,0.06)', flexShrink: 0 }}>
         {(['mine', 'team'] as const).map(t => {
@@ -884,7 +891,7 @@ function LocksCard({ locks, currentLogin, repoPath, unlockFile, isAdmin }: {
             const canUnlock = isOwn || isAdmin
             const force     = !isOwn
             return (
-              <div key={lock.id} style={{ display: 'flex', alignItems: 'center', gap: 7, overflow: 'hidden', minHeight: 36, flexShrink: 0 }}>
+              <div key={lock.id} tabIndex={0} onContextMenu={e => graphMenu.onContextMenu(e, lock.path)} style={{ display: 'flex', alignItems: 'center', gap: 7, overflow: 'hidden', minHeight: 36, flexShrink: 0 }}>
                 <div style={{
                   width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
                   background: `${authorColor(lock.owner.name)}22`,

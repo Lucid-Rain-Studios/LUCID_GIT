@@ -65,6 +65,8 @@
   flex-direction:column;
   min-width:0;
   min-height:0}
+.bp-single .bp-revisions {
+  grid-template-columns:minmax(0,1fr)}
 .bp-pane+.bp-pane {
   border-left:1px solid var(--lg-border-strong)}
 .bp-pane>header {

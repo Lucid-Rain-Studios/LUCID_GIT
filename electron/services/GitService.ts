@@ -1841,13 +1841,14 @@ class GitService {
         return { hash: hash?.trim() ?? '', message: subject?.trim() ?? '', author: author?.trim() ?? '', date: date?.trim() ?? '' }
       })
 
-    const statusMap = new Map(parseNameStatus(namestatR.stdout).map(file => [file.path, file.status]))
+    const statusMap = new Map(parseNameStatus(namestatR.stdout).map(file => [file.path, file]))
     let totalAdditions = 0
     let totalDeletions = 0
     const files = parseNumstat(numstatR.stdout).map(file => {
       totalAdditions += file.additions
       totalDeletions += file.deletions
-      return { ...file, status: (statusMap.get(file.path) ?? 'M') as BranchDiffFile['status'] }
+      const named = statusMap.get(file.path)
+      return { ...file, status: (named?.status ?? 'M') as BranchDiffFile['status'], ...(named?.oldPath ? { oldPath: named.oldPath } : {}) }
     })
 
     return {
@@ -3673,7 +3674,23 @@ ${lastError}` : '')
     return parsePorcelainBlame(stdout)
   }
 
-  async diffCommit(repoPath: string, filePath: string, hash: string): Promise<DiffContent> {
+  async diffCommit(repoPath: string, filePath: string, hash: string, baseHash?: string, oldPath?: string): Promise<DiffContent> {
+    // Explicit two-revision reviews must not silently substitute HEAD, a parent,
+    // or empty content when the reviewed commit cannot be read.
+    if (baseHash !== undefined) {
+      const read = async (ref: string, target: string) => {
+        if (ref === 'ABSENT') return ''
+        const verified = await this.resolveBranchRef(repoPath, ref)
+        const listed = await execSafe(['ls-tree', '-z', verified, '--', `:(literal)${target}`], repoPath)
+        if (listed.exitCode !== 0) throw new Error(listed.stderr || 'Could not read the reviewed file revision.')
+        if (!listed.stdout) return ''
+        const content = await execSafe(['show', `${verified}:${target}`], repoPath)
+        if (content.exitCode !== 0) throw new Error(content.stderr || 'Could not read the reviewed file revision.')
+        return content.stdout
+      }
+      const [oldContent, newContent] = await Promise.all([read(baseHash, oldPath ?? filePath), read(hash, filePath)])
+      return { oldContent, newContent, isBinary: BINARY_EXTS.has(path.extname(filePath).toLowerCase()), language: langFromPath(filePath) }
+    }
     const [newRes, oldRes] = await Promise.all([
       execSafe(['show', `${hash}:${filePath}`], repoPath),
       execSafe(['show', `${hash}^:${filePath}`], repoPath),

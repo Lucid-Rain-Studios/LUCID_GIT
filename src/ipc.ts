@@ -643,6 +643,7 @@ export interface BranchDiffCommit {
 
 export interface BranchDiffFile {
   path: string
+  oldPath?: string
   status: 'A' | 'M' | 'D' | 'R' | 'C'
   additions: number
   deletions: number
@@ -892,7 +893,7 @@ export interface LucidGitAPI {
   branchHealth: (repoPath: string, options?: { base?: string; maxChecks?: number }) => Promise<BranchHealthReport>
   gitDefaultBranch: (repoPath: string) => Promise<string>
   gitBlame: (repoPath: string, filePath: string, rev: string) => Promise<BlameEntry[]>
-  gitCommitFileDiff: (repoPath: string, filePath: string, hash: string) => Promise<DiffContent>
+  gitCommitFileDiff: (repoPath: string, filePath: string, hash: string, baseHash?: string, oldPath?: string) => Promise<DiffContent>
 
   // Asset diff previews — Phase 17
   assetDiffPreview: (repoPath: string, filePath: string, leftRef: string, rightRef: string, editorBinaryOverride?: string) => Promise<AssetDiffResult>

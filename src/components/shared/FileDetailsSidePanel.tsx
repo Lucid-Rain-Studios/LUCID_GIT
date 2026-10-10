@@ -9,14 +9,14 @@ import { BlueprintDiff, type BlueprintFileChoice } from '@/components/diff/Bluep
 import type { BlueprintRequest } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 
-function BlueprintAssetPanel({ request, files, ...props }: { files?: BlueprintFileChoice[]; request: Omit<BlueprintRequest, 'requestId'>; repoPath: string; filePath: string; hash: string; remoteUrl: string | null }) {
+export function BlueprintAssetPanel({ request, files, single = false, revisionLabels, onBlueprintUnsupported, ...props }: { single?: boolean; files?: BlueprintFileChoice[]; revisionLabels?: { left: string; right: string }; onBlueprintUnsupported?(reason: string): void; request: Omit<BlueprintRequest, 'requestId'>; repoPath: string; filePath: string; hash: string; remoteUrl: string | null }) {
   const [details, setDetails] = useState(false)
   const [unsupported, setUnsupported] = useState<string | null>(null)
   const project = useRepoStore(state => state.repoPath === props.repoPath ? state.unrealProject : null)
   return details || unsupported ? <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
     {unsupported ? <div role="status" style={{ padding: '10px 12px', color: 'var(--lg-text-secondary)', fontFamily: 'var(--lg-font-ui)', fontSize: 12, borderBottom: '1px solid var(--lg-border)' }}>{unsupported}</div> : <button className="lg-toolbar-control" onClick={() => setDetails(false)}>Back to Blueprint graph</button>}
     <AssetPanel {...props} />
-  </div> : <BlueprintDiff files={files} project={project} repoPath={props.repoPath} request={request} onFallback={() => setDetails(true)} onUnsupported={setUnsupported} />
+  </div> : <BlueprintDiff single={single} files={files} project={project} repoPath={props.repoPath} request={request} revisionLabels={revisionLabels} onFallback={() => setDetails(true)} onUnsupported={reason => { setUnsupported(reason); onBlueprintUnsupported?.(reason) }} />
 }
 
 export function isPreviewAsset(filePath: string): boolean {
@@ -340,6 +340,9 @@ export function FileDetailsSidePanel({
   remoteUrl = null,
   blueprintRequest,
   blueprintFiles,
+  blueprintSingle = false,
+  revisionLabels,
+  onBlueprintUnsupported,
 }: {
   repoPath: string
   filePath: string | null
@@ -347,6 +350,9 @@ export function FileDetailsSidePanel({
   remoteUrl?: string | null
   blueprintFiles?: BlueprintFileChoice[]
   blueprintRequest?: Omit<BlueprintRequest, 'requestId'>
+  blueprintSingle?: boolean
+  revisionLabels?: { left: string; right: string }
+  onBlueprintUnsupported?(reason: string): void
   diff?: DiffContent | null
   diffLoading?: boolean
   blame: BlameEntry[]
@@ -366,7 +372,7 @@ export function FileDetailsSidePanel({
   }
 
   if (isPreviewAsset(filePath)) {
-    if (/\.uasset$/i.test(filePath) && blueprintRequest) return <BlueprintAssetPanel key={[repoPath, filePath, blueprintRequest.oldPath, blueprintRequest.leftRef, blueprintRequest.rightRef].join('|')} request={blueprintRequest} files={blueprintFiles} repoPath={repoPath} filePath={filePath} hash={hash} remoteUrl={remoteUrl} />
+    if (/\.uasset$/i.test(filePath) && blueprintRequest) return <BlueprintAssetPanel key={[repoPath, filePath, blueprintRequest.oldPath, blueprintRequest.leftRef, blueprintRequest.rightRef].join('|')} single={blueprintSingle} request={blueprintRequest} files={blueprintFiles} repoPath={repoPath} filePath={filePath} hash={hash} remoteUrl={remoteUrl} revisionLabels={revisionLabels} onBlueprintUnsupported={onBlueprintUnsupported} />
     return <AssetPanel repoPath={repoPath} filePath={filePath} hash={hash} remoteUrl={remoteUrl} />
   }
 

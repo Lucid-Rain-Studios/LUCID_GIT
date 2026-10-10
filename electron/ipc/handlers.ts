@@ -1125,8 +1125,8 @@ export function registerHandlers(): void {
     gitService.blame(repoPath, filePath, rev)
   )
 
-  handleRead(CHANNELS.GIT_DIFF_COMMIT, (_event, repoPath: string, filePath: string, hash: string) =>
-    gitService.diffCommit(repoPath, filePath, hash)
+  handleRead(CHANNELS.GIT_DIFF_COMMIT, (_event, repoPath: string, filePath: string, hash: string, baseHash?: string, oldPath?: string) =>
+    gitService.diffCommit(repoPath, filePath, hash, baseHash, oldPath)
   )
 
   // ── Asset diff previews — Phase 17 ───────────────────────────────────────

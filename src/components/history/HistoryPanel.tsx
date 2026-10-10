@@ -1,3 +1,4 @@
+import { BlueprintFileAction } from '@/components/shared/BlueprintFileAction'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { ipc, CommitEntry, CommitFileChange, BranchInfo, BlameEntry, StashEntry } from '@/ipc'
 import { useOperationStore } from '@/stores/operationStore'
@@ -540,6 +541,7 @@ export function CommitDetail({ commit, files, filesLoading, repoPath, remoteUrl 
       {/* File context menu */}
       {ctxMenu && (
         <AppRightSelectionOptions x={ctxMenu.x} y={ctxMenu.y} minWidth={230} menuRef={ctxRef}>
+          <BlueprintFileAction repoPath={repoPath} filePath={ctxMenu.file.path} revision={commit.hash} onClose={closeCtx} />
           <AppRightSelectionItem label="Blame" onClick={() => { setBlameTarget(ctxMenu.file); closeCtx() }} />
           <AppRightSelectionSeparator />
           <AppRightSelectionItem label="Show in Explorer"           onClick={() => { ipc.showInFolder(absPath(ctxMenu.file)); closeCtx() }} />

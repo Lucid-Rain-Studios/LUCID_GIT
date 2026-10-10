@@ -1,3 +1,5 @@
+import { AppRightSelectionItem } from '@/components/ui/AppRightSelectionOptions'
+import { useBlueprintFileMenu } from '@/lib/useBlueprintFileMenu'
 import React, { useState, useCallback, useRef, useMemo } from 'react'
 import { ipc, Lock, LfsLocksMaintenanceResult, BulkUnlockResult } from '@/ipc'
 import { useLockStore } from '@/stores/lockStore'
@@ -275,6 +277,8 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
 
   const mergedResolution = resolveRequest && resolveRequest.repoPath === repoPath ? resolveRequest : null
 
+  const graphMenu = useBlueprintFileMenu(repoPath, close => selectedLocks.length > 0 ? <AppRightSelectionItem label="Force Unlock Selected" disabled={isAnyUnlocking} onClick={() => { close(); void doBulkUnlock() }} /> : null)
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#0d0f15', overflow: 'hidden', fontFamily: 'var(--lg-font-ui)' }}>
 
@@ -472,6 +476,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
             {filtered.map((lock) => (
               <LockRow
                 key={lock.id}
+                onContextMenu={e => { graphMenu.onContextMenu(e, lock.path); clearContextMenu() }}
                 lock={lock}
                 repoPath={repoPath}
                 currentLogin={currentLogin}
@@ -569,6 +574,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
                       {group.locks.map(lock => (
                         <LockRow
                           key={lock.id}
+                          onContextMenu={e => { graphMenu.onContextMenu(e, lock.path); clearContextMenu() }}
                           lock={lock}
                           repoPath={repoPath}
                           currentLogin={currentLogin}
@@ -594,6 +600,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
         )}
       </div>
 
+      {graphMenu.menu}
       {ctxMenu && selectedLocks.length > 0 && (
         <div
           style={{ position: 'fixed', left: ctxMenu.x, top: ctxMenu.y, zIndex: 50, background: '#131720', border: '1px solid #283047', borderRadius: 6, padding: 4 }}
@@ -614,7 +621,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
 
 function LockRow({
   lock, currentLogin, isAdmin, unlocking,
-  selected, disableActions, onUnlock, onSelect, onCopyPath, onShowInExplorer,
+  selected, disableActions, onUnlock, onSelect, onCopyPath, onShowInExplorer, onContextMenu,
 }: {
   lock: Lock
   repoPath: string
@@ -625,6 +632,7 @@ function LockRow({
   disableActions: boolean
   onUnlock: (lock: Lock, force: boolean) => void
   onSelect: (mods: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => void
+  onContextMenu?: (event: React.MouseEvent) => void
   onCopyPath: (lock: Lock) => void
   onShowInExplorer: (lock: Lock) => void
 }) {
@@ -645,6 +653,8 @@ function LockRow({
 
   return (
     <div
+      tabIndex={0}
+      onContextMenu={onContextMenu}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => { setHover(false) }}
       onClick={(e) => {

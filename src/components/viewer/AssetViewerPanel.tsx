@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { ipc, CommitEntry } from '@/ipc'
 import { useAssetViewerStore } from '@/stores/assetViewerStore'
+import { BlueprintAssetDialog } from './BlueprintAssetDialog'
 
 function toImgSrc(absPath: string | null): string | null {
   if (!absPath) return null
@@ -24,7 +25,7 @@ interface VersionCard {
 }
 
 export function AssetViewerPanel() {
-  const { repoPath, filePath, isOpen, close } = useAssetViewerStore()
+  const { repoPath, filePath, isOpen, close, view, revision } = useAssetViewerStore()
 
   const [zoom,         setZoom]         = useState(1)
   const [fullscreen,   setFullscreen]   = useState(false)
@@ -44,7 +45,7 @@ export function AssetViewerPanel() {
     let cancelled = false
     setThumbLoading(false)
     setThumbnail(null)
-    if (!repoPath || !filePath || !isOpen) return
+    if (!repoPath || !filePath || !isOpen || view === 'blueprint') return
     if (!isUEAsset && !isImgAsset) return
     setThumbLoading(true)
     setThumbnail(null)
@@ -53,12 +54,12 @@ export function AssetViewerPanel() {
       .catch(() => {})
       .finally(() => { if (!cancelled) setThumbLoading(false) })
     return () => { cancelled = true }
-  }, [repoPath, filePath, selectedRef, isOpen, isUEAsset, isImgAsset])
+  }, [repoPath, filePath, selectedRef, isOpen, isUEAsset, isImgAsset, view])
 
   // Load version history when file changes
   useEffect(() => {
     let cancelled = false
-    if (!repoPath || !filePath || !isOpen) return
+    if (!repoPath || !filePath || !isOpen || view === 'blueprint') return
     setVersions([])
     setVerLoading(true)
     ipc.gitFileLog(repoPath, filePath, 20)
@@ -76,7 +77,7 @@ export function AssetViewerPanel() {
       .catch(() => { if (!cancelled) setVersions([]) })
       .finally(() => { if (!cancelled) setVerLoading(false) })
     return () => { cancelled = true }
-  }, [repoPath, filePath, isOpen, isUEAsset, isImgAsset])
+  }, [repoPath, filePath, isOpen, isUEAsset, isImgAsset, view])
 
   // Reset state when panel closes or file changes
   useEffect(() => {
@@ -98,6 +99,7 @@ export function AssetViewerPanel() {
     setZoom(z => Math.max(0.1, Math.min(8, Math.round((z + delta) * 100) / 100)))
 
   if (!isOpen || !repoPath || !filePath) return null
+  if (view === 'blueprint') return <BlueprintAssetDialog repoPath={repoPath} filePath={filePath} revision={revision} onClose={close} />
 
   const imgSrc  = toImgSrc(thumbnail)
   const panelW  = fullscreen ? '100%' : 400

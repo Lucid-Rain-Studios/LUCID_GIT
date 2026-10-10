@@ -242,3 +242,36 @@ test('graph dropdown identifies changes, presence and incomplete comparisons', (
   harness.slots[0].left.status = 'unavailable'
   expect(labels().every(label => label.endsWith('(comparison unavailable)'))).toBe(true)
 })
+
+
+test('Blueprint file action accepts any uasset name, preserves revisions and excludes other files', () => {
+  const opened=[],closed=[]
+  const harness=component('src/components/shared/BlueprintFileAction.tsx',{'@/stores/assetViewerStore':{useAssetViewerStore:selector=>selector({openBlueprint:(...args)=>opened.push(args)})}})
+  for(const [filePath,revision] of [['Ordinary.UASSET',undefined],['Content/M_VisualScript.uasset','INDEX'],['Historical.uasset','a'.repeat(40)]]) {
+    const item=harness.render('BlueprintFileAction',{repoPath:'repo',filePath,revision,onClose:()=>closed.push(true)})
+    expect(item.props.label).toBe('Open Blueprint graph');item.props.onClick()
+    expect(opened.at(-1)).toEqual(['repo',filePath,revision??'WORKING'])
+  }
+  expect(closed).toHaveLength(3)
+  for(const filePath of ['Readme.txt','BP_Test.umap','folder'])expect(harness.render('BlueprintFileAction',{repoPath:'repo',filePath,onClose(){}})).toBeNull()
+})
+
+test('asset viewer mode resets between graph and normal previews', () => {
+  let state
+  const harness=component('src/stores/assetViewerStore.ts',{zustand:{create:initialize=>{state=initialize(update=>Object.assign(state,update));return ()=>state}}})
+  state.openBlueprint('repo','Ordinary.uasset','INDEX')
+  expect(state).toMatchObject({view:'blueprint',revision:'INDEX',isOpen:true})
+  state.close();expect(state.isOpen).toBe(false)
+  state.open('other','Image.png');expect(state).toMatchObject({view:'asset',revision:'WORKING',isOpen:true,repoPath:'other',filePath:'Image.png'})
+})
+
+test('dashboard graph menus target the clicked status or lock file without navigation or unlocking', () => {
+  const clicked=[],unexpected=[]
+  const harness=component('src/components/dashboard/DashboardPanel.tsx',{'@/lib/useBlueprintFileMenu':{useBlueprintFileMenu:repo=>({menu:null,onContextMenu:(_,file)=>clicked.push([repo,file])})}}, {__privateExports:['LocalStatusCard','LocksCard']})
+  let tree=harness.render('LocalStatusCard',{repoPath:'repo',sync:null,files:[{path:'Clicked.uasset',staged:false,status:'M'}],staged:0,unstaged:1,onNavigate:()=>unexpected.push('navigate')})
+  find(tree,e=>e.props?.onContextMenu).props.onContextMenu({})
+  harness.slots[0]='team'
+  tree=harness.render('LocksCard',{repoPath:'repo',locks:[{id:'lock',path:'OtherOwner.uasset',owner:{login:'other',name:'Other'},lockedAt:new Date().toISOString()}],currentLogin:'me',isAdmin:false,unlockFile:()=>unexpected.push('unlock')})
+  find(tree,e=>e.props?.onContextMenu).props.onContextMenu({})
+  expect(clicked).toEqual([['repo','Clicked.uasset'],['repo','OtherOwner.uasset']]);expect(unexpected).toEqual([])
+})

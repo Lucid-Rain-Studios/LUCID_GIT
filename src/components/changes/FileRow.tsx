@@ -5,6 +5,7 @@ import { useForecastStore } from '@/stores/forecastStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useDialogStore } from '@/stores/dialogStore'
 import { useAssetViewerStore } from '@/stores/assetViewerStore'
+import { BlueprintFileAction } from '@/components/shared/BlueprintFileAction'
 import { AppCheckbox } from '@/components/ui/AppCheckbox'
 import { FilePathText } from '@/components/ui/FilePathText'
 import { AppRightSelectionItem, AppRightSelectionOptions, AppRightSelectionSeparator } from '@/components/ui/AppRightSelectionOptions'
@@ -229,6 +230,7 @@ export function FileRow({
       {/* Context menu */}
       {ctx && (
         <AppRightSelectionOptions x={ctx.x} y={ctx.y} minWidth={200} menuRef={ctxRef}>
+          <BlueprintFileAction repoPath={repoPath} filePath={file.path} revision={file.staged ? 'INDEX' : 'WORKING'} onClose={close} />
           <AppRightSelectionItem label={isUntracked ? 'Delete file…' : 'Discard changes…'} onClick={doDiscard} danger />
           {canStageHunks && (
             <AppRightSelectionItem

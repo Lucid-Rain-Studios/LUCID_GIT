@@ -47,6 +47,9 @@ export function useDialogOverlayDismiss(onDismiss: () => void, enabled = true, l
     const keydown = (event: KeyboardEvent) => {
       if (dialogs.at(-1) !== root) return
       if (event.key === 'Escape') {
+        // A contained file menu owns Escape and returns focus to its trigger.
+        // Let its listener run before dismissing the enclosing review.
+        if (event.target instanceof HTMLElement && event.target.closest('[data-dialog-menu]')) return
         event.preventDefault(); event.stopImmediatePropagation()
         if (latest.current.enabled) latest.current.onDismiss()
       } else if (event.key === 'Tab') {

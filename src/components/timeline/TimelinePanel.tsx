@@ -1,3 +1,4 @@
+import { RevisionFileActions } from '@/components/shared/RevisionFileActions'
 import { timelineBranches } from '@/lib/timelineBranches'
 import { isBinaryPath } from '@/lib/binaryFormats'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
@@ -1394,7 +1395,6 @@ function CommitFileRow({ f, selected, repoPath, commitHash, remoteUrl, onClick }
   const [ctx,    setCtx]    = useState<{ x: number; y: number } | null>(null)
   const [blame,  setBlame]  = useState(false)
   const ctxRef = useRef<HTMLDivElement>(null)
-  const ghSlug = remoteUrl ? parseGHSlug(remoteUrl) : null
 
   useEffect(() => {
     if (!ctx) return
@@ -1407,7 +1407,6 @@ function CommitFileRow({ f, selected, repoPath, commitHash, remoteUrl, onClick }
 
   const close = () => setCtx(null)
 
-  const absPath = repoPath.replace(/\\/g, '/').replace(/\/$/, '') + '/' + f.path
 
   const label = f.oldPath ? `${f.oldPath} → ${f.path}` : f.path
   const displayLabel = f.oldPath
@@ -1446,21 +1445,7 @@ function CommitFileRow({ f, selected, repoPath, commitHash, remoteUrl, onClick }
 
       {ctx && (
         <div ref={ctxRef} style={{ ...CTX_MENU_STYLE, top: ctx.y, left: ctx.x }}>
-          <CtxItem label="Blame" onClick={() => { setBlame(true); close() }} />
-          <CtxSep />
-          <CtxItem label="Show in Explorer"            onClick={() => { ipc.showInFolder(absPath); close() }} />
-          <CtxItem label="Open in Visual Studio Code"  onClick={() => { ipc.openExternal('vscode://file/' + absPath); close() }} />
-          <CtxItem label="Open with default program"   onClick={() => { ipc.openPath(absPath); close() }} />
-          <CtxSep />
-          <CtxItem label="Copy file path"              onClick={() => { navigator.clipboard.writeText(absPath); close() }} />
-          <CtxItem label="Copy relative file path"     onClick={() => { navigator.clipboard.writeText(f.path); close() }} />
-          <CtxSep />
-          <CtxItem
-            label="View on GitHub"
-            onClick={ghSlug ? () => { ipc.openExternal(`https://github.com/${ghSlug}/blob/${commitHash}/${f.path}`); close() } : undefined}
-            disabled={!ghSlug}
-            title={ghSlug ? undefined : 'No GitHub remote detected'}
-          />
+          <RevisionFileActions repoPath={repoPath} filePath={f.path} revision={commitHash} remoteUrl={remoteUrl} onClose={close} onBlame={() => setBlame(true)} />
         </div>
       )}
 

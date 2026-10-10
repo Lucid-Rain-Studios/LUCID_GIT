@@ -10,8 +10,9 @@ import { useOperationStore } from '@/stores/operationStore'
 import { useStatusToastStore } from '@/stores/statusToastStore'
 import { useErrorStore } from '@/stores/errorStore'
 import { markFetchPerformed } from '@/lib/fetchState'
-import { FilePathText } from '@/components/ui/FilePathText'
 import { ActionBtn } from '@/components/ui/ActionBtn'
+import { PRReviewWorkspace } from '@/components/pr/PRReviewWorkspace'
+import '@/components/pr/PRReviewDialog.css'
 
 interface OverviewPanelProps {
   repoPath: string
@@ -420,7 +421,7 @@ function CommitsCard({ commits, onNavigate }: { commits: CommitEntry[]; onNaviga
 
 // ── PR Resolve Dialog ─────────────────────────────────────────────────────────
 
-function ResolveDialog({
+export function ResolveDialog({
   pr, ghSlug, repoPath, onClose, onDone,
 }: {
   pr: PullRequest
@@ -608,240 +609,40 @@ function ResolveDialog({
     } finally { setBusy(false) }
   }
 
-  return (
-    <div {...modal} style={{
-      position: 'fixed', inset: 0, zIndex: 600,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)',
-    }}>
-      <div style={{
-        background: '#131720', border: '1px solid #1a2030',
-        borderRadius: 12,
-        boxShadow: '0 24px 64px rgba(0,0,0,0.7), 0 4px 16px rgba(0,0,0,0.5)',
-        width: 520, maxHeight: '80vh',
-        display: 'flex', flexDirection: 'column',
-        animation: 'slide-down 0.16s ease both',
-      }}>
-        {/* Header */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 10,
-          padding: '16px 18px 14px', borderBottom: '1px solid #18202e', flexShrink: 0,
-        }}>
-          <span style={{
-            fontFamily: 'var(--lg-font-mono)', fontSize: 11, fontWeight: 700,
-            color: '#a27ef0', background: 'rgba(162,126,240,0.12)',
-            border: '1px solid rgba(162,126,240,0.25)',
-            borderRadius: 4, padding: '2px 7px', flexShrink: 0,
-          }}>#{pr.number}</span>
-          <span style={{
-            fontFamily: 'var(--lg-font-ui)', fontSize: 13, fontWeight: 600,
-            color: '#c8d0e8', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>{pr.title}</span>
-          <button
-            onClick={onClose}
-            style={{ background: 'none', border: 'none', color: '#344057', cursor: 'pointer', fontSize: 16, padding: '0 4px', flexShrink: 0 }}
-            onMouseEnter={e => e.currentTarget.style.color = '#e84545'}
-            onMouseLeave={e => e.currentTarget.style.color = '#344057'}
-          >✕</button>
-        </div>
+  const waitingForConflictChoices = choice === 'accept' && conflicts.length > 0 && !allConflictChoicesMade
+  const disabled = busy || waitingForConflictChoices || (choice === 'accept' && (!refsFetched || conflictLoading || branchDiffLoading || !!conflictError || !!branchDiffError || !pr.headSha || !pr.baseSha))
+  const pending = conflicts.filter(file => !conflictChoices[file.path]).length
+  const reviewStatus = conflictError || branchDiffError ? 'Review unavailable'
+    : !refsFetched || conflictLoading || branchDiffLoading ? 'Loading review…'
+    : conflicts.length ? pending ? `${pending} of ${conflicts.length} files need a choice` : `${conflicts.length} file choices ready`
+    : 'No merge conflicts detected'
 
-        {/* Branch info */}
-        <div style={{ padding: '10px 18px', borderBottom: '1px solid #18202e', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontFamily: 'var(--lg-font-mono)', fontSize: 10.5, color: '#4a9eff' }}>{pr.headBranch}</span>
-          <span style={{ color: '#344057', fontSize: 11 }}>→</span>
-          <span style={{ fontFamily: 'var(--lg-font-mono)', fontSize: 10.5, color: '#5a6880' }}>{pr.baseBranch}</span>
-          <span style={{ color: '#283047', marginLeft: 4 }}>·</span>
-          <span style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 11, color: '#344057' }}>by {pr.author}</span>
-        </div>
-
-        {/* Accept / Decline choice */}
-        <div style={{ padding: '14px 18px', borderBottom: '1px solid #18202e', flexShrink: 0 }}>
-          <div style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 10.5, fontWeight: 700, color: '#344057', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 10 }}>
-            Action
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {(['accept', 'decline'] as const).map(opt => (
-              <button
-                key={opt}
-                onClick={() => setChoice(opt)}
-                style={{
-                  flex: 1, height: 34, borderRadius: 7, cursor: 'pointer',
-                  fontFamily: 'var(--lg-font-ui)', fontSize: 12.5, fontWeight: 600,
-                  border: choice === opt
-                    ? `1px solid ${opt === 'accept' ? 'rgba(45,189,110,0.5)' : 'rgba(232,69,69,0.5)'}`
-                    : '1px solid #1a2030',
-                  background: choice === opt
-                    ? (opt === 'accept' ? 'rgba(45,189,110,0.12)' : 'rgba(232,69,69,0.12)')
-                    : 'rgba(255,255,255,0.02)',
-                  color: choice === opt
-                    ? (opt === 'accept' ? '#2dbd6e' : '#e84545')
-                    : '#5a6880',
-                }}
-              >
-                {opt === 'accept' ? '✓ Accept (Merge)' : '✕ Decline (Close)'}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Conflict preview — only when accepting */}
-        {choice === 'accept' && (
-          <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-            <div style={{ padding: '12px 18px', borderBottom: '1px solid #18202e' }}>
-              <div style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 10.5, fontWeight: 700, color: '#344057', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>
-                Commits and file changes
-              </div>
-              {branchDiffLoading ? (
-                <div style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 12, color: '#344057' }}>Loading commit details…</div>
-              ) : branchDiffError ? (
-                <div style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 12, color: '#e84545' }}>{branchDiffError}</div>
-              ) : branchDiff ? (
-                <>
-                  <div style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 12, color: '#5a6880', marginBottom: 8 }}>
-                    {branchDiff.aheadCommits.length} commit{branchDiff.aheadCommits.length !== 1 ? 's' : ''} · +{branchDiff.totalAdditions} / -{branchDiff.totalDeletions}
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
-                    {branchDiff.aheadCommits.map(c => (
-                      <div key={c.hash} style={{ border: '1px solid #1a2030', borderRadius: 6, padding: '7px 8px', background: 'rgba(255,255,255,0.02)' }}>
-                        <div style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 12, color: '#c8d0e8' }}>{c.message}</div>
-                        <div style={{ fontFamily: 'var(--lg-font-mono)', fontSize: 10, color: '#4a566a', marginTop: 3 }}>{c.hash.slice(0,7)} · {c.author}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {branchDiff.files.map(f => (
-                      <div key={f.path} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontFamily: 'var(--lg-font-mono)', fontSize: 10.5, color: '#5a6880' }}>
-                        <span style={{ color: '#c8d0e8', display: 'flex', gap: 4, minWidth: 0, flex: 1 }}>
-                          <span>{f.status}</span>
-                          <FilePathText path={f.path} style={{ flex: 1, minWidth: 0 }} />
-                        </span>
-                        <span>+{f.additions} / -{f.deletions}</span>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              ) : null}
-            </div>
-            {conflictLoading ? (
-              <div style={{ padding: '16px 18px', fontFamily: 'var(--lg-font-ui)', fontSize: 12, color: '#344057' }}>
-                Checking for conflicts…
-              </div>
-            ) : conflictError ? (
-              <div style={{ padding: '16px 18px', fontFamily: 'var(--lg-font-ui)', fontSize: 12, color: '#e84545' }}>
-                {conflictError}
-              </div>
-            ) : conflicts.length === 0 ? (
-              <div style={{ padding: '16px 18px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ color: '#2dbd6e', fontSize: 14 }}>✓</span>
-                <span style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 12, color: '#344057' }}>No merge conflicts detected</span>
-              </div>
-            ) : (
-              <>
-                <div style={{ padding: '10px 18px 4px', fontFamily: 'var(--lg-font-ui)', fontSize: 10.5, fontWeight: 700, color: '#f5a832', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                  {conflicts.length} conflict{conflicts.length !== 1 ? 's' : ''} - choose a side
-                </div>
-                <div style={{
-                  margin: '6px 18px 12px',
-                  background: 'rgba(245,168,50,0.07)', border: '1px solid rgba(245,168,50,0.25)',
-                  borderRadius: 8, padding: '12px 14px',
-                  fontFamily: 'var(--lg-font-ui)', fontSize: 12, color: '#c8d0e8', lineHeight: 1.55,
-                }}>
-                  Pick <strong style={{ color: '#c8d0e8' }}>Mine</strong> to keep <strong style={{ color: '#4a9eff' }}>{pr.headBranch}</strong>, or <strong style={{ color: '#c8d0e8' }}>Theirs</strong> to keep <strong style={{ color: '#5a6880' }}>{pr.baseBranch}</strong>. Lucid Git will update the PR branch, push the resolution, then merge the PR.
-                </div>
-                {conflicts.map(f => (
-                  <div
-                    key={f.path}
-                    style={{
-                      padding: '8px 18px', borderBottom: '1px solid #18202e',
-                      display: 'flex', alignItems: 'center', gap: 8,
-                    }}
-                  >
-                    <span style={{ color: '#f5a832', fontSize: 11 }}>⚠</span>
-                    <FilePathText path={f.path} style={{ flex: 1, fontFamily: 'var(--lg-font-mono)', fontSize: 11, color: '#c8d0e8' }} />
-                    {(['head', 'base'] as const).map(side => {
-                      const selected = conflictChoices[f.path] === side
-                      const color = side === 'head' ? '#2dbd6e' : '#4a9eff'
-                      return (
-                        <button
-                          key={side}
-                          onClick={() => setConflictChoices(prev => ({ ...prev, [f.path]: side }))}
-                          disabled={busy}
-                          style={{
-                            height: 24, padding: '0 9px', borderRadius: 5,
-                            border: `1px solid ${selected ? `${color}99` : '#1a2030'}`,
-                            background: selected ? `${color}1f` : 'rgba(255,255,255,0.02)',
-                            color: selected ? color : '#5a6880',
-                            fontFamily: 'var(--lg-font-ui)', fontSize: 11, fontWeight: 600,
-                            cursor: busy ? 'default' : 'pointer',
-                            flexShrink: 0,
-                          }}
-                          title={side === 'head' ? `Keep ${pr.headBranch}` : `Keep ${pr.baseBranch}`}
-                        >
-                          {side === 'head' ? 'Mine' : 'Theirs'}
-                        </button>
-                      )
-                    })}
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-        )}
-
-        {choice === 'decline' && (
-          <div style={{ padding: '16px 18px', flex: 1 }}>
-            <div style={{
-              background: 'rgba(232,69,69,0.07)', border: '1px solid rgba(232,69,69,0.2)',
-              borderRadius: 8, padding: '12px 14px',
-              fontFamily: 'var(--lg-font-ui)', fontSize: 12, color: '#e84545', lineHeight: 1.5,
-            }}>
-              This will close PR #{pr.number} without merging. The branch will remain intact.
-            </div>
-          </div>
-        )}
-
-        {/* Footer */}
-        <div style={{
-          display: 'flex', justifyContent: 'flex-end', gap: 8,
-          padding: '14px 18px', borderTop: '1px solid #18202e', flexShrink: 0,
-        }}>
-          <button
-            onClick={onClose}
-            disabled={busy}
-            style={{
-              height: 32, paddingLeft: 16, paddingRight: 16, borderRadius: 6,
-              background: 'transparent', border: '1px solid #1a2030',
-              color: '#5a6880', fontFamily: 'var(--lg-font-ui)', fontSize: 12.5,
-              cursor: 'pointer',
-            }}
-            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-          >Cancel</button>
-          {(() => {
-            const waitingForConflictChoices = choice === 'accept' && conflicts.length > 0 && !allConflictChoicesMade
-            const disabled = busy || waitingForConflictChoices || (choice === 'accept' && (!refsFetched || conflictLoading || branchDiffLoading || !!conflictError || !!branchDiffError || !pr.headSha || !pr.baseSha))
-            return (
-              <button
-                onClick={handleConfirm}
-                disabled={disabled}
-                title={waitingForConflictChoices ? 'Choose Mine or Theirs for every conflicted file.' : undefined}
-                style={{
-                  height: 32, paddingLeft: 16, paddingRight: 16, borderRadius: 6,
-                  background: choice === 'accept' ? 'rgba(45,189,110,0.15)' : 'rgba(232,69,69,0.15)',
-                  border: `1px solid ${choice === 'accept' ? 'rgba(45,189,110,0.4)' : 'rgba(232,69,69,0.4)'}`,
-                  color: choice === 'accept' ? '#2dbd6e' : '#e84545',
-                  fontFamily: 'var(--lg-font-ui)', fontSize: 12.5, fontWeight: 600,
-                  cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
-                }}
-                onMouseEnter={e => { if (!disabled) e.currentTarget.style.opacity = '0.8' }}
-                onMouseLeave={e => { if (!disabled) e.currentTarget.style.opacity = '1' }}
-              >{busy ? '…' : choice === 'accept' ? (conflicts.length > 0 ? 'Resolve & Merge' : 'Merge PR') : 'Close PR'}</button>
-            )
-          })()}
-        </div>
-      </div>
+  return <div {...modal} style={{ position: 'fixed', inset: 0, zIndex: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)' }}>
+    <div className="pr-review-dialog">
+      <header className="pr-review-title">
+        <span className="pr-review-number">#{pr.number}</span><h2>{pr.title}</h2><span className="pr-review-pill">Open</span>
+        <span className="pr-review-spacer" />
+        <details className="pr-review-pr-menu"><summary aria-label="Pull request actions">⋮</summary>
+          <button disabled={busy} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); setChoice(choice === 'accept' ? 'decline' : 'accept') }}>{choice === 'accept' ? 'Close PR' : 'Review merge'}</button>
+        </details>
+        <button aria-label="Close PR review" disabled={busy} onClick={onClose}>×</button>
+      </header>
+      <div className="pr-review-branches"><strong>{pr.headBranch}</strong><span>→</span><span>{pr.baseBranch}</span><span>· by {pr.author}</span><small>{pr.headSha.slice(0, 7)}</small></div>
+      {choice === 'accept' ? <PRReviewWorkspace pr={pr} repoPath={repoPath} ghSlug={ghSlug} summary={branchDiff}
+        loading={!refsFetched || conflictLoading || branchDiffLoading} error={conflictError || branchDiffError}
+        conflicts={conflicts} choices={conflictChoices} busy={busy}
+        onChoose={(path, side) => setConflictChoices(previous => ({ ...previous, [path]: side }))} />
+        : <div className="pr-review-decline-warning">This will close PR #{pr.number} without merging. The branch will remain intact.<div style={{ marginTop: 14 }}><button disabled={busy} onClick={() => setChoice('accept')}>Back to review</button></div></div>}
+      <footer className="pr-review-footer">
+        <span role="status">{choice === 'accept' ? reviewStatus : 'Close without merging'}</span><span className="pr-review-spacer" />
+        <button onClick={onClose} disabled={busy}>Cancel</button>
+        <button className={choice === 'accept' ? 'pr-review-confirm' : 'pr-review-decline'} onClick={handleConfirm} disabled={disabled}
+          title={waitingForConflictChoices ? 'Choose a revision for every conflicting file.' : undefined}>
+          {busy ? '…' : choice === 'accept' ? conflicts.length > 0 ? 'Resolve & Merge' : 'Merge PR' : 'Close PR'}
+        </button>
+      </footer>
     </div>
-  )
+  </div>
 }
 
 // ── Admin PR management card ──────────────────────────────────────────────────

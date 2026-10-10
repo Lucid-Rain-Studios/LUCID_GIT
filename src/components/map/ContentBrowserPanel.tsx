@@ -6,6 +6,7 @@ import { useOperationStore } from '@/stores/operationStore'
 import { useStatusToastStore } from '@/stores/statusToastStore'
 import { FileDetailsSidePanel } from '@/components/shared/FileDetailsSidePanel'
 import { FilePathText } from '@/components/ui/FilePathText'
+import { BlueprintFileAction } from '@/components/shared/BlueprintFileAction'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -204,6 +205,7 @@ function ContextMenu({ menu, repoPath, locks, currentUserName, onClose, onNaviga
         boxShadow: '0 8px 32px rgba(0,0,0,0.6)', padding: '3px 0', minWidth: 180,
       }}
     >
+      <BlueprintFileAction repoPath={repoPath} filePath={menu.filePath} onClose={onClose} />
       {items.map((item, i) =>
         item === null
           ? <div key={`sep-${i}`} style={{ height: 1, background: '#252d42', margin: '3px 0' }} />
@@ -487,10 +489,12 @@ export function ContentBrowserPanel({ repoPath, onNavigate }: ContentBrowserPane
         <FileDetailsSidePanel
           repoPath={repoPath}
           filePath={selectedFile}
-          hash="HEAD"
+          hash="WORKING"
+          blueprintSingle
+          blueprintRequest={selectedFile && /\.uasset$/i.test(selectedFile) ? { filePath: selectedFile, leftRef: 'ABSENT', rightRef: 'WORKING' } : undefined}
           blame={blame}
           blameLoading={blameLoading}
-          mode="details"
+          mode={selectedFile && /\.uasset$/i.test(selectedFile) ? 'preview' : 'details'}
           emptyMessage="Select a file for details"
           remoteUrl={remoteUrl}
         />

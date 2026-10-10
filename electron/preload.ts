@@ -333,8 +333,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GIT_DEFAULT_BRANCH, repoPath),
   gitBlame: (repoPath: string, filePath: string, rev: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_BLAME, repoPath, filePath, rev),
-  gitCommitFileDiff: (repoPath: string, filePath: string, hash: string) =>
-    ipcRenderer.invoke(CHANNELS.GIT_DIFF_COMMIT, repoPath, filePath, hash),
+  gitCommitFileDiff: (repoPath: string, filePath: string, hash: string, baseHash?: string, oldPath?: string) =>
+    ipcRenderer.invoke(CHANNELS.GIT_DIFF_COMMIT, repoPath, filePath, hash, baseHash, oldPath),
 
   // ── Asset diff previews — Phase 17 ───────────────────────────────────────
   assetDiffPreview: (repoPath: string, filePath: string, leftRef: string, rightRef: string, editorBinaryOverride?: string) =>

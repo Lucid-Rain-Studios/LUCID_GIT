@@ -382,6 +382,7 @@ export interface BranchDiffCommit {
 
 export interface BranchDiffFile {
   path: string
+  oldPath?: string
   status: 'A' | 'M' | 'D' | 'R' | 'C'
   additions: number
   deletions: number
