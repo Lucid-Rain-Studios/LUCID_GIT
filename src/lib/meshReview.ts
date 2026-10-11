@@ -1,10 +1,19 @@
-import type { UnrealAssetObject } from '../../electron/blueprintTypes'
+import type { NativeMeshGeometry, UnrealAssetObject } from '../../electron/blueprintTypes'
 
 export type MeshCamera = { yaw: number; pitch: number; zoom: number; wireframe: boolean }
 export const initialMeshCamera: MeshCamera = { yaw: -.7, pitch: .5, zoom: 1, wireframe: false }
 
 export type Vertex = [number, number, number]
-export interface CollisionHull { object: UnrealAssetObject; index: number; kind: 'convex' | 'box' | 'sphere' | 'capsule'; vertices: Vertex[]; indices: number[] }
+export interface CollisionHull { object: UnrealAssetObject; index: number; kind: 'convex' | 'box' | 'sphere' | 'capsule' | 'source LOD'; vertices: Vertex[]; indices: number[] }
+
+/** Engine output has already passed the bounded main-process validator. */
+export function sourceMeshHulls(objects: UnrealAssetObject[], geometry: NativeMeshGeometry | undefined, index: number) {
+  const roots = objects.filter(object => ['/Script/Engine.StaticMesh', '/Script/Engine.SkeletalMesh'].includes(object.classPath))
+  const lod = geometry?.status === 'ready' ? geometry.lods.find(lod => lod.index === index) : undefined
+  const hulls: CollisionHull[] = roots.length === 1 && lod?.vertices.length && lod.indices.length ? [{ object: roots[0], index, kind: 'source LOD', vertices: lod.vertices, indices: lod.indices }] : []
+  const diagnostics = geometry?.status === 'unavailable' ? [geometry.reason ?? 'Native source geometry unavailable.'] : !geometry ? ['Native source geometry has not been requested.'] : [...geometry.diagnostics, ...(roots.length !== 1 ? ['The captured mesh root is ambiguous.'] : []), ...(lod?.reason ? [lod.reason] : !lod ? ['This source LOD is unavailable in this revision.'] : [])]
+  return { hulls, vertices: hulls.length ? lod!.vertices.length : 0, triangles: hulls.length ? lod!.indices.length / 3 : 0, omitted: hulls.length ? 0 : 1, diagnostics }
+}
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 const number = (value: unknown) => typeof value === 'number' || typeof value === 'string' && value.trim() ? Number(value) : NaN
 function vector(value: unknown, name: string, fields = ['X', 'Y', 'Z']) {

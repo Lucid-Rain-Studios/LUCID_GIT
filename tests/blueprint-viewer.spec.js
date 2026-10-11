@@ -344,10 +344,11 @@ test('changed wires have text and stroke indicators; mutation shortcuts and node
 })
 
 test('extraction queue is bounded, shared reads deduplicate, and shutdown releases queued work', async () => {
-  const cache = tmpDir('lg-blueprint-queue-'), calls = []
+  const cache = tmpDir('lg-blueprint-queue-'), calls = [], nativeStops = []
   const { component } = require('./renderer-harness')
   const { BlueprintRevisionService: Reader } = component('electron/services/BlueprintRevisionService.ts', {
     electron: { app: { getPath: () => cache } },
+    './NativeMeshService': { nativeMeshService: { stop: () => nativeStops.push(true) } },
     'node:child_process': { execFile: (_, __, options, callback) => {
       const call = { options, callback, killed: false }
       calls.push(call)
@@ -370,6 +371,7 @@ test('extraction queue is bounded, shared reads deduplicate, and shutdown releas
   expect((await shared).status).toBe('complete')
   await expect.poll(() => calls.length).toBe(3)
   reader.stop()
+  expect(nativeStops).toHaveLength(1)
   const results = await Promise.all(jobs)
   expect(results.slice(1,10).every(r => r.error)).toBe(true)
   expect(calls.slice(1).every(call => call.killed)).toBe(true)

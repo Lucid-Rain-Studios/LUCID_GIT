@@ -9,7 +9,7 @@ export interface CommandletResult {
   error: string | null
 }
 
-class UEHeadlessService {
+export class UEHeadlessService {
   /**
    * Locate the UnrealEditor-Cmd binary for a given engine version.
    * Priority: user override → Windows registry → standard install paths → macOS paths.
@@ -66,11 +66,13 @@ class UEHeadlessService {
   async runCommandlet(args: {
     editorBin: string
     projectPath: string
-    commandlet: 'DiffAssets' | 'DataTableCSVExporter' | 'ExportThumbnail' | 'DumpAssetRegistry'
+    commandlet: 'DiffAssets' | 'DataTableCSVExporter' | 'ExportThumbnail' | 'DumpAssetRegistry' | 'pythonscript'
     params: string[]
     timeoutMs: number
+    signal?: AbortSignal
   }): Promise<CommandletResult> {
     return new Promise((resolve) => {
+      if (args.signal?.aborted) { resolve({ success: false, output: '', outputPath: null, error: 'Asset preview cancelled.' }); return }
       const argv = [
         args.projectPath,
         `-run=${args.commandlet}`,
@@ -81,26 +83,31 @@ class UEHeadlessService {
       let output = ''
       let settled = false
 
-      const proc = spawn(args.editorBin, argv, { stdio: ['ignore', 'pipe', 'pipe'] })
-      proc.stdout?.on('data', (b: Buffer) => { output += b.toString() })
-      proc.stderr?.on('data', (b: Buffer) => { output += b.toString() })
+      const proc = spawn(args.editorBin, argv, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      // Engine startup is verbose. Retain a bounded diagnostic tail, never the full log.
+      const append = (b: Buffer) => { output = (output + b.toString()).slice(-1024 * 1024) }
+      proc.stdout?.on('data', append)
+      proc.stderr?.on('data', append)
+      let stopped: string | null = null
+      const cancel = () => { stopped = 'Asset preview cancelled.'; proc.kill() }
+      args.signal?.addEventListener('abort', cancel, { once: true })
 
       const timer = setTimeout(() => {
         if (settled) return
-        settled = true
+        stopped = `Timed out after ${args.timeoutMs}ms`
         proc.kill()
-        resolve({ success: false, output, outputPath: null, error: `Timed out after ${args.timeoutMs}ms` })
       }, args.timeoutMs)
 
       proc.on('close', (code) => {
         if (settled) return
         settled = true
         clearTimeout(timer)
+        args.signal?.removeEventListener('abort', cancel)
         resolve({
-          success: code === 0,
+          success: code === 0 && !stopped,
           output,
           outputPath: null,
-          error: code !== 0 ? `Exited with code ${code}` : null,
+          error: stopped ?? (code !== 0 ? `Exited with code ${code}` : null),
         })
       })
 
@@ -108,6 +115,7 @@ class UEHeadlessService {
         if (settled) return
         settled = true
         clearTimeout(timer)
+        args.signal?.removeEventListener('abort', cancel)
         resolve({ success: false, output, outputPath: null, error: err.message })
       })
     })

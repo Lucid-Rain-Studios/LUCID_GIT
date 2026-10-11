@@ -4,6 +4,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFile, type ChildProcess } from 'node:child_process'
 import { assetDiffService } from './AssetDiffService'
+import { nativeMeshService } from './NativeMeshService'
 import { execSafe, withGitTimeout } from '../util/dugite-exec'
 import { owningMapCandidate } from '../util/external-actors'
 import { confirmsMapOwnership, discoverExternalActors, emptyExternalReview, estimatedCaptureBytes, mutableActorStamp } from './ExternalActorReview'
@@ -47,6 +48,7 @@ export class BlueprintRevisionService {
     if (this.stopping) throw new Error('Blueprint reader is shutting down.')
     if (!req || typeof repoPath !== 'string') throw new Error('Invalid Blueprint request.')
     if (req.externalActors !== undefined && typeof req.externalActors !== 'boolean') throw new Error('Invalid external actor review scope.')
+    if (req.nativeGeometry !== undefined && typeof req.nativeGeometry !== 'boolean') throw new Error('Invalid native geometry review scope.')
     validatePath(req.filePath); validatePath(req.oldPath ?? req.filePath)
     validateRef(req.leftRef); validateRef(req.rightRef)
     if (req.knownDocuments !== undefined && (!Array.isArray(req.knownDocuments) || req.knownDocuments.length > 8 || req.knownDocuments.some(key => typeof key !== 'string' || !/^[a-f0-9]{64}$/.test(key)))) throw new Error('Invalid Blueprint document cache keys.')
@@ -69,9 +71,9 @@ export class BlueprintRevisionService {
           stamp = await mutableActorStamp(repo, maps, manifest.packages.flatMap(p => [p.leftPath, p.rightPath]), refs)
         })
       } catch (error) { discoveryError = error instanceof Error ? error.message : String(error) }
-      const left = await this.side(repo, maps[0], refs[0], signal, refreshKeys)
+      const left = await this.side(repo, maps[0], refs[0], signal, refreshKeys, MAX_BYTES, req.nativeGeometry)
       if (signal?.aborted) throw new Error('Blueprint review cancelled.')
-      const right = await this.side(repo, maps[1], refs[1], signal, refreshKeys)
+      const right = await this.side(repo, maps[1], refs[1], signal, refreshKeys, MAX_BYTES, req.nativeGeometry)
       if (signal?.aborted) throw new Error('Blueprint review cancelled.')
       const owningMaps: BlueprintComparison['owningMaps'] = {}
       for (const [index, side] of [left, right].entries()) {
@@ -130,10 +132,10 @@ export class BlueprintRevisionService {
         return side
       }
       return { left: transfer(left), right: transfer(right), ...(Object.keys(owningMaps).length ? { owningMaps } : {}), ...(externalActors ? { externalActors: { ...externalActors, packages: externalActors.packages.map(p => ({ left: transfer(p.left), right: transfer(p.right) })) } } : {}) }
-    }, 120_000, 'Blueprint revision read')
+    }, req.nativeGeometry ? 300_000 : 120_000, 'Blueprint revision read')
   }
 
-  private async side(repo: string, file: string, ref: string, signal?: AbortSignal, refreshKeys?: Set<string>, byteLimit = MAX_BYTES): Promise<BlueprintSide> {
+  private async side(repo: string, file: string, ref: string, signal?: AbortSignal, refreshKeys?: Set<string>, byteLimit = MAX_BYTES, nativeGeometry = false): Promise<BlueprintSide> {
     const snapshot = await withRepoSlot(repo, 'read', () => this.resolveSide(repo, file, ref, signal))
     if ('status' in snapshot) return snapshot
     const { identity, resolved, companionIdentity, companionResolved, revisionRef } = snapshot
@@ -142,6 +144,8 @@ export class BlueprintRevisionService {
       if (estimate > byteLimit) return { ref, path: file, status: 'unavailable', reason: 'External actor package exceeds the remaining 64 MB capture budget.' }
     }
     const key = sha([repo, file, ref, identity, companionIdentity, EXTRACTOR_VERSION].join('\0'))
+    // Native exports are cancellable per request; never share an abort signal between viewers.
+    if (nativeGeometry) return { ...await this.loadSide(repo, file, resolved, ref, companionResolved, companionIdentity, refreshKeys, byteLimit, signal, true), resolvedRef: revisionRef }
     if (refreshKeys) this.identities.delete(key)
     let promise = this.identities.get(key)
     if (!promise) {
@@ -207,7 +211,7 @@ export class BlueprintRevisionService {
     return { identity, resolved, companionIdentity, companionResolved, revisionRef: companionRef }
   }
 
-  private async loadSide(repo: string, file: string, resolved: string, ref: string, companionRef: string, companionIdentity: string, refreshKeys?: Set<string>, byteLimit = MAX_BYTES): Promise<BlueprintSide> {
+  private async loadSide(repo: string, file: string, resolved: string, ref: string, companionRef: string, companionIdentity: string, refreshKeys?: Set<string>, byteLimit = MAX_BYTES, signal?: AbortSignal, nativeGeometry = false): Promise<BlueprintSide> {
     await fs.mkdir(this.cacheDirectory, { recursive: true })
     const temporary = await fs.mkdtemp(path.join(this.cacheDirectory, 'read-'))
     try {
@@ -255,7 +259,8 @@ export class BlueprintRevisionService {
       const force = refreshKeys !== undefined && !refreshKeys.has(snapshot.key)
       refreshKeys?.add(snapshot.key)
       const document = await this.extract(snapshot.key, snapshot.blobPath, force)
-      return { ref, path: file, status: 'ready', sourceBytes: snapshot.sourceBytes, contentHash: snapshot.contentHash, documentKey: snapshot.key, document }
+      const geometry = nativeGeometry ? await nativeMeshService.extract(snapshot.blobPath, file, document, signal) : undefined
+      return { ref, path: file, status: 'ready', sourceBytes: snapshot.sourceBytes, contentHash: snapshot.contentHash, documentKey: snapshot.key, document, ...(geometry ? { geometry } : {}) }
     } catch (error) {
       return { ref, path: file, status: 'unavailable', reason: error instanceof Error ? error.message : String(error) }
     } finally { await fs.rm(temporary, { recursive: true, force: true }).catch(() => {}) }
@@ -320,6 +325,7 @@ export class BlueprintRevisionService {
   }
 
   stop() {
+    nativeMeshService.stop()
     this.stopping = true
     for (const child of this.processes) child.kill()
     for (const waiter of this.waiting.splice(0)) waiter.reject(new Error('Blueprint reader is shutting down.'))

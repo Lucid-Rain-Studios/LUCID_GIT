@@ -71,6 +71,7 @@ export interface UnrealAssetDocument {
   cooked: boolean
 }
 export interface BlueprintSide {
+  geometry?: NativeMeshGeometry
   resolvedRef?: string
   ref: string
   path: string
@@ -82,6 +83,7 @@ export interface BlueprintSide {
   document?: BlueprintDocument
 }
 export interface BlueprintRequest {
+  nativeGeometry?: boolean
   externalActors?: boolean
   knownDocuments?: string[]
   force?: boolean
@@ -90,6 +92,15 @@ export interface BlueprintRequest {
   leftRef: string
   rightRef: string
   requestId: string
+}
+export interface NativeMeshGeometry {
+  status: 'ready' | 'unavailable'
+  provider: 'unreal-source-mesh-v1'
+  engineVersion: string
+  reason?: string
+  diagnostics: string[]
+  totalLods: number
+  lods: Array<{ index: number; vertexCount: number; triangleCount: number; vertices: [number, number, number][]; indices: number[]; reason?: string }>
 }
 export interface ExternalActorPackage { left: BlueprintSide; right: BlueprintSide }
 export interface ExternalActorReview {
