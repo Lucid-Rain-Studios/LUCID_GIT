@@ -12,3 +12,5 @@ The self-contained helper includes Newtonsoft.Json 13.0.4 (MIT), ZstdSharp.Port 
 - https://github.com/dotnet/runtime/blob/main/THIRD-PARTY-NOTICES.TXT
 
 No Epic Games engine source is copied into or distributed with this helper. Native serialization decoding is independently implemented; Unreal Engine is not required at runtime.
+
+Lucid Git builds UAssetAPI with a read-only TextPropertyData overlay for version-gated UE5.8 editor localization developer notes. The upstream pinned checkout is unchanged; the modified file is generated in .blueprint-build from the hash-verified upstream source under the same MIT license. No asset-writing API is called by the helper.

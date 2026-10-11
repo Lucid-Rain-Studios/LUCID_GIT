@@ -6,6 +6,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../third_party/UAssetAPI/UAssetAPI/UAssetAPI.csproj" />
+    <ProjectReference Include="../../third_party/UAssetAPI/UAssetAPI/UAssetAPI.csproj" AdditionalProperties="CustomBeforeMicrosoftCommonTargets=$(MSBuildThisFileDirectory)UAssetAPI.Reader.targets" />
   </ItemGroup>
 </Project>

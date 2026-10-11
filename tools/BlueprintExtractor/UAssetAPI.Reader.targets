@@ -1,0 +1,9 @@
+<Project>
+  <Target Name="LucidGitReadOnlyTextOverlay" BeforeTargets="CoreCompile" Condition="'$(MSBuildProjectName)' == 'UAssetAPI'">
+    <Exec Command="node &quot;$(MSBuildThisFileDirectory)../../scripts/prepare-uassetapi-reader.cjs&quot;" />
+    <ItemGroup>
+      <Compile Remove="@(Compile)" Condition="'%(Compile.Filename)%(Compile.Extension)' == 'TextPropertyData.cs'" />
+      <Compile Include="$(MSBuildThisFileDirectory)../../.blueprint-build/UAssetAPI/TextPropertyData.Reader.cs" />
+    </ItemGroup>
+  </Target>
+</Project>

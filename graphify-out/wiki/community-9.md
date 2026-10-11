@@ -1,0 +1,113 @@
+# Product requirements and file workflows
+
+[Back to index](index.md)
+
+## Source files
+
+- [LucidGit_ClaudeCode_Spec.md](../../LucidGit_ClaudeCode_Spec.md)
+- [LucidGit_ClaudeCode_Workflow.md](../../LucidGit_ClaudeCode_Workflow.md)
+- [Readme.md](../../Readme.md)
+- [src/components/changes/FileRow.tsx](../../src/components/changes/FileRow.tsx)
+- [src/stores/forecastStore.ts](../../src/stores/forecastStore.ts)
+
+## Entities and evidence
+
+- **Build specification v2.5: requirements, not verified current implementation** — `LucidGit_ClaudeCode_Spec.md:L1-L10` · `productdocs_product_spec`
+- **FileRow.tsx** — `src/components/changes/FileRow.tsx:L1` · `src_components_changes_filerow_tsx`
+- **close()** — `src/components/changes/FileRow.tsx:L105` · `filerow_close`
+- **Requirement: Git LFS locks protect Unreal and other binary assets** — `LucidGit_ClaudeCode_Spec.md:L375-L390` · `productdocs_lfs_locks`
+- **Requirement: pre-merge flight check without performing merge** — `LucidGit_ClaudeCode_Spec.md:L416-L472` · `productdocs_merge_preview`
+- **Documented Claude Code phased build workflow** — `LucidGit_ClaudeCode_Workflow.md:L1-L3` · `productdocs_build_workflow`
+- **Readme: developer setup and update-publishing instructions** — `Readme.md:L1-L117` · `productdocs_readme`
+- **Requirement: default daily-work dashboard; Overview moves to Admin** — `LucidGit_ClaudeCode_Spec.md:L1306-L1308` · `productdocs_dashboard`
+- **Requirement: blame assets and referenced dependencies** — `LucidGit_ClaudeCode_Spec.md:L962-L970` · `productdocs_dependency_blame`
+- **Requirement: root uproject detection and suggested binary LFS patterns** — `LucidGit_ClaudeCode_Spec.md:L699-L704` · `productdocs_ue_detection`
+- **Requirement: warn before editing about locks, branch changes and live WIP** — `LucidGit_ClaudeCode_Spec.md:L1148-L1155` · `productdocs_conflict_forecast`
+- **forecastStore.ts** — `src/stores/forecastStore.ts:L1` · `src_stores_forecaststore_ts`
+- **Documented PR Resolve dialog with Accept and Decline flows** — `LucidGit_ClaudeCode_Spec.md:L1779-L1802` · `productdocs_pr_resolve`
+- **Documented acceptance: run app after each phase and exercise new behavior** — `LucidGit_ClaudeCode_Workflow.md:L98-L120` · `productdocs_live_phase_checks`
+- **Instruction: publishing token needs repository Contents read/write** — `Readme.md:L55-L79` · `productdocs_release_credentials`
+- **Requirement: LucidGitError explanations, causes and ordered fixes** — `LucidGit_ClaudeCode_Spec.md:L547-L562` · `productdocs_structured_errors`
+- **Requirement: file-preview overlay with zoom and historical thumbnails** — `LucidGit_ClaudeCode_Spec.md:L1452-L1472` · `productdocs_asset_viewer`
+- **Requirement: repository notification feed persisted in SQLite** — `LucidGit_ClaudeCode_Spec.md:L598-L604` · `productdocs_notification_center`
+- **Requirement: retrospective contention treemap** — `LucidGit_ClaudeCode_Spec.md:L1069-L1077` · `productdocs_lock_heatmap`
+- **Specified SQLite lock_events and conflict_events from existing event flows** — `LucidGit_ClaudeCode_Spec.md:L1075-L1086` · `productdocs_lock_conflict_history`
+- **Specified lock poller emits EVT_LOCK_CHANGED and clears released watches** — `LucidGit_ClaudeCode_Spec.md:L393` · `productdocs_lock_event`
+- **Specified renderer: React UI, Zustand state and React Query caches** — `LucidGit_ClaudeCode_Spec.md:L45-L52` · `productdocs_renderer`
+- **Documented build prompt: approve phase task list and verify each phase before next** — `LucidGit_ClaudeCode_Workflow.md:L72-L96` · `productdocs_phase_approval`
+- **Documented developer setup: Node 20+, OAuth app, repo and Claude Code** — `LucidGit_ClaudeCode_Workflow.md:L28-L52` · `productdocs_developer_setup`
+- **Documented limitation: file choices record intent; GitHub API executes final merge** — `LucidGit_ClaudeCode_Spec.md:L1794-L1800` · `productdocs_pr_choices_intent`
+- **Documented v0.1 tag and GitHub Actions installer release flow** — `LucidGit_ClaudeCode_Workflow.md:L122-L133` · `productdocs_tag_release`
+- **Instruction: accessible published GitHub Releases; drafts not detected** — `Readme.md:L46-L53` · `productdocs_published_releases`
+- **Instruction: reference spec by phase/section rather than reposting** — `LucidGit_ClaudeCode_Workflow.md:L137-L139` · `productdocs_context_small`
+- **Requirement: Discord webhook events, role mentions and quiet hours** — `LucidGit_ClaudeCode_Spec.md:L606-L633` · `productdocs_discord_webhook`
+- **Requirement: FixAction is IPC-safe discriminated union** — `LucidGit_ClaudeCode_Spec.md:L564-L583` · `productdocs_serializable_fixes`
+- **Requirement: Pull only after Fetch this session; doPull does not fetch** — `LucidGit_ClaudeCode_Spec.md:L1323-L1329` · `productdocs_explicit_fetch_gate`
+- **Requirement: UE engine version matches uproject; thumbnail fallback if unavailable** — `LucidGit_ClaudeCode_Spec.md:L862-L864` · `productdocs_engine_match`
+- **Requirement: installer needs no end-user Git, Node or Redis** — `LucidGit_ClaudeCode_Spec.md:L10` · `productdocs_single_installer`
+- **Requirement: opt-in WIP paths only, never contents; default off** — `LucidGit_ClaudeCode_Spec.md:L1161-L1163` · `productdocs_wip_privacy`
+- **Requirement: shallow-history management and unshallow** — `LucidGit_ClaudeCode_Spec.md:L515-L525` · `productdocs_shallow_manager`
+- **Requirement: visual diff for textures, Blueprints and UE assets** — `LucidGit_ClaudeCode_Spec.md:L842-L858` · `productdocs_binary_diff`
+- **Specified SQLite notification and repository metadata storage** — `LucidGit_ClaudeCode_Spec.md:L29` · `productdocs_sqlite`
+- **Specified Sync, Work and Commit, Open PR guidance** — `LucidGit_ClaudeCode_Spec.md:L1318-L1325` · `productdocs_daily_flow`
+- **Specified default remote-tip diff after configurable five-minute fetch** — `LucidGit_ClaudeCode_Spec.md:L1157-L1159` · `productdocs_remote_divergence`
+- **Specified headless installed Unreal commandlets and persistent process pool** — `LucidGit_ClaudeCode_Spec.md:L860-L862` · `productdocs_headless_ue`
+- **Specified merge-tree --write-tree returns conflicts without merging** — `LucidGit_ClaudeCode_Spec.md:L431-L441` · `productdocs_merge_tree`
+- **Specified per-side author, timestamp, message and size in ConflictPreviewFile** — `LucidGit_ClaudeCode_Spec.md:L435-L465` · `productdocs_conflict_metadata`
+- **doCopyFullPath()** — `src/components/changes/FileRow.tsx:L125` · `filerow_docopyfullpath`
+- **doCopyRelPath()** — `src/components/changes/FileRow.tsx:L126` · `filerow_docopyrelpath`
+- **doDiscard()** — `src/components/changes/FileRow.tsx:L106` · `filerow_dodiscard`
+- **doIgnoreFile()** — `src/components/changes/FileRow.tsx:L123` · `filerow_doignorefile`
+- **doIgnoreFolder()** — `src/components/changes/FileRow.tsx:L124` · `filerow_doignorefolder`
+- **doLock()** — `src/components/changes/FileRow.tsx:L130` · `filerow_dolock`
+- **doOpenDefault()** — `src/components/changes/FileRow.tsx:L129` · `filerow_doopendefault`
+- **doOpenVSCode()** — `src/components/changes/FileRow.tsx:L128` · `filerow_doopenvscode`
+- **doShowInExplorer()** — `src/components/changes/FileRow.tsx:L127` · `filerow_doshowinexplorer`
+- **doUnlock()** — `src/components/changes/FileRow.tsx:L131` · `filerow_dounlock`
+- **doWatch()** — `src/components/changes/FileRow.tsx:L139` · `filerow_dowatch`
+- **Cited GitHub Actions automatic-token-authentication documentation** — `Readme.md:L81-L83` · `productdocs_github_token_docs`
+- **Cited electron-builder publishing documentation** — `Readme.md:L70-L72` · `productdocs_electron_publish_docs`
+- **Documented EAUTH cause: token lacks organization SSO authorization** — `LucidGit_ClaudeCode_Spec.md:L588-L592` · `productdocs_org_sso`
+- **Documented acceptance: installed app Check updates, Download, Restart and Install** — `Readme.md:L108-L117` · `productdocs_installed_update_check`
+- **Documented acceptance: installer launches on clean VM** — `LucidGit_ClaudeCode_Workflow.md:L119` · `productdocs_clean_vm_check`
+- **Documented acceptance: second machine sees LFS lock** — `LucidGit_ClaudeCode_Workflow.md:L110` · `productdocs_team_lock_check`
+- **Documented limitation: re-shallow uses new temp clone and atomic swap** — `LucidGit_ClaudeCode_Spec.md:L517-L520` · `productdocs_reshallow_constraints`
+- **Documented npm install/dev/build/dist commands for new computer** — `Readme.md:L5-L35` · `productdocs_dev_commands`
+- **Instruction: bump package version for each release** — `Readme.md:L96-L99` · `productdocs_release_version`
+- **Instruction: commit verified phase for rollback checkpoint** — `LucidGit_ClaudeCode_Workflow.md:L143-L145` · `productdocs_phase_commits`
+- **Instruction: enable Device Flow and supply OAuth Client ID** — `LucidGit_ClaudeCode_Workflow.md:L35-L42` · `productdocs_oauth_app_setup`
+- **LockIcon()** — `src/components/changes/FileRow.tsx:L41` · `filerow_lockicon`
+- **Rationale: an asset can break because a referenced asset changed** — `LucidGit_ClaudeCode_Spec.md:L964` · `productdocs_dependency_rationale`
+- **Rationale: functions cannot be sent across IPC; renderer dispatches descriptors** — `LucidGit_ClaudeCode_Spec.md:L570-L583` · `productdocs_serialization_rationale`
+- **Rationale: p-queue replaces Redis-dependent bull; dugite replaces system-Git requirement** — `LucidGit_ClaudeCode_Spec.md:L35-L39` · `productdocs_zero_dependencies_rationale`
+- **Rationale: phase stops prevent many unchecked buggy files** — `LucidGit_ClaudeCode_Workflow.md:L96` · `productdocs_small_phase_rationale`
+- **Requirement: Electron Git client for game teams and Unreal Engine 5** — `LucidGit_ClaudeCode_Spec.md:L8` · `productdocs_game_team_client`
+- **Requirement: Monaco three-way merge with per-block choices** — `LucidGit_ClaudeCode_Spec.md:L418-L422` · `productdocs_text_resolution`
+- **Requirement: Team locks grouped by owner; Mine flat** — `LucidGit_ClaudeCode_Spec.md:L404-L405` · `productdocs_team_lock_groups`
+- **Requirement: UE ignore template for DDC, Saved, Intermediate and Binaries** — `LucidGit_ClaudeCode_Spec.md:L706-L709` · `productdocs_ue_ignore`
+- **Requirement: block staging files locked by another user** — `LucidGit_ClaudeCode_Spec.md:L395-L402` · `productdocs_stage_lock_guard`
+- **Requirement: bundled Git/LFS, ASAR unpack and per-platform installers** — `LucidGit_ClaudeCode_Spec.md:L755-L768` · `productdocs_distribution`
+- **Requirement: dashboard Push needs fetched, no behind commits and ahead commits** — `LucidGit_ClaudeCode_Spec.md:L1331-L1335` · `productdocs_push_gate`
+- **Requirement: explicit Proceed or Abort before conflicting merge** — `LucidGit_ClaudeCode_Spec.md:L468-L472` · `productdocs_merge_proceed_guard`
+- **Requirement: force-unlock requires confirmation** — `LucidGit_ClaudeCode_Spec.md:L397` · `productdocs_force_unlock_confirm`
+- **Requirement: no auto-merge for uasset/umap; explicit mine/theirs choice** — `LucidGit_ClaudeCode_Spec.md:L424-L427` · `productdocs_binary_resolution`
+- **Requirement: optional lock/stage and submit unlock/commit/push workflow** — `LucidGit_ClaudeCode_Spec.md:L711-L713` · `productdocs_checkout_for_edit`
+- **Requirement: parsed all-branch Git graph, lanes, tags and PR badges** — `LucidGit_ClaudeCode_Spec.md:L721-L729` · `productdocs_history_graph`
+- **Requirement: pre-commit hook management and confirmed bypass** — `LucidGit_ClaudeCode_Spec.md:L736-L741` · `productdocs_hook_ui`
+- **Requirement: release notification offers one-click lock** — `LucidGit_ClaudeCode_Spec.md:L407-L412` · `productdocs_watched_unlock`
+- **Requirement: restoring historical commit creates safety branch** — `LucidGit_ClaudeCode_Spec.md:L723-L727` · `productdocs_restore_safety_branch`
+- **Requirement: size breakdown, GC, LFS cache pruning and scheduled cleanup** — `LucidGit_ClaudeCode_Spec.md:L526-L543` · `productdocs_cleanup`
+- **Requirement: staged LFS asset size threshold warning** — `LucidGit_ClaudeCode_Spec.md:L715-L717` · `productdocs_pak_size_warning`
+- **Requirement: suggestions use elapsed sync time and time of day** — `LucidGit_ClaudeCode_Spec.md:L1337-L1348` · `productdocs_sync_suggestions`
+- **Requirement: twelve recent gitBranchActivity entries and History navigation** — `LucidGit_ClaudeCode_Spec.md:L1350-L1351` · `productdocs_activity_feed`
+- **Requirement: workers, virtualization, cache, debounced watcher, incremental diffs** — `LucidGit_ClaudeCode_Spec.md:L745-L751` · `productdocs_performance`
+- **Specified AssetRegistry.bin package-reference graph data source** — `LucidGit_ClaudeCode_Spec.md:L966-L970` · `productdocs_asset_registry`
+- **Specified History soft-reset undo with root guard and confirmation** — `LucidGit_ClaudeCode_Spec.md:L731-L732` · `productdocs_soft_undo`
+- **Specified Monaco editor and diff engine** — `LucidGit_ClaudeCode_Spec.md:L30` · `productdocs_monaco`
+- **Specified UEGitPlugin identity linking and shared LFS lock poll backend** — `LucidGit_ClaudeCode_Spec.md:L1710-L1717` · `productdocs_ue_plugin_lock_backend`
+- **Specified gitFileLog twenty commits to SHA-specific assetRenderThumbnail** — `LucidGit_ClaudeCode_Spec.md:L1465` · `productdocs_asset_version_flow`
+- **Specified header import-table quick scan and user-requested registry commandlet** — `LucidGit_ClaudeCode_Spec.md:L972-L976` · `productdocs_dependency_fallbacks`
+- **Specified industrial dark theme, orange/blue accents, JetBrains Mono and IBM Plex Sans** — `LucidGit_ClaudeCode_Spec.md:L1515-L1537` · `productdocs_design_system`
+- **Specified lock frequency, duration, contributors and conflict-history composite** — `LucidGit_ClaudeCode_Spec.md:L1073` · `productdocs_contention_metrics`
+- **handler()** — `src/components/changes/FileRow.tsx:L89` · `filerow_handler`
+- **toggleStage()** — `src/components/changes/FileRow.tsx:L96` · `filerow_togglestage`

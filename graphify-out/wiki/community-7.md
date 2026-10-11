@@ -1,0 +1,137 @@
+# Functional audit and networking
+
+[Back to index](index.md)
+
+## Source files
+
+- [audit/LUCID-GIT-AUDIT.md](../../audit/LUCID-GIT-AUDIT.md)
+- [electron/indexRecoveryTypes.ts](../../electron/indexRecoveryTypes.ts)
+- [electron/ipc/channels.ts](../../electron/ipc/channels.ts)
+- [electron/preload.ts](../../electron/preload.ts)
+- [electron/services/UndoService.ts](../../electron/services/UndoService.ts)
+- [electron/util/network.ts](../../electron/util/network.ts)
+- [src/components/diff/AssetDiffViewer.tsx](../../src/components/diff/AssetDiffViewer.tsx)
+- [src/lib/staging.ts](../../src/lib/staging.ts)
+- [tests/fixtures/error-panel.jsx](../../tests/fixtures/error-panel.jsx)
+
+## Entities and evidence
+
+- **Functional audit: 79/85 findings checked** — `audit/LUCID-GIT-AUDIT.md:L1-L46` · `audits_functional_report`
+- **Functional completion requires implemented and verified behavior; regeneration preserves checkbox state** — `audit/LUCID-GIT-AUDIT.md:L46` · `audits_functional_completion`
+- **Git operations, concurrency and recovery audit category** — `audit/LUCID-GIT-AUDIT.md:L130` · `audits_functional_category_130`
+- **network.ts** — `electron/util/network.ts:L1` · `electron_util_network_ts`
+- **staging.ts** — `src/lib/staging.ts:L1` · `src_lib_staging_ts`
+- **Locks, forecasts and team activity audit category** — `audit/LUCID-GIT-AUDIT.md:L710` · `audits_functional_category_710`
+- **UndoService.ts** — `electron/services/UndoService.ts:L1` · `electron_services_undoservice_ts`
+- **Settings, notifications and error messages audit category** — `audit/LUCID-GIT-AUDIT.md:L1148` · `audits_functional_category_1148`
+- **Assets, Unreal and dependencies audit category** — `audit/LUCID-GIT-AUDIT.md:L920` · `audits_functional_category_920`
+- **LG-009: Many repository mutations bypass the write gate [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L180-L194` · `audits_LG_009`
+- **LG-047: Admin Firebase cross-clone presence implemented with bounded/deduplicated controlled tests; live cross-computer acceptance pending [Implemented pending live verification; Feature gap]** — `audit/LUCID-GIT-AUDIT.md:L840-L854` · `audits_LG_047`
+- **Authentication and permissions audit category** — `audit/LUCID-GIT-AUDIT.md:L596` · `audits_functional_category_596`
+- **channels.ts** — `electron/ipc/channels.ts:L1` · `electron_ipc_channels_ts`
+- **LG-069: Dialogs lack reliable modal keyboard accessibility [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L1328-L1342` · `audits_LG_069`
+- **LG-078: JSON persistence can silently reset after corruption [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L1294-L1308` · `audits_LG_078`
+- **LG-083: Inherited upstream hides first-push eligibility for new branches [Implemented and verified; Reproduced]** — `audit/LUCID-GIT-AUDIT.md:L564-L578` · `audits_LG_083`
+- **Pull requests audit category** — `audit/LUCID-GIT-AUDIT.md:L1050` · `audits_functional_category_1050`
+- **UI, history and accessibility audit category** — `audit/LUCID-GIT-AUDIT.md:L1326` · `audits_functional_category_1326`
+- **LG-003: Index-lock cleanup reopened: bounded age/activity heuristics cannot prove external owner death; packaged/taskkill acceptance unverified [Reopened; ownership risk remains; Source]** — `audit/LUCID-GIT-AUDIT.md:L132-L146` · `audits_LG_003`
+- **LG-004: Undo destroys edits made after the checkpoint [Unchecked finding; Reproduced]** — `audit/LUCID-GIT-AUDIT.md:L50-L64` · `audits_LG_004`
+- **LG-007: Operation queue can deadlock while idle [Implemented and verified; Reproduced]** — `audit/LUCID-GIT-AUDIT.md:L148-L162` · `audits_LG_007`
+- **LG-012: Error-panel LFS migration skips the destructive confirmation [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L228-L242` · `audits_LG_012`
+- **LG-023: Undo does not restore the original staging state [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L98-L112` · `audits_LG_023`
+- **LG-050: Asset caches stay stale after edit, stage or commit [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L954-L968` · `audits_LG_050`
+- **LG-051: Asset loading duplicates large binary reads [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L970-L984` · `audits_LG_051`
+- **LG-055: Unreal commandlet diff feature gap; separate bounded read-only revision-pinned UAssetAPI/Klee review partially verified across real assets/Git/browser/helper; full native geometry, property bags, world placement and editor/desktop acceptance pending [Partial; unchecked; Feature gap]** — `audit/LUCID-GIT-AUDIT.md:L1034-L1050` · `audits_LG_055`
+- **LG-058: PR form can close during submission and overwrite typed defaults [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L1068-L1082` · `audits_LG_058`
+- **LG-059: PR merge allows unknown preview state and unpinned HEAD [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L1084-L1098` · `audits_LG_059`
+- **LG-065: Settings saves can overwrite unrelated settings [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L1198-L1212` · `audits_LG_065`
+- **LG-074: Error explanations and repair actions can mismatch the failure [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L1246-L1260` · `audits_LG_074`
+- **LG-081: Heatmap statistics include synthetic preview events [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L904-L920` · `audits_LG_081`
+- **LG-084: Discard bypasses eligible index-lock recovery [Implemented and verified; Reproduced]** — `audit/LUCID-GIT-AUDIT.md:L580-L596` · `audits_LG_084`
+- **Undo audit category** — `audit/LUCID-GIT-AUDIT.md:L48` · `audits_functional_category_48`
+- **UndoService** — `electron/services/UndoService.ts:L28` · `undoservice_undoservice`
+- **preload.ts** — `electron/preload.ts:L1` · `electron_preload_ts`
+- **AssetDiffViewer.tsx** — `src/components/diff/AssetDiffViewer.tsx:L1` · `src_components_diff_assetdiffviewer_tsx`
+- **LG-006: Undo claims success after restoration failure [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L82-L96` · `audits_LG_006`
+- **LG-008: Gate timeout permits overlapping writes [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L164-L178` · `audits_LG_008`
+- **LG-010: Failed discard reports success and may unlock the file [Implemented and verified; Reproduced]** — `audit/LUCID-GIT-AUDIT.md:L196-L210` · `audits_LG_010`
+- **LG-013: Lock verification switch writes the wrong config key [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L244-L258` · `audits_LG_013`
+- **LG-016: Unstaged diff compares against HEAD instead of the index [Implemented and verified; Reproduced]** — `audit/LUCID-GIT-AUDIT.md:L308-L322` · `audits_LG_016`
+- **LG-017: Partially staged files hide their unstaged side [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L324-L338` · `audits_LG_017`
+- **LG-025: Large selected stashes can exceed Windows command length [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L436-L450` · `audits_LG_025`
+- **LG-027: Repeated commit shortcuts can start overlapping hook workflows [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L468-L482` · `audits_LG_027`
+- **LG-029: Bulk staging bypasses the file-row lock guard [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L500-L514` · `audits_LG_029`
+- **LG-033: Adding a second account can disagree with the backend identity [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L614-L628` · `audits_LG_033`
+- **LG-038: Lock-list failures look like every lock was released [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L728-L742` · `audits_LG_038`
+- **LG-041: Automatic post-push unlocking ignores remaining local edits [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L760-L774` · `audits_LG_041`
+- **LG-042: Automatic unlocking assumes the default branch is main [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L888-L902` · `audits_LG_042`
+- **LG-043: Forecast fetch can fail silently while appearing current [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L776-L790` · `audits_LG_043`
+- **LG-052: Asset previews can display an older file’s response [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L986-L1000` · `audits_LG_052`
+- **LG-056: Built-in hook installation replaces another built-in hook [Implemented and verified; Reproduced]** — `audit/LUCID-GIT-AUDIT.md:L532-L546` · `audits_LG_056`
+- **LG-060: Fork PR resolution loses the source-repository identity [Unchecked finding; Source]** — `audit/LUCID-GIT-AUDIT.md:L1100-L1114` · `audits_LG_060`
+- **LG-062: Several visible settings have no runtime consumer [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L1150-L1164` · `audits_LG_062`
+- **LG-066: Settings errors are silent or leave permanent loading [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L1214-L1228` · `audits_LG_066`
+- **LG-072: Timeline can start empty for a local-only repository [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L1360-L1374` · `audits_LG_072`
+- **LG-080: Text diff ignores appearance preferences [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L1408-L1422` · `audits_LG_080`
+- **LG-082: PR creation preview includes commits already on the published target [Implemented and verified; Reproduced]** — `audit/LUCID-GIT-AUDIT.md:L1132-L1148` · `audits_LG_082`
+- **indexRecoveryTypes.ts** — `electron/indexRecoveryTypes.ts:L1` · `electron_indexrecoverytypes_ts`
+- **LG-001: Shell interpolation in asset extraction [Implemented and verified; Reproduced safely]** — `audit/LUCID-GIT-AUDIT.md:L922-L936` · `audits_LG_001`
+- **LG-002: GitHub credentials can reach unrelated hosts [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L598-L612` · `audits_LG_002`
+- **LG-005: Undo can reset a different branch [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L66-L80` · `audits_LG_005`
+- **LG-011: Old error fixes operate on the newly active repository [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L212-L226` · `audits_LG_011`
+- **LG-014: Manual hook workflow bypasses commit-msg hooks [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L260-L274` · `audits_LG_014`
+- **LG-015: Asset preview runs blocking Git commands on the main process [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L938-L952` · `audits_LG_015`
+- **LG-018: Commit-file listing omits root and merge changes [Implemented and verified; Root reproduced; merge source]** — `audit/LUCID-GIT-AUDIT.md:L340-L354` · `audits_LG_018`
+- **LG-019: Filename parsing fails for quoted or unusual names [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L356-L370` · `audits_LG_019`
+- **LG-020: Selecting a local branch may compare or merge its remote version [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L372-L386` · `audits_LG_020`
+- **LG-021: Merge continuation retries every failure as a new commit [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L388-L402` · `audits_LG_021`
+- **LG-022: Conflict recovery is incomplete across entry points [Unchecked finding; Source]** — `audit/LUCID-GIT-AUDIT.md:L404-L418` · `audits_LG_022`
+- **LG-024: Stash all leaves untracked files behind [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L420-L434` · `audits_LG_024`
+- **LG-026: Amend protection can use stale pushed-HEAD state [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L452-L466` · `audits_LG_026`
+- **LG-028: Commit drafts carry into another repository [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L484-L498` · `audits_LG_028`
+- **LG-030: Opening or refreshing a repository hides Git failures [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L516-L530` · `audits_LG_030`
+- **LG-031: Late repository responses overwrite the active project [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L276-L290` · `audits_LG_031`
+- **LG-032: Local Git usage is unnecessarily gated on GitHub login [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L630-L644` · `audits_LG_032`
+- **LG-034: Permission caches survive account changes [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L646-L660` · `audits_LG_034`
+- **LG-035: Authentication requests can hang without deadlines [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L662-L676` · `audits_LG_035`
+- **LG-036: Device polling does not handle overlap and slow-down robustly [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L678-L692` · `audits_LG_036`
+- **LG-037: Canceling login does not cancel an in-flight exchange [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L694-L710` · `audits_LG_037`
+- **LG-039: Old repository polling can overwrite current locks [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L712-L726` · `audits_LG_039`
+- **LG-040: Synthetic PR locks conflict with authoritative locks [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L744-L758` · `audits_LG_040`
+- **LG-044: Resolved forecast conflicts remain visible [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L792-L806` · `audits_LG_044`
+- **LG-045: Forecast results can leak across repositories [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L808-L822` · `audits_LG_045`
+- **LG-046: Forecast only examines the first ten remote branches [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L824-L838` · `audits_LG_046`
+- **LG-048: Watcher misses worktree metadata and some tracked edits [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L856-L870` · `audits_LG_048`
+- **LG-049: PR closure processing can permanently lose follow-up actions [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L872-L886` · `audits_LG_049`
+- **LG-053: Dependency graph stays stale for uncommitted asset edits [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L1002-L1016` · `audits_LG_053`
+- **LG-054: Some binary formats enter the text-diff route [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L1018-L1032` · `audits_LG_054`
+- **LG-057: PR lists and file lists are incomplete without pagination [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L1052-L1066` · `audits_LG_057`
+- **LG-061: Failed local PR resolution leaves repository state changed [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L1116-L1130` · `audits_LG_061`
+- **LG-063: Team policy settings do not apply the advertised policy [Implemented and verified; Feature gap]** — `audit/LUCID-GIT-AUDIT.md:L1166-L1180` · `audits_LG_063`
+- **LG-064: Webhook event choices exceed emitted events [Implemented and verified; Feature gap]** — `audit/LUCID-GIT-AUDIT.md:L1182-L1196` · `audits_LG_064`
+- **LG-067: Auto-fetch runs only while its dashboard component is mounted [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L1230-L1244` · `audits_LG_067`
+- **LG-068: Notification counts and clear behavior are inconsistent [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L1310-L1326` · `audits_LG_068`
+- **LG-070: Undo commit is offered on non-tip commits [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L114-L130` · `audits_LG_070`
+- **LG-071: History failures and response races lack visible recovery [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L1344-L1358` · `audits_LG_071`
+- **LG-073: Contribution calendar does not refresh after commits [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L1392-L1406` · `audits_LG_073`
+- **LG-076: Renderer bootstrap failure has no usable recovery screen [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L1278-L1292` · `audits_LG_076`
+- **LG-079: Some file actions force Windows separators on other platforms [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L1376-L1390` · `audits_LG_079`
+- **LG-085: Quit permits Git work after its termination sweep [Implemented and verified; Reproduced]** — `audit/LUCID-GIT-AUDIT.md:L292-L306` · `audits_LG_085`
+- **.markAvailable()** — `electron/services/UndoService.ts:L72` · `undoservice_undoservice_markavailable`
+- **.recordCheckpoint()** — `electron/services/UndoService.ts:L31` · `undoservice_undoservice_recordcheckpoint`
+- **.undo()** — `electron/services/UndoService.ts:L103` · `undoservice_undoservice_undo`
+- **LG-075: Updater failures can appear as no update or unfinished download [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L1262-L1276` · `audits_LG_075`
+- **LG-077: Release build does not itself type-check the renderer [Implemented and verified; Source]** — `audit/LUCID-GIT-AUDIT.md:L548-L562` · `audits_LG_077`
+- **error-panel.jsx** — `tests/fixtures/error-panel.jsx:L1` · `tests_fixtures_error_panel_jsx`
+- **.discard()** — `electron/services/UndoService.ts:L94` · `undoservice_undoservice_discard`
+- **.peek()** — `electron/services/UndoService.ts:L98` · `undoservice_undoservice_peek`
+- **fmtBytes()** — `src/components/diff/AssetDiffViewer.tsx:L12` · `assetdiffviewer_fmtbytes`
+- **sizeDeltaLabel()** — `src/components/diff/AssetDiffViewer.tsx:L21` · `assetdiffviewer_sizedeltalabel`
+- **Fixture()** — `tests/fixtures/error-panel.jsx:L16` · `error_panel_fixture`
+- **Functional baseline: static source and isolated Git reproductions; typechecks/build are not live UI or packaged cross-platform proof** — `audit/LUCID-GIT-AUDIT.md:L5-L15` · `audits_functional_baseline`
+- **Functional examples illustrate triggers; solutions are proposals; note tradeoffs need representative Unreal runtime measurement** — `audit/LUCID-GIT-AUDIT.md:L29` · `audits_functional_evidence_labels`
+- **Preserve caches, in-flight deduplication, batching, bounded walks, watcher debounce, read cancellation and authenticated LFS recovery; avoid retry storms** — `audit/LUCID-GIT-AUDIT.md:L23-L29` · `audits_optimization_preservation`
+- **Undo retains its separate category and stable IDs; mutation gate LG-009 also covers Undo** — `audit/LUCID-GIT-AUDIT.md:L44` · `audits_undo_category_contract`
+- **canStagePath()** — `src/lib/staging.ts:L3` · `staging_canstagepath`
+- **toImgSrc()** — `src/components/diff/AssetDiffViewer.tsx:L27` · `assetdiffviewer_toimgsrc`
+- **warning()** — `tests/fixtures/error-panel.jsx:L11` · `error_panel_warning`

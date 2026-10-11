@@ -22,3 +22,30 @@
 .uar-tree-controls{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.uar-tree-heading{display:flex;align-items:center;gap:4px}.uar-tree-heading .uar-tree-state{flex:1;min-width:0}.uar-tree-state.uar-modified{border-left:2px solid var(--warning-color,#d4a657)}.uar-tree-state.uar-added{border-left:2px solid var(--success-color,#6cbf8b)}.uar-tree-state.uar-removed{border-left:2px solid var(--danger-color,#d87979)}
 
 .uar-map-tools,.uar-map-legend{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:8px 0}.uar-map-field{position:relative;height:360px;min-height:260px;overflow:hidden;border:1px solid var(--lg-border);border-radius:6px;background-color:var(--lg-bg-secondary);background-image:radial-gradient(var(--lg-border) 1px,transparent 1px);background-size:20px 20px;touch-action:none;cursor:grab}.uar-map-field:active{cursor:grabbing}.uar-map-field:focus-visible{outline:2px solid var(--lg-accent);outline-offset:2px}.uar-map-field .uar-map-dot{position:absolute;transform:translate(-50%,-50%);width:12px;height:12px;padding:0;border:2px solid var(--lg-bg-primary);border-radius:50%;background:var(--lg-text-secondary);cursor:pointer}.uar-map-field .uar-map-dot.uar-added{background:var(--lg-success)}.uar-map-field .uar-map-dot.uar-removed{background:var(--lg-error)}.uar-map-field .uar-map-dot.uar-modified{background:var(--lg-warning)}.uar-map-field .uar-map-dot.uar-unknown{background:transparent;border-color:var(--lg-text-secondary)}.uar-map-field .uar-map-dot:hover,.uar-map-field .uar-map-dot:focus-visible,.uar-map-field .uar-map-dot[aria-pressed=true]{outline:2px solid var(--lg-accent);outline-offset:2px;z-index:2}.uar-map-tooltip{position:absolute;top:10px;left:10px;right:10px;width:fit-content;max-width:calc(100% - 20px);padding:8px 10px;border:1px solid var(--lg-border);border-radius:5px;background:var(--lg-bg-primary);color:var(--lg-text-primary);pointer-events:none;z-index:3;overflow-wrap:anywhere}.uar-map-tooltip span{display:block;font-size:11px;color:var(--lg-text-secondary);margin-top:3px}.uar-map-axis{position:absolute;bottom:10px;right:10px;font-size:10px;color:var(--lg-text-secondary);pointer-events:none}.uar-map-legend{font-size:10px;color:var(--lg-text-secondary)}.uar-map-list>div{max-height:200px;overflow:auto}.uar-map-list input{margin-top:8px}
+
+.uar-mesh-field { width: 100%; height: min(48vh, 440px); min-height: 220px; background: var(--lg-bg-secondary); border: 1px solid var(--lg-border); border-radius: 6px; touch-action: none; cursor: grab; }
+.uar-mesh-field:active { cursor: grabbing; }
+.uar-mesh-field:focus-visible { outline: 2px solid var(--lg-accent); outline-offset: 2px; }
+.uar .bp-choice>button,.uar .bp-choice-list>button { display:flex; align-items:center; gap:6px; padding:6px 8px; font:inherit; border:1px solid var(--lg-border-strong); border-radius:var(--lg-radius); background:var(--lg-bg-elevated); cursor:pointer; }
+.uar .bp-choice-list>button { background:transparent; border-color:transparent; }
+.uar .bp-choice>button:focus-visible { outline:2px solid var(--lg-accent); outline-offset:2px; }
+
+.uar-map-guides { position: absolute; inset: 0; pointer-events: none; stroke: var(--lg-warning); fill: none; stroke-width: 1.5; }
+.uar-map-guides line { stroke-dasharray: 4 3; }
+
+.uar-map-actor { margin-bottom: 8px; border: 1px solid var(--lg-border); border-radius: 4px; }
+.uar-map-actor .uar-tree-heading { padding-left: 6px; }
+.uar-map-owned { padding: 6px 8px 6px 26px; }
+.uar-reference-links { max-height: 250px; overflow: auto; }
+.uar-object-link { margin: 8px 0; }
+
+.uar-collision-summary { margin:8px 0; overflow:auto; color:var(--lg-text-secondary); }
+.uar-collision-summary summary { cursor:pointer; padding:4px 0; }
+.uar-collision-summary table { width:100%; border-collapse:collapse; font-size:11px; margin:8px 0; }
+.uar-collision-summary th,.uar-collision-summary td { text-align:left; padding:6px; border-bottom:1px solid var(--lg-border); }
+.uar-collision-summary th { color:var(--lg-text-primary); }
+
+.uar-timing-track{position:relative;height:12px;margin:4px 6px 12px;background:var(--lg-bg-secondary);border:1px solid var(--lg-border)}
+.uar-timing-track>span{position:absolute;top:1px;bottom:1px;min-width:2px;background:var(--lg-accent);max-width:100%}
+
+.uar-blend-list{max-height:260px;overflow:auto}.uar-blend-field{height:280px}

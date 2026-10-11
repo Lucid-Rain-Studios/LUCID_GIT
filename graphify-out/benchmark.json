@@ -1,0 +1,30 @@
+{
+  "corpus_tokens": 495517,
+  "corpus_words": 371638,
+  "nodes": 2188,
+  "edges": 4887,
+  "avg_query_tokens": 37530,
+  "reduction_ratio": 13.2,
+  "per_question": [
+    {
+      "question": "UnrealAssetReview BlueprintRevisionService",
+      "query_tokens": 69875,
+      "reduction": 7.1
+    },
+    {
+      "question": "StateTree property bags",
+      "query_tokens": 51311,
+      "reduction": 9.7
+    },
+    {
+      "question": "GitService repository gates",
+      "query_tokens": 17796,
+      "reduction": 27.8
+    },
+    {
+      "question": "Animation pose graph",
+      "query_tokens": 11139,
+      "reduction": 44.5
+    }
+  ]
+}

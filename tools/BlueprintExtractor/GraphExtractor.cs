@@ -10,7 +10,7 @@ using UAssetAPI.UnrealTypes;
 // source is embedded or required at runtime. Unsupported versions/tails are explicit.
 static class GraphExtractor
 {
-    const int ReaderVersion = 10;
+    const int ReaderVersion = 14;
     static string Name(UAsset a, int index) => index switch {
         > 0 when index <= a.Exports.Count => a.Exports[index - 1].ObjectName.ToString(),
         < 0 when -index <= a.Imports.Count => a.Imports[-index - 1].ObjectName.ToString(),
@@ -42,7 +42,7 @@ static class GraphExtractor
                 if (stream.Position != stream.Length) throw new InvalidDataException("Unparsed EdGraphPinType property data.");
                 return type;
             }
-            if ((o.Value<string>("$type") ?? "").Contains("ObjectPropertyData"))
+            if ((o.Value<string>("$type") ?? "").Contains("ObjectPropertyData") && o["Value"]!.Type == JTokenType.Integer)
                 return ObjectPath(a, o.Value<int>("Value"));
             return Simplify(a, o["Value"]!);
         }
@@ -179,13 +179,15 @@ static class GraphExtractor
                 var index = member.Value<int>("Value");
                 if (index <= 0 || index > a.Exports.Count || a.Exports[index - 1] is not NormalExport n) { graphDiagnostics.Add("An unparsed node export is present."); continue; }
                 var properties = Props(a, n); var cls = Name(a, n.ClassIndex.Index); var pins = new JArray();
-                var complete = true;
+                var opaqueFields = n.Data.OfType<UnknownPropertyData>().Select(field => field.Name.ToString()).ToArray();
+                var complete = opaqueFields.Length == 0;
+                if (opaqueFields.Length > 0) graphDiagnostics.Add(n.ObjectName + ": recovered tagged export; opaque saved fields: " + string.Join(", ", opaqueFields));
                 if (cls != "EdGraphNode_Comment" || (n.Extras?.Length ?? 0) > 0) {
                     try { Pins(a, n, index, pins, properties); }
                     catch (Exception ex) { complete = false; graphDiagnostics.Add(n.ObjectName + ": " + ex.Message); }
                 }
                 var title = properties["FunctionReference"]?["MemberName"]?.ToString() ?? properties["EventReference"]?["MemberName"]?.ToString() ?? properties.Value<string>("CustomFunctionName") ?? properties["VariableReference"]?["MemberName"]?.ToString() ?? (cls == "EdGraphNode_Comment" ? properties.Value<string>("NodeComment") : null) ?? cls.Replace("K2Node_", "");
-                graphNodes.Add(new JObject { ["id"] = GuidOf(properties, "NodeGuid"), ["exportIndex"] = index, ["name"] = n.ObjectName.ToString(), ["classPath"] = ObjectPath(a, n.ClassIndex.Index), ["title"] = title, ["x"] = properties.Value<int?>("NodePosX") ?? 0, ["y"] = properties.Value<int?>("NodePosY") ?? 0, ["width"] = properties.Value<int?>("NodeWidth") ?? 0, ["height"] = properties.Value<int?>("NodeHeight") ?? 0, ["comment"] = properties.Value<string>("NodeComment") ?? "", ["properties"] = properties, ["pins"] = pins, ["complete"] = complete });
+                graphNodes.Add(new JObject { ["id"] = GuidOf(properties, "NodeGuid"), ["exportIndex"] = index, ["name"] = n.ObjectName.ToString(), ["classPath"] = ObjectPath(a, n.ClassIndex.Index), ["title"] = title, ["x"] = properties.Value<int?>("NodePosX") ?? 0, ["y"] = properties.Value<int?>("NodePosY") ?? 0, ["width"] = properties.Value<int?>("NodeWidth") ?? 0, ["height"] = properties.Value<int?>("NodeHeight") ?? 0, ["comment"] = properties.Value<string>("NodeComment") ?? "", ["properties"] = properties, ["pins"] = pins, ["opaqueProperties"] = JArray.FromObject(opaqueFields), ["complete"] = complete });
             }
             var duplicateIds = graphNodes.GroupBy(n => n.Value<string>("id")).Where(g => string.IsNullOrEmpty(g.Key) || g.Key == new string('0', 32) || g.Count() > 1).Select(g => g.Key).ToHashSet();
             foreach (var n in graphNodes.Where(n => duplicateIds.Contains(n.Value<string>("id")))) {
@@ -198,7 +200,7 @@ static class GraphExtractor
                 if (!byExport.TryGetValue(link.Value<int>("export"), out var target) || !((JArray)target["pins"]!).Any(tp => tp.Value<string>("id") == link.Value<string>("pin"))) { n["complete"] = false; graphDiagnostics.Add(n.Value<string>("name") + ": unresolved pin connection."); continue; }
                 link["node"] = target.Value<string>("id"); link["nodeName"] = target.Value<string>("name"); link["export"]?.Parent?.Remove();
             }
-            graphs.Add(new JObject { ["id"] = GuidOf(gp, "GraphGuid"), ["name"] = graph.ObjectName.ToString(), ["path"] = ObjectPath(a, gi + 1), ["nodes"] = graphNodes, ["complete"] = graphDiagnostics.Count == 0, ["diagnostics"] = JArray.FromObject(graphDiagnostics) });
+            graphs.Add(new JObject { ["kind"] = schema.EndsWith(".AnimationGraphSchema") ? "pose" : schema.EndsWith(".AnimationStateMachineSchema") ? "state-machine" : schema.EndsWith(".AnimationTransitionSchema") ? "transition" : "event", ["schema"] = schema, ["id"] = GuidOf(gp, "GraphGuid"), ["name"] = graph.ObjectName.ToString(), ["path"] = ObjectPath(a, gi + 1), ["nodes"] = graphNodes, ["complete"] = graphDiagnostics.Count == 0, ["diagnostics"] = JArray.FromObject(graphDiagnostics) });
             diagnostics.AddRange(graphDiagnostics);
         }
         return new { schemaVersion = 1, readerVersion = ReaderVersion, assetClass, status = graphs.Count == 0 ? "unsupported" : diagnostics.Count == 0 ? "complete" : "partial", engineVersion = savedVersion, graphs, diagnostics = graphs.Count == 0 ? new[] { "No supported Blueprint or animation graphs are stored in this asset." } : diagnostics.ToArray() };

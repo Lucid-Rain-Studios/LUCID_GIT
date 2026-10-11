@@ -99,3 +99,75 @@ catch (TargetInvocationException ex) when (ex.InnerException is InvalidDataExcep
 Console.WriteLine("3 native pin-type property normalization checks passed.");
 
 
+
+var inventoryAsset = new UAsset(EngineVersion.VER_UE5_4);
+Newtonsoft.Json.Linq.JObject Field(string name, int index, string value) => new() { ["Name"] = name, ["ArrayIndex"] = index, ["Value"] = value };
+var indexedFields = new Newtonsoft.Json.Linq.JArray(Field("Axis", 0, "first"), Field("Axis", 2, "third"), Field("Single", 0, "saved"));
+var rawFields = new Newtonsoft.Json.Linq.JArray(); var fieldDiagnostics = new Newtonsoft.Json.Linq.JArray();
+var savedFields = AssetExtractor.SavedProperties(inventoryAsset, indexedFields, rawFields, fieldDiagnostics);
+if (savedFields.Value<string>("Axis[0]") != "first" || savedFields.Value<string>("Axis[2]") != "third" || savedFields.Value<string>("Single") != "saved" || savedFields.ContainsKey("Axis[1]")) throw new Exception("Static indexes were collapsed or defaults invented.");
+if (AssetExtractor.SavedProperties(inventoryAsset, new(), rawFields, fieldDiagnostics).Count != 0) throw new Exception("Empty export fields became an array.");
+var ambiguousFields = AssetExtractor.SavedProperties(inventoryAsset, new(Field("Axis", 0, "one"), Field("Axis", 0, "two"), Field("Other", 0, "kept")), rawFields, fieldDiagnostics);
+if (ambiguousFields["Axis"] is not Newtonsoft.Json.Linq.JArray duplicates || duplicates.Count != 2 || ambiguousFields.Value<string>("Other") != "kept" || rawFields.Count != 1 || fieldDiagnostics.Count != 1) throw new Exception("Ambiguous indexes were treated as unique or other fields were lost.");
+Console.WriteLine("3 tagged export static-index/empty/ambiguity checks passed.");
+
+// Exercise the compiled upstream overlay, not only GraphExtractor's pin reader.
+void TaggedText(int version, bool cooked, bool truncated = false) {
+    var asset = new UAsset(EngineVersion.VER_UE5_4);
+    asset.CustomVersionContainer.First(v => v.FriendlyName == "FFortniteMainBranchObjectVersion").Version = version;
+    if (cooked) asset.PackageFlags |= EPackageFlags.PKG_FilterEditorOnly;
+    using var stream = new MemoryStream();
+    using (var writer = new AssetBinaryWriter(stream, Encoding.UTF8, true, asset)) {
+        writer.Write((uint)8); writer.Write((sbyte)0);
+        writer.Write(new FString("Tooltip")); writer.Write(new FString("Key")); writer.Write(new FString("Saved tooltip"));
+        if (version >= 260 && !cooked) writer.Write(new FString("Developer notes"));
+        writer.Write(123456);
+    }
+    if (truncated) stream.SetLength(stream.Length - 8);
+    stream.Position = 0;
+    using var reader = new AssetBinaryReader(stream, asset);
+    try {
+        var property = new UAssetAPI.PropertyTypes.Objects.TextPropertyData(FName.DefineDummy(asset, "Tooltip"));
+        property.Read(reader, false, 0);
+        if (truncated || property.CultureInvariantString.ToString() != "Saved tooltip" || reader.ReadInt32() != 123456 || stream.Position != stream.Length) throw new Exception("Tagged text consumed the wrong boundary.");
+    } catch (EndOfStreamException) when (truncated) { }
+}
+TaggedText(259, false); TaggedText(260, false); TaggedText(270, false); TaggedText(260, true); TaggedText(260, false, true);
+Console.WriteLine("5 compiled tagged-text overlay checks passed.");
+
+void Recovery(string mode) {
+    var asset = new UAsset(EngineVersion.VER_UE5_4) { Imports = new(), Exports = new() };
+    asset.ClearNameIndexList();
+    var normal = new UAssetAPI.ExportTypes.NormalExport { Asset = asset, ClassIndex = new FPackageIndex(0), ObjectFlags = EObjectFlags.RF_ClassDefaultObject };
+    using var stream = new MemoryStream();
+    using (var writer = new AssetBinaryWriter(stream, Encoding.UTF8, true, asset)) {
+        if (asset.ObjectVersionUE5 >= ObjectVersionUE5.PROPERTY_TAG_EXTENSION_AND_OVERRIDABLE_SERIALIZATION) writer.Write((byte)(mode == "control" ? 1 : 0));
+        void Type(string name, int children) { writer.Write(new FName(asset, name)); writer.Write(children); }
+        writer.Write(new FName(asset, "UnsupportedEditorArray"));
+        if (mode == "other") Type("IntProperty", 0);
+        else { Type("ArrayProperty", 1); Type("StructProperty", 1); Type("UnknownEditorStruct", 0); }
+        writer.Write(mode == "overflow" ? int.MaxValue : mode == "other" ? 1 : 4); writer.Write((byte)0);
+        writer.Write(1); // One struct element, but no struct tag: must stay opaque.
+        writer.Write(new FName(asset, "FollowingField")); Type("IntProperty", 0);
+        writer.Write(4); writer.Write((byte)0); writer.Write(42);
+        writer.Write(new FName(asset, "None")); writer.Write(987654); // Untouched native extras.
+    }
+    var bytes = stream.ToArray(); stream.Position = 0;
+    using var reader = new AssetBinaryReader(stream, asset);
+    try {
+        TaggedExportRecovery.ReadFields(reader, normal);
+        if (mode != "valid") throw new Exception($"Invalid recovery {mode} was accepted.");
+        if (normal.Data.Count != 2 || normal.Data[0] is not UAssetAPI.PropertyTypes.Objects.UnknownPropertyData raw || !raw.Value.SequenceEqual(BitConverter.GetBytes(1)) || normal.Data[1] is not UAssetAPI.PropertyTypes.Objects.IntPropertyData integer || integer.Value != 42 || reader.ReadInt32() != 987654 || !bytes.SequenceEqual(stream.ToArray())) throw new Exception("Recovery shifted another field, consumed extras or changed saved bytes.");
+    } catch (Exception ex) when (mode != "valid" && ex is InvalidDataException or EndOfStreamException or IndexOutOfRangeException or ArgumentOutOfRangeException) { }
+    asset.Imports.Add(new UAssetAPI.Import { ObjectName = new FName(asset, "/Script/AnimGraph"), OuterIndex = new FPackageIndex(0) });
+    asset.Imports.Add(new UAssetAPI.Import { ObjectName = new FName(asset, "AnimGraphNode_SequencePlayer"), OuterIndex = new FPackageIndex(-1) });
+    var original = new UAssetAPI.ExportTypes.RawExport { Asset = asset, ClassIndex = new FPackageIndex(-2), ObjectName = new FName(asset, "Node"), ObjectFlags = EObjectFlags.RF_ClassDefaultObject, Data = bytes };
+    asset.Exports.Add(original);
+    TaggedExportRecovery.Apply(asset);
+    if (mode == "valid") {
+        if (asset.Exports[0] is not UAssetAPI.ExportTypes.NormalExport recovered || recovered.Data.Count != 2 || !recovered.Extras.SequenceEqual(BitConverter.GetBytes(987654))) throw new Exception("Valid raw node did not recover independently bounded fields.");
+    } else if (!ReferenceEquals(asset.Exports[0], original)) throw new Exception("Failed recovery replaced its original raw export.");
+    if (!original.Data.SequenceEqual(bytes)) throw new Exception("Recovery mutated raw input.");
+}
+Recovery("valid"); Recovery("overflow"); Recovery("other"); Recovery("control");
+Console.WriteLine("4 tagged-recovery boundary/profile checks passed.");

@@ -1,7 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../third_party/UAssetAPI/UAssetAPI/UAssetAPI.csproj" />
+    <ProjectReference Include="../../third_party/UAssetAPI/UAssetAPI/UAssetAPI.csproj" AdditionalProperties="CustomBeforeMicrosoftCommonTargets=$(MSBuildThisFileDirectory)../../tools/BlueprintExtractor/UAssetAPI.Reader.targets" />
+    <Compile Include="../../tools/BlueprintExtractor/TaggedExportRecovery.cs" Link="TaggedExportRecovery.cs" />
+    <Compile Include="../../tools/BlueprintExtractor/AssetExtractor.cs" Link="AssetExtractor.cs" />
     <Compile Include="../../tools/BlueprintExtractor/GraphExtractor.cs" Link="GraphExtractor.cs" />
   </ItemGroup>
 </Project>

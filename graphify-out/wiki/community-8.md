@@ -1,0 +1,133 @@
+# Repository gates and recovery
+
+[Back to index](index.md)
+
+## Source files
+
+- [LucidGit_ClaudeCode_Spec.md](../../LucidGit_ClaudeCode_Spec.md)
+- [docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION_PLAN.md](../../docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION_PLAN.md)
+- [electron/services/BlueprintRevisionService.ts](../../electron/services/BlueprintRevisionService.ts)
+- [electron/services/ExternalActorReview.ts](../../electron/services/ExternalActorReview.ts)
+- [electron/services/ForecastService.ts](../../electron/services/ForecastService.ts)
+- [electron/services/IndexRecoveryService.ts](../../electron/services/IndexRecoveryService.ts)
+- [electron/util/dugite-exec.ts](../../electron/util/dugite-exec.ts)
+- [electron/util/external-actors.ts](../../electron/util/external-actors.ts)
+- [electron/util/git-command.ts](../../electron/util/git-command.ts)
+- [electron/util/repo-gate.ts](../../electron/util/repo-gate.ts)
+
+## Entities and evidence
+
+- **dugite-exec.ts** — `electron/util/dugite-exec.ts:L1` · `electron_util_dugite_exec_ts`
+- **IndexRecoveryService.ts** — `electron/services/IndexRecoveryService.ts:L1` · `electron_services_indexrecoveryservice_ts`
+- **BlueprintRevisionService.ts** — `electron/services/BlueprintRevisionService.ts:L1` · `electron_services_blueprintrevisionservice_ts`
+- **ForecastService.ts** — `electron/services/ForecastService.ts:L1` · `electron_services_forecastservice_ts`
+- **repo-gate.ts** — `electron/util/repo-gate.ts:L1` · `electron_util_repo_gate_ts`
+- **withRepoSlot()** — `electron/util/repo-gate.ts:L176` · `repo_gate_withreposlot`
+- **.inspect()** — `electron/services/IndexRecoveryService.ts:L264` · `indexrecoveryservice_indexrecoveryservice_inspect`
+- **docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION_PLAN.md** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION_PLAN.md:L1` · `assetdocs_doc_uarp`
+- **.restore()** — `electron/services/IndexRecoveryService.ts:L379` · `indexrecoveryservice_indexrecoveryservice_restore`
+- **ExternalActorReview.ts** — `electron/services/ExternalActorReview.ts:L1` · `electron_services_externalactorreview_ts`
+- **ForecastService** — `electron/services/ForecastService.ts:L26` · `forecastservice_forecastservice`
+- **IndexRecoveryService** — `electron/services/IndexRecoveryService.ts:L173` · `indexrecoveryservice_indexrecoveryservice`
+- **BlueprintRevisionService** — `electron/services/BlueprintRevisionService.ts:L27` · `blueprintrevisionservice_blueprintrevisionservice`
+- **.pollCurrent()** — `electron/services/ForecastService.ts:L101` · `forecastservice_forecastservice_pollcurrent`
+- **context()** — `electron/services/IndexRecoveryService.ts:L80` · `indexrecoveryservice_context`
+- **hash()** — `electron/services/IndexRecoveryService.ts:L9` · `indexrecoveryservice_hash`
+- **required()** — `electron/services/IndexRecoveryService.ts:L62` · `indexrecoveryservice_required`
+- **.checkBlockers()** — `electron/services/IndexRecoveryService.ts:L176` · `indexrecoveryservice_indexrecoveryservice_checkblockers`
+- **.poll()** — `electron/services/ForecastService.ts:L80` · `forecastservice_forecastservice_poll`
+- **git()** — `electron/services/IndexRecoveryService.ts:L58` · `indexrecoveryservice_git`
+- **withGitTimeout()** — `electron/util/dugite-exec.ts:L644` · `dugite_exec_withgittimeout`
+- **.compare()** — `electron/services/BlueprintRevisionService.ts:L46` · `blueprintrevisionservice_blueprintrevisionservice_compare`
+- **.diagnose()** — `electron/services/IndexRecoveryService.ts:L257` · `indexrecoveryservice_indexrecoveryservice_diagnose`
+- **.loadSide()** — `electron/services/BlueprintRevisionService.ts:L210` · `blueprintrevisionservice_blueprintrevisionservice_loadside`
+- **.side()** — `electron/services/BlueprintRevisionService.ts:L136` · `blueprintrevisionservice_blueprintrevisionservice_side`
+- **blockers()** — `electron/services/IndexRecoveryService.ts:L99` · `indexrecoveryservice_blockers`
+- **external-actors.ts** — `electron/util/external-actors.ts:L1` · `electron_util_external_actors_ts`
+- **fingerprint()** — `electron/services/IndexRecoveryService.ts:L121` · `indexrecoveryservice_fingerprint`
+- **gitOpActivity()** — `electron/util/dugite-exec.ts:L289` · `dugite_exec_gitopactivity`
+- **pump()** — `electron/util/repo-gate.ts:L104` · `repo_gate_pump`
+- **update()** — `electron/services/IndexRecoveryService.ts:L167` · `indexrecoveryservice_update`
+- **.emitStatus()** — `electron/services/ForecastService.ts:L97` · `forecastservice_forecastservice_emitstatus`
+- **.lockSnapshot()** — `electron/services/IndexRecoveryService.ts:L189` · `indexrecoveryservice_indexrecoveryservice_locksnapshot`
+- **.start()** — `electron/services/ForecastService.ts:L44` · `forecastservice_forecastservice_start`
+- **killGitProcesses()** — `electron/util/dugite-exec.ts:L196` · `dugite_exec_killgitprocesses`
+- **opsKey()** — `electron/util/dugite-exec.ts:L280` · `dugite_exec_opskey`
+- **recoveryPaths()** — `electron/services/IndexRecoveryService.ts:L68` · `indexrecoveryservice_recoverypaths`
+- **validateObjects()** — `electron/services/IndexRecoveryService.ts:L129` · `indexrecoveryservice_validateobjects`
+- **.extract()** — `electron/services/BlueprintRevisionService.ts:L264` · `blueprintrevisionservice_blueprintrevisionservice_extract`
+- **.recoverLock()** — `electron/services/IndexRecoveryService.ts:L224` · `indexrecoveryservice_indexrecoveryservice_recoverlock`
+- **.repair()** — `electron/services/IndexRecoveryService.ts:L304` · `indexrecoveryservice_indexrecoveryservice_repair`
+- **.resolveSide()** — `electron/services/BlueprintRevisionService.ts:L159` · `blueprintrevisionservice_blueprintrevisionservice_resolveside`
+- **.stop()** — `electron/services/ForecastService.ts:L64` · `forecastservice_forecastservice_stop`
+- **.stopTasks()** — `electron/services/IndexRecoveryService.ts:L184` · `indexrecoveryservice_indexrecoveryservice_stoptasks`
+- **.undo()** — `electron/services/IndexRecoveryService.ts:L413` · `indexrecoveryservice_indexrecoveryservice_undo`
+- **Requirement: long Git and LFS operations stream OperationStep progress** — `LucidGit_ClaudeCode_Spec.md:L476-L511` · `productdocs_operation_progress`
+- **canRun()** — `electron/util/repo-gate.ts:L76` · `repo_gate_canrun`
+- **checksumBad()** — `electron/services/IndexRecoveryService.ts:L110` · `indexrecoveryservice_checksumbad`
+- **claim()** — `electron/util/repo-gate.ts:L85` · `repo_gate_claim`
+- **durable()** — `electron/services/IndexRecoveryService.ts:L50` · `indexrecoveryservice_durable`
+- **entryFor()** — `electron/util/dugite-exec.ts:L319` · `dugite_exec_entryfor`
+- **execBinary()** — `electron/util/dugite-exec.ts:L560` · `dugite_exec_execbinary`
+- **gateKey()** — `electron/util/repo-gate.ts:L56` · `repo_gate_gatekey`
+- **git-command.ts** — `electron/util/git-command.ts:L1` · `electron_util_git_command_ts`
+- **isReadOnlyCommand()** — `electron/util/git-command.ts:L45` · `git_command_isreadonlycommand`
+- **readIndex()** — `electron/services/IndexRecoveryService.ts:L39` · `indexrecoveryservice_readindex`
+- **registerGitProcess()** — `electron/util/dugite-exec.ts:L47` · `dugite_exec_registergitprocess`
+- **repoGitTasks()** — `electron/util/dugite-exec.ts:L107` · `dugite_exec_repogittasks`
+- **repoSlotState()** — `electron/util/repo-gate.ts:L215` · `repo_gate_reposlotstate`
+- **stopGitProcess()** — `electron/util/dugite-exec.ts:L90` · `dugite_exec_stopgitprocess`
+- **token()** — `electron/services/IndexRecoveryService.ts:L118` · `indexrecoveryservice_token`
+- **waitForGitOpsToDrain()** — `electron/util/dugite-exec.ts:L310` · `dugite_exec_waitforgitopstodrain`
+- **.constructor()** — `electron/services/BlueprintRevisionService.ts:L39` · `blueprintrevisionservice_blueprintrevisionservice_constructor`
+- **.getStatus()** — `electron/services/ForecastService.ts:L74` · `forecastservice_forecastservice_getstatus`
+- **.isPaused()** — `electron/services/ForecastService.ts:L42` · `forecastservice_forecastservice_ispaused`
+- **.pause()** — `electron/services/ForecastService.ts:L36` · `forecastservice_forecastservice_pause`
+- **.prune()** — `electron/services/BlueprintRevisionService.ts:L310` · `blueprintrevisionservice_blueprintrevisionservice_prune`
+- **.resume()** — `electron/services/ForecastService.ts:L38` · `forecastservice_forecastservice_resume`
+- **.stop()** — `electron/services/BlueprintRevisionService.ts:L322` · `blueprintrevisionservice_blueprintrevisionservice_stop`
+- **BlueprintRevisionService retained as compatible facade; additive family modules preferred to large refactor** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION_PLAN.md:L65` · `assetdocs_architecture`
+- **Mesh geometry provider/renderer, skin/LOD/materials and engine fidelity remain unchecked** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION_PLAN.md:L154-L159` · `assetdocs_geometrygate`
+- **Specified Git stderr progress parsing via execWithProgress** — `LucidGit_ClaudeCode_Spec.md:L491-L509` · `productdocs_stderr_progress`
+- **confirmsMapOwnership()** — `electron/services/ExternalActorReview.ts:L12` · `externalactorreview_confirmsmapownership`
+- **discoverExternalActors()** — `electron/services/ExternalActorReview.ts:L20` · `externalactorreview_discoverexternalactors`
+- **exists()** — `electron/services/IndexRecoveryService.ts:L33` · `indexrecoveryservice_exists`
+- **externalActorPrefix()** — `electron/util/external-actors.ts:L7` · `external_actors_externalactorprefix`
+- **gateFor()** — `electron/util/repo-gate.ts:L67` · `repo_gate_gatefor`
+- **journal()** — `electron/services/IndexRecoveryService.ts:L153` · `indexrecoveryservice_journal`
+- **killAllGitProcesses()** — `electron/util/dugite-exec.ts:L216` · `dugite_exec_killallgitprocesses`
+- **latest()** — `electron/services/IndexRecoveryService.ts:L163` · `indexrecoveryservice_latest`
+- **mapPackagePath()** — `electron/util/external-actors.ts:L11` · `external_actors_mappackagepath`
+- **mutableActorStamp()** — `electron/services/ExternalActorReview.ts:L56` · `externalactorreview_mutableactorstamp`
+- **owned()** — `electron/services/IndexRecoveryService.ts:L54` · `indexrecoveryservice_owned`
+- **preemptRepoReads()** — `electron/util/dugite-exec.ts:L178` · `dugite_exec_preemptreporeads`
+- **release()** — `electron/util/repo-gate.ts:L90` · `repo_gate_release`
+- **secs()** — `electron/util/dugite-exec.ts:L592` · `dugite_exec_secs`
+- **sha()** — `electron/services/BlueprintRevisionService.ts:L17` · `blueprintrevisionservice_sha`
+- **shutdownRepoGate()** — `electron/util/repo-gate.ts:L204` · `repo_gate_shutdownrepogate`
+- **stopRepoGitTasks()** — `electron/util/dugite-exec.ts:L118` · `dugite_exec_stoprepogittasks`
+- **subcommandIndex()** — `electron/util/git-command.ts:L19` · `git_command_subcommandindex`
+- **timeoutMessage()** — `electron/util/dugite-exec.ts:L607` · `dugite_exec_timeoutmessage`
+- **validatePath()** — `electron/services/BlueprintRevisionService.ts:L19` · `blueprintrevisionservice_validatepath`
+- **validateRef()** — `electron/services/BlueprintRevisionService.ts:L23` · `blueprintrevisionservice_validateref`
+- **waitForSlot()** — `electron/util/repo-gate.ts:L123` · `repo_gate_waitforslot`
+- **Approved HTML concept is design baseline; all asset names/counts/previews illustrative** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION_PLAN.md:L7` · `assetdocs_concept`
+- **Historical dependency must use selected tree; index/worktree capture consistency must reject mixed-time snapshots** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION_PLAN.md:L80` · `assetdocs_dependencycontract`
+- **Keep UAssetAPI/Klee initially; additional native provider requires uncooked fixture/licensing/packaging gates** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION_PLAN.md:L40-L51` · `assetdocs_providerdecision`
+- **LG-055 engine integration,UI-059 context andUI-060 broad dialog acceptance remain separate findings** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION_PLAN.md:L197-L200` · `assetdocs_auditcontract`
+- **Proposed full manifests include uexp/ubulk/uptnl/trailer/virtualized payload requirements** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION_PLAN.md:L70` · `assetdocs_manifestcontract`
+- **Remaining dependency order covers package/editor, StateTree bags, custom animation, native geometry, placement and acceptance** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION_PLAN.md:L229-L234` · `assetdocs_remainingorder`
+- **Required capability coverage separates properties/topology/geometry/hierarchy reconstruction scopes** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION_PLAN.md:L71` · `assetdocs_capabilities`
+- **Required normalized contract separates serialized from inherited/resolved values; omitted defaults never zero/false** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION_PLAN.md:L72` · `assetdocs_defaultcontract`
+- **Required stable GUID/qualified fallback matching excludes export indexes as cross-revision identity** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION_PLAN.md:L76` · `assetdocs_identitycontract`
+- **Shared host/profile slices are partial deliveries rather than completed six broad phases** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION_PLAN.md:L225` · `assetdocs_noreleaseclaim`
+- **check()** — `electron/services/ExternalActorReview.ts:L10` · `externalactorreview_check`
+- **describeLiveGitProcesses()** — `electron/util/dugite-exec.ts:L156` · `dugite_exec_describelivegitprocesses`
+- **emptyExternalReview()** — `electron/services/ExternalActorReview.ts:L77` · `externalactorreview_emptyexternalreview`
+- **execWithProgressInner()** — `electron/util/dugite-exec.ts:L431` · `dugite_exec_execwithprogressinner`
+- **killProcessTree()** — `electron/util/dugite-exec.ts:L74` · `dugite_exec_killprocesstree`
+- **owningMapCandidate()** — `electron/util/external-actors.ts:L3` · `external_actors_owningmapcandidate`
+- **parseGitProgress()** — `electron/util/dugite-exec.ts:L387` · `dugite_exec_parsegitprogress`
+- **shutdownGitProcesses()** — `electron/util/dugite-exec.ts:L229` · `dugite_exec_shutdowngitprocesses`
+- **storage()** — `electron/services/IndexRecoveryService.ts:L146` · `indexrecoveryservice_storage`
+- **withTimeout()** — `electron/util/dugite-exec.ts:L617` · `dugite_exec_withtimeout`

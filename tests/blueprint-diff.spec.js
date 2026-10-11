@@ -240,7 +240,12 @@ test('graph dropdown identifies changes, presence and incomplete comparisons', (
   expect(items.find(e => e.name === 'Removed').color).toBe('var(--lg-error)')
   expect(items.find(e => e.name === 'Added').color).toBe('var(--lg-success)')
   harness.slots[0].left.status = 'unavailable'
-  expect(labels().every(label => label.endsWith('(comparison unavailable)'))).toBe(true)
+  expect(labels().every(label => label.includes('comparison unavailable'))).toBe(true)
+  expect(labels().find(label => label.startsWith('Partial'))).toBe('Partial (comparison unavailable, incomplete)')
+  for (const [kind, label] of Object.entries({ pose: 'Pose graph', 'state-machine': 'State machine', transition: 'Transition rule', event: 'Event graph' })) {
+    right[0].kind = kind
+    expect(labels()[0]).toBe(`Same (${label}, comparison unavailable)`)
+  }
 })
 
 

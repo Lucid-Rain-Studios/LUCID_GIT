@@ -1,0 +1,162 @@
+# Asset graphs and contents
+
+[Back to index](index.md)
+
+## Source files
+
+- [docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md](../../docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md)
+- [electron/blueprintTypes.ts](../../electron/blueprintTypes.ts)
+- [src/components/diff/AnimationSequenceReview.tsx](../../src/components/diff/AnimationSequenceReview.tsx)
+- [src/components/diff/AnimationStateMachine.tsx](../../src/components/diff/AnimationStateMachine.tsx)
+- [src/components/diff/BlendSpaceReview.tsx](../../src/components/diff/BlendSpaceReview.tsx)
+- [src/components/diff/BlueprintChoice.tsx](../../src/components/diff/BlueprintChoice.tsx)
+- [src/components/diff/BlueprintDiff.tsx](../../src/components/diff/BlueprintDiff.tsx)
+- [src/components/diff/MapContents.tsx](../../src/components/diff/MapContents.tsx)
+- [src/components/diff/MapPreview.tsx](../../src/components/diff/MapPreview.tsx)
+- [src/components/diff/MeshContents.tsx](../../src/components/diff/MeshContents.tsx)
+- [src/components/diff/MeshPreview.tsx](../../src/components/diff/MeshPreview.tsx)
+- [src/components/diff/PhysicsAssetPreview.tsx](../../src/components/diff/PhysicsAssetPreview.tsx)
+- [src/components/diff/StateTreePreview.tsx](../../src/components/diff/StateTreePreview.tsx)
+- [src/components/diff/UnrealAssetReview.tsx](../../src/components/diff/UnrealAssetReview.tsx)
+- [src/lib/animationReview.ts](../../src/lib/animationReview.ts)
+- [src/lib/animationTimeline.ts](../../src/lib/animationTimeline.ts)
+- [src/lib/assetReferences.ts](../../src/lib/assetReferences.ts)
+- [src/lib/blendSpaceReview.ts](../../src/lib/blendSpaceReview.ts)
+- [src/lib/blueprintClient.ts](../../src/lib/blueprintClient.ts)
+- [src/lib/blueprintGraph.ts](../../src/lib/blueprintGraph.ts)
+- [src/lib/blueprintKlee.ts](../../src/lib/blueprintKlee.ts)
+- [src/lib/mapInventory.ts](../../src/lib/mapInventory.ts)
+- [src/lib/mapReview.ts](../../src/lib/mapReview.ts)
+- [src/lib/mapTransforms.ts](../../src/lib/mapTransforms.ts)
+- [src/lib/meshMetadata.ts](../../src/lib/meshMetadata.ts)
+- [src/lib/meshReview.ts](../../src/lib/meshReview.ts)
+- [src/lib/stateTreeReview.ts](../../src/lib/stateTreeReview.ts)
+- [src/lib/unrealAssetReview.ts](../../src/lib/unrealAssetReview.ts)
+- [tools/blueprint-klee-host.js](../../tools/blueprint-klee-host.js)
+
+## Entities and evidence
+
+- **UnrealAssetReview.tsx** — `src/components/diff/UnrealAssetReview.tsx:L1` · `src_components_diff_unrealassetreview_tsx`
+- **blueprintTypes.ts** — `electron/blueprintTypes.ts:L1` · `electron_blueprinttypes_ts`
+- **BlueprintDiff.tsx** — `src/components/diff/BlueprintDiff.tsx:L1` · `src_components_diff_blueprintdiff_tsx`
+- **stateTreeReview.ts** — `src/lib/stateTreeReview.ts:L1` · `src_lib_statetreereview_ts`
+- **meshReview.ts** — `src/lib/meshReview.ts:L1` · `src_lib_meshreview_ts`
+- **unrealAssetReview.ts** — `src/lib/unrealAssetReview.ts:L1` · `src_lib_unrealassetreview_ts`
+- **blueprintGraph.ts** — `src/lib/blueprintGraph.ts:L1` · `src_lib_blueprintgraph_ts`
+- **BlueprintChoice.tsx** — `src/components/diff/BlueprintChoice.tsx:L1` · `src_components_diff_blueprintchoice_tsx`
+- **animationTimeline.ts** — `src/lib/animationTimeline.ts:L1` · `src_lib_animationtimeline_ts`
+- **blendSpaceReview.ts** — `src/lib/blendSpaceReview.ts:L1` · `src_lib_blendspacereview_ts`
+- **PhysicsAssetPreview.tsx** — `src/components/diff/PhysicsAssetPreview.tsx:L1` · `src_components_diff_physicsassetpreview_tsx`
+- **mapTransforms.ts** — `src/lib/mapTransforms.ts:L1` · `src_lib_maptransforms_ts`
+- **stateTreeLinks()** — `src/lib/stateTreeReview.ts:L46` · `statetreereview_statetreelinks`
+- **MeshPreview.tsx** — `src/components/diff/MeshPreview.tsx:L1` · `src_components_diff_meshpreview_tsx`
+- **animationReview.ts** — `src/lib/animationReview.ts:L1` · `src_lib_animationreview_ts`
+- **assetReferences.ts** — `src/lib/assetReferences.ts:L1` · `src_lib_assetreferences_ts`
+- **collisionHulls()** — `src/lib/meshReview.ts:L46` · `meshreview_collisionhulls`
+- **mapInventory.ts** — `src/lib/mapInventory.ts:L1` · `src_lib_mapinventory_ts`
+- **mapReview.ts** — `src/lib/mapReview.ts:L1` · `src_lib_mapreview_ts`
+- **record()** — `src/lib/stateTreeReview.ts:L4` · `statetreereview_record`
+- **AnimationSequenceReview.tsx** — `src/components/diff/AnimationSequenceReview.tsx:L1` · `src_components_diff_animationsequencereview_tsx`
+- **AnimationStateMachine.tsx** — `src/components/diff/AnimationStateMachine.tsx:L1` · `src_components_diff_animationstatemachine_tsx`
+- **MapPreview.tsx** — `src/components/diff/MapPreview.tsx:L1` · `src_components_diff_mappreview_tsx`
+- **PhysicsAssetPreview pairs unique captured body paths and reuses BlueprintChoice/MeshPreview** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L154` · `assetdocs_physicsasset`
+- **StateTreePreview.tsx** — `src/components/diff/StateTreePreview.tsx:L1` · `src_components_diff_statetreepreview_tsx`
+- **stateTreeEntries()** — `src/lib/stateTreeReview.ts:L109` · `statetreereview_statetreeentries`
+- **vector()** — `src/lib/meshReview.ts:L10` · `meshreview_vector`
+- **BlendSpaceReview.tsx** — `src/components/diff/BlendSpaceReview.tsx:L1` · `src_components_diff_blendspacereview_tsx`
+- **MapContents.tsx** — `src/components/diff/MapContents.tsx:L1` · `src_components_diff_mapcontents_tsx`
+- **bindingEndpoint()** — `src/lib/stateTreeReview.ts:L23` · `statetreereview_bindingendpoint`
+- **guid()** — `src/lib/stateTreeReview.ts:L15` · `statetreereview_guid`
+- **quaternion()** — `src/lib/meshReview.ts:L24` · `meshreview_quaternion`
+- **savedRotation()** — `src/lib/meshReview.ts:L35` · `meshreview_savedrotation`
+- **unwrap()** — `src/lib/stateTreeReview.ts:L11` · `statetreereview_unwrap`
+- **MeshContents.tsx** — `src/components/diff/MeshContents.tsx:L1` · `src_components_diff_meshcontents_tsx`
+- **blueprintClient.ts** — `src/lib/blueprintClient.ts:L1` · `src_lib_blueprintclient_ts`
+- **meshMetadata.ts** — `src/lib/meshMetadata.ts:L1` · `src_lib_meshmetadata_ts`
+- **packageChanges()** — `src/lib/unrealAssetReview.ts:L49` · `unrealassetreview_packagechanges`
+- **record()** — `src/lib/meshReview.ts:L8` · `meshreview_record`
+- **savedObjectIndex()** — `src/lib/assetReferences.ts:L3` · `assetreferences_savedobjectindex`
+- **semantic()** — `src/lib/blueprintGraph.ts:L26` · `blueprintgraph_semantic`
+- **stateClass()** — `src/lib/stateTreeReview.ts:L5` · `statetreereview_stateclass`
+- **stateName()** — `src/lib/stateTreeReview.ts:L7` · `statetreereview_statename`
+- **stateTreeStateIndex()** — `src/lib/stateTreeReview.ts:L33` · `statetreereview_statetreestateindex`
+- **CPU/SVG collision preview bounded to64 shapes/20000 vertices/10000 triangles per side** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L79` · `assetdocs_collisionbounds`
+- **Saved SphereElems uses finite center/positive radius and faceted preview topology** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L147` · `assetdocs_sphere`
+- **animationTimeline()** — `src/lib/animationTimeline.ts:L11` · `animationtimeline_animationtimeline`
+- **assetChanges()** — `src/lib/unrealAssetReview.ts:L40` · `unrealassetreview_assetchanges`
+- **blueprint-klee-host.js** — `tools/blueprint-klee-host.js:L1` · `tools_blueprint_klee_host_js`
+- **blueprintKlee.ts** — `src/lib/blueprintKlee.ts:L1` · `src_lib_blueprintklee_ts`
+- **canonical()** — `src/lib/blueprintGraph.ts:L21` · `blueprintgraph_canonical`
+- **chooseGraph()** — `src/components/diff/BlueprintDiff.tsx:L130` · `blueprintdiff_choosegraph`
+- **createKleeCanvas()** — `tools/blueprint-klee-host.js:L15` · `blueprint_klee_host_createkleecanvas`
+- **enumValue()** — `src/lib/animationTimeline.ts:L6` · `animationtimeline_enumvalue`
+- **graphChanges()** — `src/lib/blueprintGraph.ts:L38` · `blueprintgraph_graphchanges`
+- **mapAttachmentPositions()** — `src/lib/mapTransforms.ts:L19` · `maptransforms_mapattachmentpositions`
+- **mapInventory()** — `src/lib/mapInventory.ts:L11` · `mapinventory_mapinventory`
+- **number()** — `src/lib/animationTimeline.ts:L5` · `animationtimeline_number`
+- **number()** — `src/lib/meshReview.ts:L9` · `meshreview_number`
+- **openGraph()** — `src/components/diff/BlueprintDiff.tsx:L135` · `blueprintdiff_opengraph`
+- **propertyChanges()** — `src/lib/unrealAssetReview.ts:L17` · `unrealassetreview_propertychanges`
+- **quote()** — `src/lib/blueprintGraph.ts:L78` · `blueprintgraph_quote`
+- **record()** — `src/lib/animationTimeline.ts:L4` · `animationtimeline_record`
+- **reviewObjects()** — `src/lib/unrealAssetReview.ts:L31` · `unrealassetreview_reviewobjects`
+- **select()** — `src/components/diff/BlueprintDiff.tsx:L126` · `blueprintdiff_select`
+- **stateTreeComparisonObjects()** — `src/lib/stateTreeReview.ts:L159` · `statetreereview_statetreecomparisonobjects`
+- **step()** — `src/components/diff/BlueprintDiff.tsx:L128` · `blueprintdiff_step`
+- **unreal()** — `src/lib/blueprintGraph.ts:L79` · `blueprintgraph_unreal`
+- **wireId()** — `src/lib/blueprintGraph.ts:L58` · `blueprintgraph_wireid`
+- **AnimationSequenceContents()** — `src/components/diff/AnimationSequenceReview.tsx:L5` · `animationsequencereview_animationsequencecontents`
+- **AnimationSequencePreview()** — `src/components/diff/AnimationSequenceReview.tsx:L12` · `animationsequencereview_animationsequencepreview`
+- **AnimationStateMachine()** — `src/components/diff/AnimationStateMachine.tsx:L6` · `animationstatemachine_animationstatemachine`
+- **BlendSpacePreview()** — `src/components/diff/BlendSpaceReview.tsx:L5` · `blendspacereview_blendspacepreview`
+- **BlueprintChoice()** — `src/components/diff/BlueprintChoice.tsx:L6` · `blueprintchoice_blueprintchoice`
+- **MapContents()** — `src/components/diff/MapContents.tsx:L5` · `mapcontents_mapcontents`
+- **MapPreview()** — `src/components/diff/MapPreview.tsx:L10` · `mappreview_mappreview`
+- **MeshPreview()** — `src/components/diff/MeshPreview.tsx:L6` · `meshpreview_meshpreview`
+- **ObjectInspector()** — `src/components/diff/UnrealAssetReview.tsx:L32` · `unrealassetreview_objectinspector`
+- **PhysicsAssetPreview()** — `src/components/diff/PhysicsAssetPreview.tsx:L8` · `physicsassetpreview_physicsassetpreview`
+- **actorName()** — `src/lib/mapInventory.ts:L4` · `mapinventory_actorname`
+- **animationMetadata()** — `src/lib/animationTimeline.ts:L52` · `animationtimeline_animationmetadata`
+- **animationNodeName()** — `src/lib/animationReview.ts:L13` · `animationreview_animationnodename`
+- **animationSequenceClass()** — `src/lib/animationTimeline.ts:L7` · `animationtimeline_animationsequenceclass`
+- **animationStateMachine()** — `src/lib/animationReview.ts:L20` · `animationreview_animationstatemachine`
+- **blendSpaceBounds()** — `src/lib/blendSpaceReview.ts:L28` · `blendspacereview_blendspacebounds`
+- **blendSpaceClass()** — `src/lib/blendSpaceReview.ts:L5` · `blendspacereview_blendspaceclass`
+- **blendSpaceModel()** — `src/lib/blendSpaceReview.ts:L8` · `blendspacereview_blendspacemodel`
+- **boundGraphs()** — `src/lib/animationReview.ts:L4` · `animationreview_boundgraphs`
+- **cameraChanged()** — `src/components/diff/BlueprintDiff.tsx:L121` · `blueprintdiff_camerachanged`
+- **canonical()** — `src/lib/unrealAssetReview.ts:L12` · `unrealassetreview_canonical`
+- **changed()** — `src/components/diff/BlueprintDiff.tsx:L210` · `blueprintdiff_changed`
+- **className()** — `src/components/diff/UnrealAssetReview.tsx:L29` · `unrealassetreview_classname`
+- **close()** — `src/components/diff/BlueprintChoice.tsx:L19` · `blueprintchoice_close`
+- **collisionBounds()** — `src/lib/meshReview.ts:L134` · `meshreview_collisionbounds`
+- **counts()** — `src/components/diff/UnrealAssetReview.tsx:L127` · `unrealassetreview_counts`
+- **createBlueprintClient()** — `src/lib/blueprintClient.ts:L5` · `blueprintclient_createblueprintclient`
+- **dismiss()** — `src/components/diff/BlueprintDiff.tsx:L142` · `blueprintdiff_dismiss`
+- **displayValue()** — `src/lib/unrealAssetReview.ts:L77` · `unrealassetreview_displayvalue`
+- **entryClass()** — `src/lib/stateTreeReview.ts:L6` · `statetreereview_entryclass`
+- **finite()** — `src/lib/blendSpaceReview.ts:L4` · `blendspacereview_finite`
+- **fit()** — `src/components/diff/BlueprintDiff.tsx:L127` · `blueprintdiff_fit`
+- **graphText()** — `src/lib/blueprintGraph.ts:L85` · `blueprintgraph_graphtext`
+- **isUnrealPackage()** — `src/lib/unrealAssetReview.ts:L4` · `unrealassetreview_isunrealpackage`
+- **label()** — `src/components/diff/BlueprintDiff.tsx:L17` · `blueprintdiff_label`
+- **loadKlee()** — `src/lib/blueprintKlee.ts:L16` · `blueprintklee_loadklee`
+- **mapPositions()** — `src/lib/mapReview.ts:L6` · `mapreview_mappositions`
+- **mapVisiblePositions()** — `src/lib/mapReview.ts:L19` · `mapreview_mapvisiblepositions`
+- **matching()** — `src/components/diff/UnrealAssetReview.tsx:L117` · `unrealassetreview_matching`
+- **meshMetadata()** — `src/lib/meshMetadata.ts:L4` · `meshmetadata_meshmetadata`
+- **outside()** — `src/components/diff/BlueprintDiff.tsx:L149` · `blueprintdiff_outside`
+- **packageObjects()** — `src/lib/unrealAssetReview.ts:L37` · `unrealassetreview_packageobjects`
+- **pairGraphs()** — `src/lib/blueprintGraph.ts:L8` · `blueprintgraph_pairgraphs`
+- **record()** — `src/lib/blendSpaceReview.ts:L3` · `blendspacereview_record`
+- **referencePackage()** — `src/lib/assetReferences.ts:L18` · `assetreferences_referencepackage`
+- **revisionName()** — `src/lib/unrealAssetReview.ts:L5` · `unrealassetreview_revisionname`
+- **rotate()** — `src/lib/meshReview.ts:L17` · `meshreview_rotate`
+- **rotateQuaternion()** — `src/lib/meshReview.ts:L29` · `meshreview_rotatequaternion`
+- **selectObject()** — `src/components/diff/UnrealAssetReview.tsx:L120` · `unrealassetreview_selectobject`
+- **stateTreeHierarchy()** — `src/lib/stateTreeReview.ts:L76` · `statetreereview_statetreehierarchy`
+- **toggle()** — `src/components/diff/StateTreePreview.tsx:L18` · `statetreepreview_toggle`
+- **value()** — `src/components/diff/BlueprintDiff.tsx:L63` · `blueprintdiff_value`
+- **vector()** — `src/lib/mapTransforms.ts:L6` · `maptransforms_vector`
+- **wireChanges()** — `src/lib/blueprintGraph.ts:L61` · `blueprintgraph_wirechanges`
+- **zoom()** — `src/components/diff/BlueprintDiff.tsx:L129` · `blueprintdiff_zoom`

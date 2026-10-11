@@ -1,0 +1,10 @@
+{
+  "ast_nodes": 1655,
+  "semantic_nodes": 533,
+  "module_edges": 779,
+  "documentation_module_references": 304,
+  "unselected_local_imports": 18,
+  "dropped_external_or_unresolved_ast_edges": 978,
+  "unresolved_cross_file_call_targets": 513,
+  "token_usage": "not measured"
+}

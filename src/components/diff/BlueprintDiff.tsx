@@ -1,3 +1,5 @@
+import { AnimationStateMachine } from './AnimationStateMachine'
+import { animationNodeName, boundGraphs } from '../../lib/animationReview'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Maximize2, Minimize2, Link2, Focus, PanelRightClose, PanelRightOpen, Minus, Plus, RotateCcw, ChevronLeft, ChevronRight, Menu } from 'lucide-react'
@@ -53,7 +55,7 @@ function GraphPane({ side, graph, changes, wires, selected, canvasRef, saved, on
 
 function Inspector({ change, node }: { change?: GraphChange; node?: BlueprintNode }) {
   if (!node) return <div className="bp-inspector-empty">Select a node or change to inspect its saved values.</div>
-  return <div className="bp-inspector"><strong>{node.title}</strong><small>{node.classPath}</small>
+  return <div className="bp-inspector"><strong>{animationNodeName(node)}</strong><small>{node.classPath}</small>
     {change && <div className="bp-change-kind" style={{ color: tone[change.kind] }}>{mark[change.kind]} {change.kind === 'moved' ? 'Layout changed' : change.kind === 'commented' ? 'Comment changed' : change.kind[0].toUpperCase() + change.kind.slice(1)}</div>}
     {change?.left && change.right && <div className="bp-value-pair"><span>Base</span><span>Selected revision</span></div>}
     {(node.pins.length > 0 || (change?.left?.pins.length ?? 0) > 0) && <div className="bp-pin-values">{Array.from(new Set([...(change?.left?.pins ?? []).map(p => p.id), ...node.pins.map(p => p.id)])).map(id => {
@@ -63,6 +65,7 @@ function Inspector({ change, node }: { change?: GraphChange; node?: BlueprintNod
     })}</div>}
     {change?.commentChanged && <div className="bp-comment-diff"><strong>Comment</strong><span>Base</span><pre>{change.left?.comment || '(empty)'}</pre><span>Selected revision</span><pre>{change.right?.comment || '(empty)'}</pre></div>}
     <details><summary>Saved properties</summary><pre>{JSON.stringify(node.properties, null, 2)}</pre></details>
+    {!!node.opaqueProperties?.length && <small>Raw saved fields: {node.opaqueProperties.join(', ')}. These payloads are not interpreted.</small>}
     <small>{node.complete ? 'Serialized node data decoded.' : 'This node contains unsupported data. Its connections may be incomplete.'}</small>
   </div>
 }
@@ -70,6 +73,7 @@ function Inspector({ change, node }: { change?: GraphChange; node?: BlueprintNod
 export function BlueprintDiff({ onRetry, comparison, files, project, repoPath, request, revisionLabels, onFallback, onUnsupported, single = false }: BlueprintDiffProps) {
   const [result, setResult] = useState<BlueprintComparison | null>(null), [error, setError] = useState<string | null>(null), [retry, setRetry] = useState(0)
   const [expanded, setExpanded] = useState(false), [graphKey, setGraphKey] = useState(''), [selected, setSelected] = useState(''), [sync, setSync] = useState(true), [highlight, setHighlight] = useState(true), [inspector, setInspector] = useState(false)
+  const [graphHistory, setGraphHistory] = useState<string[]>([])
   const navigation = useRef<HTMLDetailsElement>(null)
   const left = useRef<KleeCanvas | null>(null), right = useRef<KleeCanvas | null>(null), leftCamera = useRef<BlueprintCamera>(), rightCamera = useRef<BlueprintCamera>()
   const fullscreenButton = useRef<HTMLButtonElement>(null), wasExpanded = useRef(false)
@@ -80,7 +84,7 @@ export function BlueprintDiff({ onRetry, comparison, files, project, repoPath, r
   useEffect(() => {
     let cancelled = false
     const requestId = crypto.randomUUID()
-    setResult(null); setError(null); setSelected(''); setGraphKey(''); leftCamera.current = undefined; rightCamera.current = undefined
+    setResult(null); setError(null); setSelected(''); setGraphKey(''); setGraphHistory([]); leftCamera.current = undefined; rightCamera.current = undefined
     const read = comparison && retry === 0 ? Promise.resolve(comparison) : ipc.blueprintCompare(repoPath, { filePath, oldPath, leftRef, rightRef, requestId, force: retry > 0 })
     read.then(data => {
       if (cancelled) return
@@ -101,7 +105,9 @@ export function BlueprintDiff({ onRetry, comparison, files, project, repoPath, r
     const changes = comparable && !single ? graphChanges(p) : []
     const incomplete = p.left?.complete === false || p.right?.complete === false
     const status = single ? '' : !comparable ? 'comparison unavailable' : !p.left ? 'added' : !p.right ? 'removed' : changes.length ? `${changes.length} change${changes.length === 1 ? '' : 's'}` : ''
-    const suffix = [status, comparable && incomplete ? 'incomplete' : ''].filter(Boolean).join(', ')
+    const family = (p.right ?? p.left)?.kind
+    const familyLabel = family ? ({ event: 'Event graph', pose: 'Pose graph', 'state-machine': 'State machine', transition: 'Transition rule' })[family] : ''
+    const suffix = [familyLabel, status, incomplete ? 'incomplete' : ''].filter(Boolean).join(', ')
     return { pair: p, changes, wires: comparable && !single ? wireChanges(p) : [], label: p.name + (suffix ? ` (${suffix})` : ''), detail: suffix ? `(${suffix})` : '', color: single ? 'var(--lg-warning)' : !comparable ? 'var(--lg-text-secondary)' : !p.left ? 'var(--lg-success)' : !p.right ? 'var(--lg-error)' : 'var(--lg-warning)' }
   }), [pairs, comparable, single])
   const changes = graphEntries.find(entry => entry.pair === pair)?.changes ?? []
@@ -126,6 +132,12 @@ export function BlueprintDiff({ onRetry, comparison, files, project, repoPath, r
     leftCamera.current = undefined; rightCamera.current = undefined; setGraphKey(key); setSelected('')
     if (navigation.current) navigation.current.open = false
   }
+  const openGraph = (graph: BlueprintGraph) => {
+    const target = pairs.find(candidate => candidate.left === graph || candidate.right === graph)
+    if (!target || target === pair) return
+    if (pair) setGraphHistory(history => [...history.slice(-19), pair.key])
+    chooseGraph(target.key)
+  }
   useEffect(() => {
     const dismiss = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && navigation.current?.open) {
@@ -149,10 +161,11 @@ export function BlueprintDiff({ onRetry, comparison, files, project, repoPath, r
           <label htmlFor="bp-file-choice">{single ? 'Blueprint file' : 'Changed Blueprint file'}</label>
           {files?.length ? <BlueprintChoice id="bp-file-choice" label="Blueprint file" value={String(currentFile)} items={files.map((file, i) => ({ value: String(i), name: file.path.includes('/') ? '.../' + file.path.split('/').pop() : file.path, prefix: file.stage ?? file.label?.match(/^(Unstaged|Staged)\b/)?.[1], title: file.path }))} onChange={value => { if (navigation.current) navigation.current.open = false; files[Number(value)]?.onSelect() }}/> : <div className="bp-navigation-file" title={request.filePath}>{request.filePath}</div>}
           <label htmlFor="bp-graph-choice">Graph / function</label>
-          <BlueprintChoice id="bp-graph-choice" label="Blueprint graph" value={pair?.key ?? ''} items={graphEntries.map(entry => ({ value: entry.pair.key, name: entry.pair.name, detail: entry.detail, color: entry.color }))} onChange={chooseGraph}/>
+          <BlueprintChoice id="bp-graph-choice" label="Blueprint graph" value={pair?.key ?? ''} items={graphEntries.map(entry => ({ value: entry.pair.key, name: entry.pair.name, detail: entry.detail, color: entry.color }))} onChange={key => { setGraphHistory([]); chooseGraph(key) }}/>
           <small>{pairs.length} graph{pairs.length === 1 ? '' : 's'} in this {single ? 'asset' : 'comparison'}</small>
         </div>
       </details>
+      {graphHistory.length > 0 && <button className="lg-toolbar-control" onClick={() => { const previous = graphHistory[graphHistory.length - 1]; setGraphHistory(history => history.slice(0, -1)); chooseGraph(previous) }}>Back to graph</button>}
       <span className="bp-active-graph" title={pair?.name}>{pair?.name ?? 'Blueprint graph'}</span>
       {!single && <><button className="lg-toolbar-control lg-icon-control" title="Synchronize graph views" aria-label="Synchronize graph views" aria-pressed={sync} onClick={() => { setSync(!sync); if (!sync) { const camera = right.current?.getCamera() ?? left.current?.getCamera(); if(camera){left.current?.setCamera(camera);right.current?.setCamera(camera)} } }}><Link2 size={14}/></button>
       <button className="lg-toolbar-control" aria-pressed={highlight} onClick={() => setHighlight(!highlight)}>Changes</button>
@@ -168,9 +181,14 @@ export function BlueprintDiff({ onRetry, comparison, files, project, repoPath, r
     {result && <>
       {(result.left.status === 'unavailable' || result.right.status === 'unavailable' || pair?.left?.complete === false || pair?.right?.complete === false) && <div className="bp-warning" role="status">{single ? 'Some asset data is unavailable or incomplete. Connections may be incomplete.' : 'Some revision data is unavailable or incomplete. Change highlights cover decoded nodes only.'}<details><summary>Details</summary>{Array.from(new Set([result.left.reason, result.right.reason, ...(pair?.left?.diagnostics??[]), ...(pair?.right?.diagnostics??[])].filter(Boolean))).map((s,i)=><div key={i}>{s}</div>)}</details><button onClick={() => onRetry ? onRetry() : setRetry(v => v+1)}>Retry reading</button></div>}
       {pair?.matchedByName && <div className="bp-info">Graphs matched by name because their saved identities differ.</div>}
+      {(pair?.left?.kind === 'state-machine' || pair?.right?.kind === 'state-machine') && <details className="bp-state-overview"><summary>States and transitions</summary><div className="bp-state-sides">{(['left', 'right'] as const).filter(key => !single || key === 'right').map(key => pair?.[key]?.kind === 'state-machine' ? <AnimationStateMachine key={key} graph={pair[key]!} graphs={result[key].document?.graphs ?? []} label={revisionLabels?.[key] ?? (key === 'left' ? 'Base' : 'Selected')} selected={selected} changes={key === 'left' ? leftChanges : rightChanges} onSelect={id => { select(id, true); setInspector(true) }} onOpen={openGraph}/> : <section className="bp-state-machine" key={key}>State machine unavailable in this revision.</section>)}</div></details>}
       <div className="bp-body"><div className="bp-revisions">{!single && <GraphPane revisionLabel={revisionLabels?.left} side={result.left} graph={pair?.left} changes={leftChanges} wires={leftWires} selected={selected} canvasRef={left} saved={leftCamera} onCamera={camera => cameraChanged('left',camera)} onSelect={id=>select(id)}/>}<GraphPane revisionLabel={revisionLabels?.right} side={result.right} graph={pair?.right} changes={rightChanges} wires={rightWires} selected={selected} canvasRef={right} saved={rightCamera} onCamera={camera=>cameraChanged('right',camera)} onSelect={id=>select(id)}/></div>
       {inspector && <aside className="bp-sidebar"><header>{single ? "Nodes" : "Graph changes"} <span>{single ? pair?.right?.nodes.length : changes.length}</span></header>{!single && <div className="bp-change-list">{changes.length ? changes.map(c=><button key={c.id} className={selected===c.id?'selected':''} onClick={()=>select(c.id,true)}><span style={{color:tone[c.kind]}}>{mark[c.kind]}</span><div>{c.title}<small>{[c.kind === 'modified' ? 'Properties, pins or connections changed' : c.kind === 'commented' ? 'Comment changed' : c.kind === 'moved' ? 'Saved layout changed' : 'Node '+c.kind, c.commentChanged && c.kind !== 'commented' ? 'Comment changed' : '', c.layoutChanged && c.kind !== 'moved' ? 'Saved layout changed' : ''].filter(Boolean).join(' / ')}</small></div></button>) : <p>{pair && (!comparable||pair.left?.complete===false||pair.right?.complete===false) ? 'Comparison is incomplete.' : pair ? 'No decoded graph changes. Other asset data may still differ.' : 'No supported graph to compare.'}</p>}</div>}<Inspector change={chosen} node={node}/>
-        <details className="bp-node-list"><summary>All nodes</summary>{(pair?.right?.nodes ?? pair?.left?.nodes ?? []).map(n=><button key={n.id||n.name} onClick={()=>select(n.id,true)}>{n.title}</button>)}</details>
+        {(['left', 'right'] as const).filter(key => !single || key === 'right').flatMap(key => {
+          const savedNode = pair?.[key]?.nodes.find(candidate => candidate.id === selected)
+          return savedNode ? boundGraphs(savedNode, result[key].document?.graphs ?? []).map(link => <div className="bp-bound-graph" key={key + link.property}><small>{revisionLabels?.[key] ?? (key === 'left' ? 'Base' : 'Selected')} · {link.property}</small>{link.graph ? <button className="lg-toolbar-control" onClick={() => openGraph(link.graph!)}>Open {link.graph.name}{!link.graph.complete ? ' · incomplete' : ''}</button> : <small>Saved graph unavailable or ambiguous: {link.path}</small>}</div>) : []
+        })}
+        <details className="bp-node-list"><summary>All nodes</summary>{(pair?.right?.nodes ?? pair?.left?.nodes ?? []).map(n=><button key={n.id||n.name} onClick={()=>select(n.id,true)}>{animationNodeName(n)}</button>)}</details>
       </aside>}</div>
       {single ? <footer className="bp-footer">Read-only <span>Node positions are preserved</span></footer> : <footer className="bp-footer">{highlight && !!currentWires?.length && <small aria-label="Wire change summary">+ {currentWires.filter(w => w.kind === 'added').length} added wires / - {currentWires.filter(w => w.kind === 'removed').length} removed wires (dashed) / ~ {currentWires.filter(w => w.kind === 'modified').length} modified wires</small>}{sync?'Views synchronized':'Independent views'}<small aria-label="Graph change summary">{!comparable ? 'Comparison unavailable' : (pair?.left?.complete === false || pair?.right?.complete === false) ? `${changes.length} decoded changes - Comparison incomplete` : !changes.length ? 'No decoded changes · Other asset data may differ' : `${changes.length} graph change${changes.length === 1 ? '' : 's'}`}</small><span>Read-only · Node positions are preserved</span></footer>}
     </>}

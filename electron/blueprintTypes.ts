@@ -24,10 +24,13 @@ export interface BlueprintNode {
   height: number
   comment: string
   complete: boolean
+  opaqueProperties?: string[]
   properties: Record<string, unknown>
   pins: BlueprintPin[]
 }
 export interface BlueprintGraph {
+  kind?: 'event' | 'pose' | 'state-machine' | 'transition'
+  schema?: string
   id: string
   name: string
   path: string
@@ -46,6 +49,7 @@ export interface BlueprintDocument {
   assetReview?: UnrealAssetDocument
 }
 export interface UnrealAssetObject {
+  references?: Array<{ propertyPath: string; target: string; className: string }>
   sourcePackage?: string
   serializedPath?: string
   id: string
@@ -67,6 +71,7 @@ export interface UnrealAssetDocument {
   cooked: boolean
 }
 export interface BlueprintSide {
+  resolvedRef?: string
   ref: string
   path: string
   status: 'ready' | 'absent' | 'unavailable'

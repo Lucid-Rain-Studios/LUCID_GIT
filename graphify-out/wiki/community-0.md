@@ -1,0 +1,473 @@
+# Application navigation
+
+[Back to index](index.md)
+
+## Source files
+
+- [LucidGit_ClaudeCode_Spec.md](../../LucidGit_ClaudeCode_Spec.md)
+- [src/App.tsx](../../src/App.tsx)
+- [src/components/auth/AccountSwitcher.tsx](../../src/components/auth/AccountSwitcher.tsx)
+- [src/components/auth/DeviceFlowLogin.tsx](../../src/components/auth/DeviceFlowLogin.tsx)
+- [src/components/branches/BranchHealthCard.tsx](../../src/components/branches/BranchHealthCard.tsx)
+- [src/components/changes/CommitBox.tsx](../../src/components/changes/CommitBox.tsx)
+- [src/components/changes/FileTree.tsx](../../src/components/changes/FileTree.tsx)
+- [src/components/changes/HunkStagingDialog.tsx](../../src/components/changes/HunkStagingDialog.tsx)
+- [src/components/changes/StashPanel.tsx](../../src/components/changes/StashPanel.tsx)
+- [src/components/command-palette/CommandPalette.tsx](../../src/components/command-palette/CommandPalette.tsx)
+- [src/components/dashboard/AutoFetchControl.tsx](../../src/components/dashboard/AutoFetchControl.tsx)
+- [src/components/dashboard/DashboardPanel.tsx](../../src/components/dashboard/DashboardPanel.tsx)
+- [src/components/dashboard/MyPRStatusPill.tsx](../../src/components/dashboard/MyPRStatusPill.tsx)
+- [src/components/dashboard/PotentialConflictsDialog.tsx](../../src/components/dashboard/PotentialConflictsDialog.tsx)
+- [src/components/diff/BinaryDiff.tsx](../../src/components/diff/BinaryDiff.tsx)
+- [src/components/diff/TextDiff.tsx](../../src/components/diff/TextDiff.tsx)
+- [src/components/history/HistoryPanel.tsx](../../src/components/history/HistoryPanel.tsx)
+- [src/components/history/graphLayout.ts](../../src/components/history/graphLayout.ts)
+- [src/components/layout/AppShell.tsx](../../src/components/layout/AppShell.tsx)
+- [src/components/layout/StatusBar.tsx](../../src/components/layout/StatusBar.tsx)
+- [src/components/layout/TopBar.tsx](../../src/components/layout/TopBar.tsx)
+- [src/components/lfs/LfsPanel.tsx](../../src/components/lfs/LfsPanel.tsx)
+- [src/components/locks/ClearLockCacheButton.tsx](../../src/components/locks/ClearLockCacheButton.tsx)
+- [src/components/locks/PushBlockedByLocksDialog.tsx](../../src/components/locks/PushBlockedByLocksDialog.tsx)
+- [src/components/map/ContentBrowserPanel.tsx](../../src/components/map/ContentBrowserPanel.tsx)
+- [src/components/map/RepoMapPanel.tsx](../../src/components/map/RepoMapPanel.tsx)
+- [src/components/merge/CherryPickConflictDialog.tsx](../../src/components/merge/CherryPickConflictDialog.tsx)
+- [src/components/merge/MergeDialog.tsx](../../src/components/merge/MergeDialog.tsx)
+- [src/components/merge/MergePreviewDialog.tsx](../../src/components/merge/MergePreviewDialog.tsx)
+- [src/components/notifications/NotificationBell.tsx](../../src/components/notifications/NotificationBell.tsx)
+- [src/components/notifications/NotificationFeed.tsx](../../src/components/notifications/NotificationFeed.tsx)
+- [src/components/notifications/StatusToastStack.tsx](../../src/components/notifications/StatusToastStack.tsx)
+- [src/components/overview/OverviewPanel.tsx](../../src/components/overview/OverviewPanel.tsx)
+- [src/components/pr/PRDialog.tsx](../../src/components/pr/PRDialog.tsx)
+- [src/components/pr/PRUnlockDialog.tsx](../../src/components/pr/PRUnlockDialog.tsx)
+- [src/components/repo/CloneDialog.tsx](../../src/components/repo/CloneDialog.tsx)
+- [src/components/settings/AppearanceSettings.tsx](../../src/components/settings/AppearanceSettings.tsx)
+- [src/components/settings/FirebasePresenceSettings.tsx](../../src/components/settings/FirebasePresenceSettings.tsx)
+- [src/components/settings/NotificationSettings.tsx](../../src/components/settings/NotificationSettings.tsx)
+- [src/components/settings/SettingsError.tsx](../../src/components/settings/SettingsError.tsx)
+- [src/components/settings/SettingsPage.tsx](../../src/components/settings/SettingsPage.tsx)
+- [src/components/settings/TeamConfigPanel.tsx](../../src/components/settings/TeamConfigPanel.tsx)
+- [src/components/settings/WebhookPanel.tsx](../../src/components/settings/WebhookPanel.tsx)
+- [src/components/shared/CommitContextMenu.tsx](../../src/components/shared/CommitContextMenu.tsx)
+- [src/components/shared/CommitFilesModal.tsx](../../src/components/shared/CommitFilesModal.tsx)
+- [src/components/shared/FileDetailsSidePanel.tsx](../../src/components/shared/FileDetailsSidePanel.tsx)
+- [src/components/timeline/TimelinePanel.tsx](../../src/components/timeline/TimelinePanel.tsx)
+- [src/components/ui/ActionBtn.tsx](../../src/components/ui/ActionBtn.tsx)
+- [src/components/ui/AppCheckbox.tsx](../../src/components/ui/AppCheckbox.tsx)
+- [src/components/ui/AppTooltip.tsx](../../src/components/ui/AppTooltip.tsx)
+- [src/components/ui/DisabledButtonTooltip.tsx](../../src/components/ui/DisabledButtonTooltip.tsx)
+- [src/components/ui/FilePathText.tsx](../../src/components/ui/FilePathText.tsx)
+- [src/components/ui/GlobalDialogs.tsx](../../src/components/ui/GlobalDialogs.tsx)
+- [src/components/ui/GlobalLoadingCursor.tsx](../../src/components/ui/GlobalLoadingCursor.tsx)
+- [src/components/ui/PanelErrorBoundary.tsx](../../src/components/ui/PanelErrorBoundary.tsx)
+- [src/components/unreal/UnrealPanel.tsx](../../src/components/unreal/UnrealPanel.tsx)
+- [src/components/viewer/AssetViewerPanel.tsx](../../src/components/viewer/AssetViewerPanel.tsx)
+- [src/components/viewer/BlueprintAssetDialog.tsx](../../src/components/viewer/BlueprintAssetDialog.tsx)
+- [src/ipc.ts](../../src/ipc.ts)
+- [src/lib/appearance.ts](../../src/lib/appearance.ts)
+- [src/lib/fetchState.ts](../../src/lib/fetchState.ts)
+- [src/lib/firebasePresenceConfig.ts](../../src/lib/firebasePresenceConfig.ts)
+- [src/lib/firebasePresenceRules.ts](../../src/lib/firebasePresenceRules.ts)
+- [src/lib/gitErrors.ts](../../src/lib/gitErrors.ts)
+- [src/lib/pathDisplay.ts](../../src/lib/pathDisplay.ts)
+- [src/lib/timelineBranches.ts](../../src/lib/timelineBranches.ts)
+- [src/lib/topBarSyncBridge.ts](../../src/lib/topBarSyncBridge.ts)
+- [src/lib/useAutoFetch.ts](../../src/lib/useAutoFetch.ts)
+- [src/lib/useDialogOverlayDismiss.ts](../../src/lib/useDialogOverlayDismiss.ts)
+- [src/lib/utils.ts](../../src/lib/utils.ts)
+- [src/stores/appearanceStore.ts](../../src/stores/appearanceStore.ts)
+- [src/stores/authStore.ts](../../src/stores/authStore.ts)
+- [src/stores/conflictStore.ts](../../src/stores/conflictStore.ts)
+- [src/stores/dialogStore.ts](../../src/stores/dialogStore.ts)
+- [src/stores/errorStore.ts](../../src/stores/errorStore.ts)
+- [src/stores/lockStore.ts](../../src/stores/lockStore.ts)
+- [src/stores/notificationStore.ts](../../src/stores/notificationStore.ts)
+- [src/stores/operationStore.ts](../../src/stores/operationStore.ts)
+- [src/stores/prStore.ts](../../src/stores/prStore.ts)
+- [src/stores/prUnlockStore.ts](../../src/stores/prUnlockStore.ts)
+- [src/stores/repoStore.ts](../../src/stores/repoStore.ts)
+- [src/stores/statusToastStore.ts](../../src/stores/statusToastStore.ts)
+
+## Entities and evidence
+
+- **ipc.ts** — `src/ipc.ts:L1` · `src_ipc_ts`
+- **AppShell.tsx** — `src/components/layout/AppShell.tsx:L1` · `src_components_layout_appshell_tsx`
+- **TimelinePanel.tsx** — `src/components/timeline/TimelinePanel.tsx:L1` · `src_components_timeline_timelinepanel_tsx`
+- **repoStore.ts** — `src/stores/repoStore.ts:L1` · `src_stores_repostore_ts`
+- **ActionBtn.tsx** — `src/components/ui/ActionBtn.tsx:L1` · `src_components_ui_actionbtn_tsx`
+- **DashboardPanel.tsx** — `src/components/dashboard/DashboardPanel.tsx:L1` · `src_components_dashboard_dashboardpanel_tsx`
+- **HistoryPanel.tsx** — `src/components/history/HistoryPanel.tsx:L1` · `src_components_history_historypanel_tsx`
+- **operationStore.ts** — `src/stores/operationStore.ts:L1` · `src_stores_operationstore_ts`
+- **TopBar.tsx** — `src/components/layout/TopBar.tsx:L1` · `src_components_layout_topbar_tsx`
+- **useDialogOverlayDismiss.ts** — `src/lib/useDialogOverlayDismiss.ts:L1` · `src_lib_usedialogoverlaydismiss_ts`
+- **authStore.ts** — `src/stores/authStore.ts:L1` · `src_stores_authstore_ts`
+- **FileTree.tsx** — `src/components/changes/FileTree.tsx:L1` · `src_components_changes_filetree_tsx`
+- **PRDialog.tsx** — `src/components/pr/PRDialog.tsx:L1` · `src_components_pr_prdialog_tsx`
+- **FilePathText.tsx** — `src/components/ui/FilePathText.tsx:L1` · `src_components_ui_filepathtext_tsx`
+- **ContentBrowserPanel.tsx** — `src/components/map/ContentBrowserPanel.tsx:L1` · `src_components_map_contentbrowserpanel_tsx`
+- **OverviewPanel.tsx** — `src/components/overview/OverviewPanel.tsx:L1` · `src_components_overview_overviewpanel_tsx`
+- **CommitBox.tsx** — `src/components/changes/CommitBox.tsx:L1` · `src_components_changes_commitbox_tsx`
+- **dialogStore.ts** — `src/stores/dialogStore.ts:L1` · `src_stores_dialogstore_ts`
+- **MergeDialog.tsx** — `src/components/merge/MergeDialog.tsx:L1` · `src_components_merge_mergedialog_tsx`
+- **appearance.ts** — `src/lib/appearance.ts:L1` · `src_lib_appearance_ts`
+- **lockStore.ts** — `src/stores/lockStore.ts:L1` · `src_stores_lockstore_ts`
+- **CherryPickConflictDialog.tsx** — `src/components/merge/CherryPickConflictDialog.tsx:L1` · `src_components_merge_cherrypickconflictdialog_tsx`
+- **CommandPalette.tsx** — `src/components/command-palette/CommandPalette.tsx:L1` · `src_components_command_palette_commandpalette_tsx`
+- **FileDetailsSidePanel.tsx** — `src/components/shared/FileDetailsSidePanel.tsx:L1` · `src_components_shared_filedetailssidepanel_tsx`
+- **RepoMapPanel.tsx** — `src/components/map/RepoMapPanel.tsx:L1` · `src_components_map_repomappanel_tsx`
+- **LfsPanel.tsx** — `src/components/lfs/LfsPanel.tsx:L1` · `src_components_lfs_lfspanel_tsx`
+- **PRUnlockDialog.tsx** — `src/components/pr/PRUnlockDialog.tsx:L1` · `src_components_pr_prunlockdialog_tsx`
+- **PushBlockedByLocksDialog.tsx** — `src/components/locks/PushBlockedByLocksDialog.tsx:L1` · `src_components_locks_pushblockedbylocksdialog_tsx`
+- **topBarSyncBridge.ts** — `src/lib/topBarSyncBridge.ts:L1` · `src_lib_topbarsyncbridge_ts`
+- **utils.ts** — `src/lib/utils.ts:L1` · `src_lib_utils_ts`
+- **fetchState.ts** — `src/lib/fetchState.ts:L1` · `src_lib_fetchstate_ts`
+- **markFetchPerformed()** — `src/lib/fetchState.ts:L10` · `fetchstate_markfetchperformed`
+- **CloneDialog.tsx** — `src/components/repo/CloneDialog.tsx:L1` · `src_components_repo_clonedialog_tsx`
+- **HunkStagingDialog.tsx** — `src/components/changes/HunkStagingDialog.tsx:L1` · `src_components_changes_hunkstagingdialog_tsx`
+- **StashPanel.tsx** — `src/components/changes/StashPanel.tsx:L1` · `src_components_changes_stashpanel_tsx`
+- **UnrealPanel.tsx** — `src/components/unreal/UnrealPanel.tsx:L1` · `src_components_unreal_unrealpanel_tsx`
+- **NotificationFeed.tsx** — `src/components/notifications/NotificationFeed.tsx:L1` · `src_components_notifications_notificationfeed_tsx`
+- **PotentialConflictsDialog.tsx** — `src/components/dashboard/PotentialConflictsDialog.tsx:L1` · `src_components_dashboard_potentialconflictsdialog_tsx`
+- **CommitContextMenu.tsx** — `src/components/shared/CommitContextMenu.tsx:L1` · `src_components_shared_commitcontextmenu_tsx`
+- **MergePreviewDialog.tsx** — `src/components/merge/MergePreviewDialog.tsx:L1` · `src_components_merge_mergepreviewdialog_tsx`
+- **DeviceFlowLogin.tsx** — `src/components/auth/DeviceFlowLogin.tsx:L1` · `src_components_auth_deviceflowlogin_tsx`
+- **GlobalDialogs.tsx** — `src/components/ui/GlobalDialogs.tsx:L1` · `src_components_ui_globaldialogs_tsx`
+- **SettingsPage.tsx** — `src/components/settings/SettingsPage.tsx:L1` · `src_components_settings_settingspage_tsx`
+- **AppCheckbox.tsx** — `src/components/ui/AppCheckbox.tsx:L1` · `src_components_ui_appcheckbox_tsx`
+- **AssetViewerPanel.tsx** — `src/components/viewer/AssetViewerPanel.tsx:L1` · `src_components_viewer_assetviewerpanel_tsx`
+- **AutoFetchControl.tsx** — `src/components/dashboard/AutoFetchControl.tsx:L1` · `src_components_dashboard_autofetchcontrol_tsx`
+- **BranchHealthCard.tsx** — `src/components/branches/BranchHealthCard.tsx:L1` · `src_components_branches_branchhealthcard_tsx`
+- **StatusBar.tsx** — `src/components/layout/StatusBar.tsx:L1` · `src_components_layout_statusbar_tsx`
+- **TeamConfigPanel.tsx** — `src/components/settings/TeamConfigPanel.tsx:L1` · `src_components_settings_teamconfigpanel_tsx`
+- **TextDiff.tsx** — `src/components/diff/TextDiff.tsx:L1` · `src_components_diff_textdiff_tsx`
+- **markBranchIntegrated()** — `src/lib/topBarSyncBridge.ts:L40` · `topbarsyncbridge_markbranchintegrated`
+- **AppearanceSettings.tsx** — `src/components/settings/AppearanceSettings.tsx:L1` · `src_components_settings_appearancesettings_tsx`
+- **BinaryDiff.tsx** — `src/components/diff/BinaryDiff.tsx:L1` · `src_components_diff_binarydiff_tsx`
+- **FirebasePresenceSettings.tsx** — `src/components/settings/FirebasePresenceSettings.tsx:L1` · `src_components_settings_firebasepresencesettings_tsx`
+- **NotificationSettings.tsx** — `src/components/settings/NotificationSettings.tsx:L1` · `src_components_settings_notificationsettings_tsx`
+- **PanelErrorBoundary.tsx** — `src/components/ui/PanelErrorBoundary.tsx:L1` · `src_components_ui_panelerrorboundary_tsx`
+- **WebhookPanel.tsx** — `src/components/settings/WebhookPanel.tsx:L1` · `src_components_settings_webhookpanel_tsx`
+- **close()** — `src/components/timeline/TimelinePanel.tsx:L1200` · `timelinepanel_close`
+- **errorStore.ts** — `src/stores/errorStore.ts:L1` · `src_stores_errorstore_ts`
+- **statusToastStore.ts** — `src/stores/statusToastStore.ts:L1` · `src_stores_statustoaststore_ts`
+- **ClearLockCacheButton.tsx** — `src/components/locks/ClearLockCacheButton.tsx:L1` · `src_components_locks_clearlockcachebutton_tsx`
+- **MyPRStatusPill.tsx** — `src/components/dashboard/MyPRStatusPill.tsx:L1` · `src_components_dashboard_myprstatuspill_tsx`
+- **Requirement: themed Promise-based dialogStore and GlobalDialogs** — `LucidGit_ClaudeCode_Spec.md:L1388-L1404` · `productdocs_custom_dialogs`
+- **SettingsError.tsx** — `src/components/settings/SettingsError.tsx:L1` · `src_components_settings_settingserror_tsx`
+- **notificationStore.ts** — `src/stores/notificationStore.ts:L1` · `src_stores_notificationstore_ts`
+- **useAutoFetch.ts** — `src/lib/useAutoFetch.ts:L1` · `src_lib_useautofetch_ts`
+- **App.tsx** — `src/App.tsx:L1` · `src_app_tsx`
+- **AppTooltip.tsx** — `src/components/ui/AppTooltip.tsx:L1` · `src_components_ui_apptooltip_tsx`
+- **doTopBarPull()** — `src/components/layout/TopBar.tsx:L339` · `topbar_dotopbarpull`
+- **doUpdateFromMain()** — `src/components/layout/TopBar.tsx:L249` · `topbar_doupdatefrommain`
+- **getTopBarSyncHandlers()** — `src/lib/topBarSyncBridge.ts:L60` · `topbarsyncbridge_gettopbarsynchandlers`
+- **getTopBarSyncSnapshot()** — `src/lib/topBarSyncBridge.ts:L59` · `topbarsyncbridge_gettopbarsyncsnapshot`
+- **gitErrors.ts** — `src/lib/gitErrors.ts:L1` · `src_lib_giterrors_ts`
+- **graphLayout.ts** — `src/components/history/graphLayout.ts:L1` · `src_components_history_graphlayout_ts`
+- **handler()** — `src/components/layout/AppShell.tsx:L251` · `appshell_handler`
+- **load()** — `src/components/lfs/LfsPanel.tsx:L42` · `lfspanel_load`
+- **refreshRevisionState()** — `src/components/layout/TopBar.tsx:L104` · `topbar_refreshrevisionstate`
+- **CommitFilesModal.tsx** — `src/components/shared/CommitFilesModal.tsx:L1` · `src_components_shared_commitfilesmodal_tsx`
+- **Requirement: per-panel error boundary with Retry and Dashboard recovery** — `LucidGit_ClaudeCode_Spec.md:L1501-L1511` · `productdocs_panel_recovery`
+- **applyAppearanceSettings()** — `src/lib/appearance.ts:L291` · `appearance_applyappearancesettings`
+- **conflictStore.ts** — `src/stores/conflictStore.ts:L1` · `src_stores_conflictstore_ts`
+- **doFetch()** — `src/components/command-palette/CommandPalette.tsx:L111` · `commandpalette_dofetch`
+- **doPull()** — `src/components/command-palette/CommandPalette.tsx:L124` · `commandpalette_dopull`
+- **doPull()** — `src/components/dashboard/DashboardPanel.tsx:L206` · `dashboardpanel_dopull`
+- **doPush()** — `src/components/layout/TopBar.tsx:L175` · `topbar_dopush`
+- **emit()** — `src/lib/topBarSyncBridge.ts:L47` · `topbarsyncbridge_emit`
+- **fallbackConflict()** — `src/components/merge/MergeDialog.tsx:L72` · `mergedialog_fallbackconflict`
+- **pathDisplay.ts** — `src/lib/pathDisplay.ts:L1` · `src_lib_pathdisplay_ts`
+- **prStore.ts** — `src/stores/prStore.ts:L1` · `src_stores_prstore_ts`
+- **prUnlockStore.ts** — `src/stores/prUnlockStore.ts:L1` · `src_stores_prunlockstore_ts`
+- **runCommit()** — `src/components/changes/CommitBox.tsx:L135` · `commitbox_runcommit`
+- **BlueprintAssetDialog.tsx** — `src/components/viewer/BlueprintAssetDialog.tsx:L1` · `src_components_viewer_blueprintassetdialog_tsx`
+- **DisabledButtonTooltip.tsx** — `src/components/ui/DisabledButtonTooltip.tsx:L1` · `src_components_ui_disabledbuttontooltip_tsx`
+- **Documented reopen-last-repo using recent localStorage; invalid path falls to welcome** — `LucidGit_ClaudeCode_Spec.md:L1868-L1881` · `productdocs_session_restore`
+- **GlobalLoadingCursor.tsx** — `src/components/ui/GlobalLoadingCursor.tsx:L1` · `src_components_ui_globalloadingcursor_tsx`
+- **LAST_FETCH_KEY()** — `src/lib/fetchState.ts:L1` · `fetchstate_last_fetch_key`
+- **NotificationBell.tsx** — `src/components/notifications/NotificationBell.tsx:L1` · `src_components_notifications_notificationbell_tsx`
+- **appearanceStore.ts** — `src/stores/appearanceStore.ts:L1` · `src_stores_appearancestore_ts`
+- **clearLockAndRetry()** — `src/components/merge/CherryPickConflictDialog.tsx:L134` · `cherrypickconflictdialog_clearlockandretry`
+- **conflictFileType()** — `src/components/merge/MergeDialog.tsx:L56` · `mergedialog_conflictfiletype`
+- **conflictTypeFromStatus()** — `src/components/merge/MergeDialog.tsx:L62` · `mergedialog_conflicttypefromstatus`
+- **doFetch()** — `src/components/layout/TopBar.tsx:L321` · `topbar_dofetch`
+- **doPush()** — `src/components/command-palette/CommandPalette.tsx:L131` · `commandpalette_dopush`
+- **extname()** — `src/components/merge/MergeDialog.tsx:L50` · `mergedialog_extname`
+- **finalize()** — `src/components/merge/CherryPickConflictDialog.tsx:L121` · `cherrypickconflictdialog_finalize`
+- **firebasePresenceConfig.ts** — `src/lib/firebasePresenceConfig.ts:L1` · `src_lib_firebasepresenceconfig_ts`
+- **getLastFetch()** — `src/lib/fetchState.ts:L4` · `fetchstate_getlastfetch`
+- **handleBypass()** — `src/components/changes/CommitBox.tsx:L197` · `commitbox_handlebypass`
+- **handleCommit()** — `src/components/changes/CommitBox.tsx:L176` · `commitbox_handlecommit`
+- **handleConfirm()** — `src/components/overview/OverviewPanel.tsx:L566` · `overviewpanel_handleconfirm`
+- **handleFinalizeError()** — `src/components/merge/CherryPickConflictDialog.tsx:L103` · `cherrypickconflictdialog_handlefinalizeerror`
+- **hexToRgbComponents()** — `src/lib/appearance.ts:L349` · `appearance_hextorgbcomponents`
+- **hexToRgba()** — `src/lib/appearance.ts:L354` · `appearance_hextorgba`
+- **integrationKey()** — `src/lib/topBarSyncBridge.ts:L38` · `topbarsyncbridge_integrationkey`
+- **isDone()** — `src/components/pr/PRUnlockDialog.tsx:L49` · `prunlockdialog_isdone`
+- **isModalOpen()** — `src/lib/useDialogOverlayDismiss.ts:L10` · `usedialogoverlaydismiss_ismodalopen`
+- **parseGitErrorOrGeneric()** — `src/lib/gitErrors.ts:L443` · `giterrors_parsegiterrororgeneric`
+- **poll()** — `src/components/layout/TopBar.tsx:L137` · `topbar_poll`
+- **prepareDeferredStage()** — `src/components/changes/CommitBox.tsx:L125` · `commitbox_preparedeferredstage`
+- **resolveConflictedPRLocally()** — `src/components/overview/OverviewPanel.tsx:L514` · `overviewpanel_resolveconflictedprlocally`
+- **routeIfMergeInProgress()** — `src/components/layout/TopBar.tsx:L240` · `topbar_routeifmergeinprogress`
+- **runFinalize()** — `src/components/merge/CherryPickConflictDialog.tsx:L87` · `cherrypickconflictdialog_runfinalize`
+- **timelineBranches.ts** — `src/lib/timelineBranches.ts:L1` · `src_lib_timelinebranches_ts`
+- **AccountSwitcher.tsx** — `src/components/auth/AccountSwitcher.tsx:L1` · `src_components_auth_accountswitcher_tsx`
+- **ActionBtn()** — `src/components/ui/ActionBtn.tsx:L44` · `actionbtn_actionbtn`
+- **Backdrop()** — `src/components/ui/GlobalDialogs.tsx:L7` · `globaldialogs_backdrop`
+- **CommitContextMenu()** — `src/components/shared/CommitContextMenu.tsx:L16` · `commitcontextmenu_commitcontextmenu`
+- **FileIcon()** — `src/components/map/ContentBrowserPanel.tsx:L94` · `contentbrowserpanel_fileicon`
+- **LAST_PULL_KEY()** — `src/components/dashboard/DashboardPanel.tsx:L40` · `dashboardpanel_last_pull_key`
+- **StatusToastStack.tsx** — `src/components/notifications/StatusToastStack.tsx:L1` · `src_components_notifications_statustoaststack_tsx`
+- **active()** — `src/stores/lockStore.ts:L6` · `lockstore_active`
+- **branchColor()** — `src/components/history/graphLayout.ts:L30` · `graphlayout_branchcolor`
+- **buildCommitMessage()** — `src/components/changes/CommitBox.tsx:L119` · `commitbox_buildcommitmessage`
+- **buildPatch()** — `src/components/changes/HunkStagingDialog.tsx:L44` · `hunkstagingdialog_buildpatch`
+- **computeGraph()** — `src/components/history/graphLayout.ts:L85` · `graphlayout_computegraph`
+- **countFiles()** — `src/components/map/ContentBrowserPanel.tsx:L48` · `contentbrowserpanel_countfiles`
+- **countFiles()** — `src/components/changes/FileTree.tsx:L47` · `filetree_countfiles`
+- **doFetch()** — `src/components/dashboard/DashboardPanel.tsx:L192` · `dashboardpanel_dofetch`
+- **doMerge()** — `src/components/merge/MergeDialog.tsx:L163` · `mergedialog_domerge`
+- **doMigrate()** — `src/components/lfs/LfsPanel.tsx:L127` · `lfspanel_domigrate`
+- **doPush()** — `src/components/dashboard/DashboardPanel.tsx:L221` · `dashboardpanel_dopush`
+- **doRestore()** — `src/components/lfs/LfsPanel.tsx:L57` · `lfspanel_dorestore`
+- **doTrack()** — `src/components/lfs/LfsPanel.tsx:L93` · `lfspanel_dotrack`
+- **doUntrack()** — `src/components/lfs/LfsPanel.tsx:L107` · `lfspanel_dountrack`
+- **fileColor()** — `src/components/map/ContentBrowserPanel.tsx:L80` · `contentbrowserpanel_filecolor`
+- **flattenTree()** — `src/components/map/ContentBrowserPanel.tsx:L52` · `contentbrowserpanel_flattentree`
+- **flattenTree()** — `src/components/changes/FileTree.tsx:L51` · `filetree_flattentree`
+- **greeting()** — `src/components/dashboard/DashboardPanel.tsx:L42` · `dashboardpanel_greeting`
+- **handleApply()** — `src/components/history/HistoryPanel.tsx:L609` · `historypanel_handleapply`
+- **handleApply()** — `src/components/changes/HunkStagingDialog.tsx:L106` · `hunkstagingdialog_handleapply`
+- **handleCheckout()** — `src/components/timeline/TimelinePanel.tsx:L1221` · `timelinepanel_handlecheckout`
+- **handleCherryPick()** — `src/components/timeline/TimelinePanel.tsx:L1261` · `timelinepanel_handlecherrypick`
+- **handleClone()** — `src/components/repo/CloneDialog.tsx:L71` · `clonedialog_handleclone`
+- **handleCreateBranch()** — `src/components/timeline/TimelinePanel.tsx:L1248` · `timelinepanel_handlecreatebranch`
+- **handleKeyDown()** — `src/components/repo/CloneDialog.tsx:L98` · `clonedialog_handlekeydown`
+- **handleResetTo()** — `src/components/timeline/TimelinePanel.tsx:L1202` · `timelinepanel_handleresetto`
+- **handleRevert()** — `src/components/timeline/TimelinePanel.tsx:L1235` · `timelinepanel_handlerevert`
+- **handleUndoCommit()** — `src/components/timeline/TimelinePanel.tsx:L1274` · `timelinepanel_handleundocommit`
+- **handleUnlock()** — `src/components/pr/PRUnlockDialog.tsx:L53` · `prunlockdialog_handleunlock`
+- **handler()** — `src/components/changes/FileTree.tsx:L213` · `filetree_handler`
+- **hasBranchIntegrated()** — `src/lib/topBarSyncBridge.ts:L39` · `topbarsyncbridge_hasbranchintegrated`
+- **isAsset()** — `src/components/timeline/TimelinePanel.tsx:L43` · `timelinepanel_isasset`
+- **isStillLocked()** — `src/components/pr/PRUnlockDialog.tsx:L47` · `prunlockdialog_isstilllocked`
+- **lightenHex()** — `src/lib/appearance.ts:L359` · `appearance_lightenhex`
+- **load()** — `src/components/unreal/UnrealPanel.tsx:L43` · `unrealpanel_load`
+- **normalizeBranchName()** — `src/components/pr/PRDialog.tsx:L26` · `prdialog_normalizebranchname`
+- **parseFirstName()** — `src/components/dashboard/DashboardPanel.tsx:L49` · `dashboardpanel_parsefirstname`
+- **parseGitError()** — `src/lib/gitErrors.ts:L405` · `giterrors_parsegiterror`
+- **parseGitHubSlug()** — `src/components/shared/CommitContextMenu.tsx:L8` · `commitcontextmenu_parsegithubslug`
+- **repoSessionVersion()** — `src/stores/repoStore.ts:L11` · `repostore_reposessionversion`
+- **routeConflictToResolver()** — `src/stores/conflictStore.ts:L35` · `conflictstore_routeconflicttoresolver`
+- **run()** — `src/components/unreal/UnrealPanel.tsx:L76` · `unrealpanel_run`
+- **selectCenterFile()** — `src/components/timeline/TimelinePanel.tsx:L1935` · `timelinepanel_selectcenterfile`
+- **setTopBarSyncHandlers()** — `src/lib/topBarSyncBridge.ts:L54` · `topbarsyncbridge_settopbarsynchandlers`
+- **submit()** — `src/components/pr/PRDialog.tsx:L269` · `prdialog_submit`
+- **summarizeRawError()** — `src/lib/gitErrors.ts:L429` · `giterrors_summarizerawerror`
+- **timeAgo()** — `src/components/dashboard/DashboardPanel.tsx:L54` · `dashboardpanel_timeago`
+- **timeAgoMs()** — `src/components/overview/OverviewPanel.tsx:L32` · `overviewpanel_timeagoms`
+- **timeAgoStr()** — `src/components/dashboard/DashboardPanel.tsx:L63` · `dashboardpanel_timeagostr`
+- **timeAgoStr()** — `src/components/overview/OverviewPanel.tsx:L41` · `overviewpanel_timeagostr`
+- **typingInField()** — `src/components/layout/AppShell.tsx:L245` · `appshell_typinginfield`
+- **updateTopBarSyncSnapshot()** — `src/lib/topBarSyncBridge.ts:L49` · `topbarsyncbridge_updatetopbarsyncsnapshot`
+- **useDialogOverlayDismiss()** — `src/lib/useDialogOverlayDismiss.ts:L29` · `usedialogoverlaydismiss_usedialogoverlaydismiss`
+- **withAlpha()** — `src/components/ui/ActionBtn.tsx:L30` · `actionbtn_withalpha`
+- **App()** — `src/App.tsx:L7` · `app_app`
+- **AppTooltip()** — `src/components/ui/AppTooltip.tsx:L12` · `apptooltip_apptooltip`
+- **DisabledButtonTooltip()** — `src/components/ui/DisabledButtonTooltip.tsx:L26` · `disabledbuttontooltip_disabledbuttontooltip`
+- **DragHandle()** — `src/components/layout/AppShell.tsx:L486` · `appshell_draghandle`
+- **DriftPill()** — `src/components/branches/BranchHealthCard.tsx:L36` · `branchhealthcard_driftpill`
+- **FilePathText()** — `src/components/ui/FilePathText.tsx:L14` · `filepathtext_filepathtext`
+- **FirebasePresenceSettings()** — `src/components/settings/FirebasePresenceSettings.tsx:L13` · `firebasepresencesettings_firebasepresencesettings`
+- **FolderIcon()** — `src/components/map/ContentBrowserPanel.tsx:L67` · `contentbrowserpanel_foldericon`
+- **FolderIcon()** — `src/components/changes/FileTree.tsx:L64` · `filetree_foldericon`
+- **FolderRow()** — `src/components/changes/FileTree.tsx:L77` · `filetree_folderrow`
+- **GlobalLoadingCursor()** — `src/components/ui/GlobalLoadingCursor.tsx:L8` · `globalloadingcursor_globalloadingcursor`
+- **Label()** — `src/components/pr/PRDialog.tsx:L36` · `prdialog_label`
+- **LockBadge()** — `src/components/map/ContentBrowserPanel.tsx:L104` · `contentbrowserpanel_lockbadge`
+- **MyPRStatusPill()** — `src/components/dashboard/MyPRStatusPill.tsx:L10` · `myprstatuspill_myprstatuspill`
+- **Panel()** — `src/components/ui/GlobalDialogs.tsx:L20` · `globaldialogs_panel`
+- **Rationale: replace jarring native OS dialog chrome in dark UI** — `LucidGit_ClaudeCode_Spec.md:L1390` · `productdocs_dialog_style_rationale`
+- **RecentRepoRow()** — `src/components/layout/AppShell.tsx:L55` · `appshell_recentreporow`
+- **Requirement: Escape cancel, Enter confirm, danger mode, no stacking** — `LucidGit_ClaudeCode_Spec.md:L1404-L1415` · `productdocs_dialog_keyboard`
+- **SearchGroup()** — `src/components/command-palette/CommandPalette.tsx:L28` · `commandpalette_searchgroup`
+- **Section()** — `src/components/settings/NotificationSettings.tsx:L63` · `notificationsettings_section`
+- **Section()** — `src/components/settings/WebhookPanel.tsx:L35` · `webhookpanel_section`
+- **SelectInput()** — `src/components/pr/PRDialog.tsx:L99` · `prdialog_selectinput`
+- **SettingsError()** — `src/components/settings/SettingsError.tsx:L3` · `settingserror_settingserror`
+- **StashPanel()** — `src/components/changes/StashPanel.tsx:L25` · `stashpanel_stashpanel`
+- **StatusDot()** — `src/components/branches/BranchHealthCard.tsx:L27` · `branchhealthcard_statusdot`
+- **TextArea()** — `src/components/pr/PRDialog.tsx:L73` · `prdialog_textarea`
+- **TextDiff()** — `src/components/diff/TextDiff.tsx:L13` · `textdiff_textdiff`
+- **TextInput()** — `src/components/pr/PRDialog.tsx:L47` · `prdialog_textinput`
+- **ToggleRow()** — `src/components/settings/NotificationSettings.tsx:L76` · `notificationsettings_togglerow`
+- **WebhookPanel()** — `src/components/settings/WebhookPanel.tsx:L48` · `webhookpanel_webhookpanel`
+- **abort()** — `src/components/merge/CherryPickConflictDialog.tsx:L148` · `cherrypickconflictdialog_abort`
+- **abortMerge()** — `src/components/merge/MergeDialog.tsx:L219` · `mergedialog_abortmerge`
+- **act()** — `src/components/map/ContentBrowserPanel.tsx:L153` · `contentbrowserpanel_act`
+- **adjustZoom()** — `src/components/viewer/AssetViewerPanel.tsx:L98` · `assetviewerpanel_adjustzoom`
+- **async()** — `src/components/layout/AppShell.tsx:L784` · `appshell_async`
+- **authorColor()** — `src/components/diff/BinaryDiff.tsx:L23` · `binarydiff_authorcolor`
+- **authorColor()** — `src/components/dashboard/DashboardPanel.tsx:L65` · `dashboardpanel_authorcolor`
+- **authorColor()** — `src/components/history/HistoryPanel.tsx:L35` · `historypanel_authorcolor`
+- **authorColor()** — `src/components/overview/OverviewPanel.tsx:L45` · `overviewpanel_authorcolor`
+- **authorColor()** — `src/components/map/RepoMapPanel.tsx:L51` · `repomappanel_authorcolor`
+- **authorColor()** — `src/components/timeline/TimelinePanel.tsx:L61` · `timelinepanel_authorcolor`
+- **avatarInitials()** — `src/components/map/RepoMapPanel.tsx:L58` · `repomappanel_avatarinitials`
+- **branchToTitle()** — `src/components/pr/PRDialog.tsx:L18` · `prdialog_branchtotitle`
+- **browseDir()** — `src/components/repo/CloneDialog.tsx:L29` · `clonedialog_browsedir`
+- **buildTree()** — `src/components/map/ContentBrowserPanel.tsx:L29` · `contentbrowserpanel_buildtree`
+- **buildTree()** — `src/components/changes/FileTree.tsx:L28` · `filetree_buildtree`
+- **buildTree()** — `src/components/map/RepoMapPanel.tsx:L79` · `repomappanel_buildtree`
+- **byRisk()** — `src/components/branches/BranchHealthCard.tsx:L23` · `branchhealthcard_byrisk`
+- **changeInterval()** — `src/components/dashboard/AutoFetchControl.tsx:L51` · `autofetchcontrol_changeinterval`
+- **classifyPRLoadError()** — `src/components/overview/OverviewPanel.tsx:L70` · `overviewpanel_classifyprloaderror`
+- **cn()** — `src/lib/utils.ts:L4` · `utils_cn`
+- **collapseAll()** — `src/components/dashboard/PotentialConflictsDialog.tsx:L54` · `potentialconflictsdialog_collapseall`
+- **compactPath()** — `src/lib/pathDisplay.ts:L1` · `pathdisplay_compactpath`
+- **componentDidCatch()** — `src/components/ui/PanelErrorBoundary.tsx:L25` · `panelerrorboundary_componentdidcatch`
+- **componentDidUpdate()** — `src/components/ui/PanelErrorBoundary.tsx:L34` · `panelerrorboundary_componentdidupdate`
+- **constructor()** — `src/components/ui/PanelErrorBoundary.tsx:L16` · `panelerrorboundary_constructor`
+- **describeUnknown()** — `src/ipc.ts:L991` · `ipc_describeunknown`
+- **diamondPoints()** — `src/components/timeline/TimelinePanel.tsx:L106` · `timelinepanel_diamondpoints`
+- **dismiss()** — `src/components/changes/FileTree.tsx:L726` · `filetree_dismiss`
+- **doMerge()** — `src/components/merge/MergePreviewDialog.tsx:L61` · `mergepreviewdialog_domerge`
+- **doUndo()** — `src/components/command-palette/CommandPalette.tsx:L90` · `commandpalette_doundo`
+- **doUnlock()** — `src/components/dashboard/DashboardPanel.tsx:L851` · `dashboardpanel_dounlock`
+- **doUnlock()** — `src/components/locks/PushBlockedByLocksDialog.tsx:L77` · `pushblockedbylocksdialog_dounlock`
+- **e()** — `src/components/shared/FileDetailsSidePanel.tsx:L242` · `filedetailssidepanel_e`
+- **e()** — `src/components/dashboard/PotentialConflictsDialog.tsx:L136` · `potentialconflictsdialog_e`
+- **expandAll()** — `src/components/dashboard/PotentialConflictsDialog.tsx:L53` · `potentialconflictsdialog_expandall`
+- **feedbackText()** — `src/stores/operationStore.ts:L63` · `operationstore_feedbacktext`
+- **fileStatusLabel()** — `src/components/dashboard/DashboardPanel.tsx:L83` · `dashboardpanel_filestatuslabel`
+- **finalizeMerge()** — `src/components/merge/MergeDialog.tsx:L197` · `mergedialog_finalizemerge`
+- **firebasePresenceRules.ts** — `src/lib/firebasePresenceRules.ts:L1` · `src_lib_firebasepresencerules_ts`
+- **fmtBytes()** — `src/components/overview/OverviewPanel.tsx:L25` · `overviewpanel_fmtbytes`
+- **formatAge()** — `src/components/merge/CherryPickConflictDialog.tsx:L12` · `cherrypickconflictdialog_formatage`
+- **formatBytes()** — `src/components/merge/CherryPickConflictDialog.tsx:L32` · `cherrypickconflictdialog_formatbytes`
+- **formatBytes()** — `src/components/lfs/LfsPanel.tsx:L12` · `lfspanel_formatbytes`
+- **formatBytes()** — `src/components/merge/MergeDialog.tsx:L24` · `mergedialog_formatbytes`
+- **formatBytes()** — `src/components/merge/MergePreviewDialog.tsx:L24` · `mergepreviewdialog_formatbytes`
+- **formatBytes()** — `src/components/unreal/UnrealPanel.tsx:L9` · `unrealpanel_formatbytes`
+- **formatFetchAgo()** — `src/lib/fetchState.ts:L28` · `fetchstate_formatfetchago`
+- **formatRemaining()** — `src/components/dashboard/AutoFetchControl.tsx:L17` · `autofetchcontrol_formatremaining`
+- **getDerivedStateFromError()** — `src/components/ui/PanelErrorBoundary.tsx:L21` · `panelerrorboundary_getderivedstatefromerror`
+- **handleApply()** — `src/components/settings/TeamConfigPanel.tsx:L55` · `teamconfigpanel_handleapply`
+- **handleBranchSelect()** — `src/components/layout/TopBar.tsx:L76` · `topbar_handlebranchselect`
+- **handleCloneRepo()** — `src/components/layout/AppShell.tsx:L476` · `appshell_handleclonerepo`
+- **handleCloseRequest()** — `src/components/auth/DeviceFlowLogin.tsx:L66` · `deviceflowlogin_handlecloserequest`
+- **handleConfirmClose()** — `src/components/auth/DeviceFlowLogin.tsx:L75` · `deviceflowlogin_handleconfirmclose`
+- **handleCopy()** — `src/components/auth/DeviceFlowLogin.tsx:L55` · `deviceflowlogin_handlecopy`
+- **handleDone()** — `src/components/pr/PRUnlockDialog.tsx:L68` · `prunlockdialog_handledone`
+- **handleDrop()** — `src/components/history/HistoryPanel.tsx:L633` · `historypanel_handledrop`
+- **handleLoadMore()** — `src/components/history/HistoryPanel.tsx:L1123` · `historypanel_handleloadmore`
+- **handleMultiCherryPick()** — `src/components/history/HistoryPanel.tsx:L1223` · `historypanel_handlemulticherrypick`
+- **handleMultiCopySHAs()** — `src/components/history/HistoryPanel.tsx:L1291` · `historypanel_handlemulticopyshas`
+- **handleMultiRevert()** — `src/components/history/HistoryPanel.tsx:L1240` · `historypanel_handlemultirevert`
+- **handleMultiStageChanges()** — `src/components/history/HistoryPanel.tsx:L1258` · `historypanel_handlemultistagechanges`
+- **handleMultiStashChanges()** — `src/components/history/HistoryPanel.tsx:L1274` · `historypanel_handlemultistashchanges`
+- **handleOpenConfig()** — `src/components/layout/TopBar.tsx:L1476` · `topbar_handleopenconfig`
+- **handleOpenGitHub()** — `src/components/auth/DeviceFlowLogin.tsx:L62` · `deviceflowlogin_handleopengithub`
+- **handleOpenRepo()** — `src/components/layout/AppShell.tsx:L471` · `appshell_handleopenrepo`
+- **handlePop()** — `src/components/history/HistoryPanel.tsx:L594` · `historypanel_handlepop`
+- **handleRefresh()** — `src/components/layout/AppShell.tsx:L480` · `appshell_handlerefresh`
+- **handleSave()** — `src/components/settings/TeamConfigPanel.tsx:L39` · `teamconfigpanel_handlesave`
+- **handleSave()** — `src/components/layout/TopBar.tsx:L1467` · `topbar_handlesave`
+- **handleUnlock()** — `src/components/notifications/NotificationFeed.tsx:L221` · `notificationfeed_handleunlock`
+- **handleUnlockAll()** — `src/components/notifications/NotificationFeed.tsx:L231` · `notificationfeed_handleunlockall`
+- **handleUnlockAll()** — `src/components/pr/PRUnlockDialog.tsx:L64` · `prunlockdialog_handleunlockall`
+- **handler()** — `src/components/auth/AccountSwitcher.tsx:L15` · `accountswitcher_handler`
+- **handler()** — `src/components/command-palette/CommandPalette.tsx:L227` · `commandpalette_handler`
+- **handler()** — `src/components/ui/GlobalDialogs.tsx:L106` · `globaldialogs_handler`
+- **handler()** — `src/components/history/HistoryPanel.tsx:L433` · `historypanel_handler`
+- **handler()** — `src/components/notifications/NotificationFeed.tsx:L37` · `notificationfeed_handler`
+- **handler()** — `src/components/timeline/TimelinePanel.tsx:L1193` · `timelinepanel_handler`
+- **handler()** — `src/components/layout/TopBar.tsx:L1460` · `topbar_handler`
+- **heatFill()** — `src/components/map/RepoMapPanel.tsx:L32` · `repomappanel_heatfill`
+- **heatStroke()** — `src/components/map/RepoMapPanel.tsx:L40` · `repomappanel_heatstroke`
+- **hideAllBranches()** — `src/components/timeline/TimelinePanel.tsx:L1979` · `timelinepanel_hideallbranches`
+- **hideAllUsers()** — `src/components/timeline/TimelinePanel.tsx:L2001` · `timelinepanel_hideallusers`
+- **if()** — `src/components/timeline/TimelinePanel.tsx:L342` · `timelinepanel_if`
+- **inDir()** — `src/components/diff/BinaryDiff.tsx:L80` · `binarydiff_indir`
+- **inferDisabledReason()** — `src/components/ui/DisabledButtonTooltip.tsx:L10` · `disabledbuttontooltip_inferdisabledreason`
+- **initials()** — `src/components/dashboard/DashboardPanel.tsx:L72` · `dashboardpanel_initials`
+- **initials()** — `src/components/history/HistoryPanel.tsx:L42` · `historypanel_initials`
+- **initials()** — `src/components/overview/OverviewPanel.tsx:L52` · `overviewpanel_initials`
+- **initials()** — `src/components/timeline/TimelinePanel.tsx:L68` · `timelinepanel_initials`
+- **isDeferredStaging()** — `src/components/changes/FileTree.tsx:L504` · `filetree_isdeferredstaging`
+- **isStillLocked()** — `src/components/notifications/NotificationFeed.tsx:L218` · `notificationfeed_isstilllocked`
+- **isUnmerged()** — `src/components/merge/MergeDialog.tsx:L67` · `mergedialog_isunmerged`
+- **isolateTopDialog()** — `src/lib/useDialogOverlayDismiss.ts:L12` · `usedialogoverlaydismiss_isolatetopdialog`
+- **labelCol()** — `src/components/map/RepoMapPanel.tsx:L47` · `repomappanel_labelcol`
+- **layout()** — `src/components/map/RepoMapPanel.tsx:L153` · `repomappanel_layout`
+- **load()** — `src/components/settings/AppearanceSettings.tsx:L36` · `appearancesettings_load`
+- **load()** — `src/components/settings/NotificationSettings.tsx:L103` · `notificationsettings_load`
+- **loadPakSize()** — `src/components/unreal/UnrealPanel.tsx:L66` · `unrealpanel_loadpaksize`
+- **loadRecentRepos()** — `src/stores/repoStore.ts:L13` · `repostore_loadrecentrepos`
+- **logRendererEvent()** — `src/ipc.ts:L1001` · `ipc_logrendererevent`
+- **mapSegment()** — `src/components/timeline/TimelinePanel.tsx:L275` · `timelinepanel_mapsegment`
+- **markVisibleRead()** — `src/components/notifications/NotificationFeed.tsx:L63` · `notificationfeed_markvisibleread`
+- **maybeNotifyOperationComplete()** — `src/stores/operationStore.ts:L68` · `operationstore_maybenotifyoperationcomplete`
+- **nameMatches()** — `src/components/diff/BinaryDiff.tsx:L81` · `binarydiff_namematches`
+- **normalize()** — `src/components/locks/PushBlockedByLocksDialog.tsx:L27` · `pushblockedbylocksdialog_normalize`
+- **onClick()** — `src/components/locks/ClearLockCacheButton.tsx:L18` · `clearlockcachebutton_onclick`
+- **onDown()** — `src/components/map/ContentBrowserPanel.tsx:L144` · `contentbrowserpanel_ondown`
+- **onFetchPerformed()** — `src/lib/fetchState.ts:L16` · `fetchstate_onfetchperformed`
+- **onFocus()** — `src/components/layout/AppShell.tsx:L445` · `appshell_onfocus`
+- **onKey()** — `src/components/map/ContentBrowserPanel.tsx:L145` · `contentbrowserpanel_onkey`
+- **onKey()** — `src/components/dashboard/PotentialConflictsDialog.tsx:L33` · `potentialconflictsdialog_onkey`
+- **onKey()** — `src/components/pr/PRDialog.tsx:L243` · `prdialog_onkey`
+- **onKey()** — `src/components/pr/PRUnlockDialog.tsx:L30` · `prunlockdialog_onkey`
+- **onMouseDown()** — `src/components/layout/StatusBar.tsx:L33` · `statusbar_onmousedown`
+- **onTopBarSyncChanged()** — `src/lib/topBarSyncBridge.ts:L62` · `topbarsyncbridge_ontopbarsyncchanged`
+- **parseDiff()** — `src/components/changes/HunkStagingDialog.tsx:L21` · `hunkstagingdialog_parsediff`
+- **parseFirebaseWebConfig()** — `src/lib/firebasePresenceConfig.ts:L3` · `firebasepresenceconfig_parsefirebasewebconfig`
+- **parseGHSlug()** — `src/components/timeline/TimelinePanel.tsx:L47` · `timelinepanel_parseghslug`
+- **parseGitHubSlug()** — `src/components/dashboard/DashboardPanel.tsx:L77` · `dashboardpanel_parsegithubslug`
+- **parseGitHubSlug()** — `src/components/history/HistoryPanel.tsx:L17` · `historypanel_parsegithubslug`
+- **parseGitHubSlug()** — `src/stores/lockStore.ts:L8` · `lockstore_parsegithubslug`
+- **parseGitHubSlug()** — `src/components/overview/OverviewPanel.tsx:L58` · `overviewpanel_parsegithubslug`
+- **parseGitHubSlug()** — `src/components/pr/PRDialog.tsx:L13` · `prdialog_parsegithubslug`
+- **parseGitHubSlug()** — `src/components/layout/TopBar.tsx:L42` · `topbar_parsegithubslug`
+- **persistRead()** — `src/stores/notificationStore.ts:L24` · `notificationstore_persistread`
+- **pickRepo()** — `src/components/repo/CloneDialog.tsx:L53` · `clonedialog_pickrepo`
+- **publishBranch()** — `src/components/pr/PRDialog.tsx:L250` · `prdialog_publishbranch`
+- **retryPush()** — `src/components/locks/PushBlockedByLocksDialog.tsx:L90` · `pushblockedbylocksdialog_retrypush`
+- **revealFile()** — `src/components/command-palette/CommandPalette.tsx:L106` · `commandpalette_revealfile`
+- **saveRecentRepos()** — `src/stores/repoStore.ts:L17` · `repostore_saverecentrepos`
+- **selectAll()** — `src/components/changes/HunkStagingDialog.tsx:L103` · `hunkstagingdialog_selectall`
+- **selectCommit()** — `src/components/timeline/TimelinePanel.tsx:L1925` · `timelinepanel_selectcommit`
+- **selectNone()** — `src/components/changes/HunkStagingDialog.tsx:L104` · `hunkstagingdialog_selectnone`
+- **selectWorkingTree()** — `src/components/timeline/TimelinePanel.tsx:L1919` · `timelinepanel_selectworkingtree`
+- **showAllBranches()** — `src/components/history/HistoryPanel.tsx:L1157` · `historypanel_showallbranches`
+- **showAllBranches()** — `src/components/timeline/TimelinePanel.tsx:L1971` · `timelinepanel_showallbranches`
+- **showAllUsers()** — `src/components/timeline/TimelinePanel.tsx:L1996` · `timelinepanel_showallusers`
+- **tick()** — `src/components/auth/DeviceFlowLogin.tsx:L31` · `deviceflowlogin_tick`
+- **timeAgo()** — `src/components/viewer/AssetViewerPanel.tsx:L12` · `assetviewerpanel_timeago`
+- **timeAgo()** — `src/components/diff/BinaryDiff.tsx:L13` · `binarydiff_timeago`
+- **timeAgo()** — `src/components/merge/CherryPickConflictDialog.tsx:L24` · `cherrypickconflictdialog_timeago`
+- **timeAgo()** — `src/components/history/HistoryPanel.tsx:L26` · `historypanel_timeago`
+- **timeAgo()** — `src/components/merge/MergeDialog.tsx:L16` · `mergedialog_timeago`
+- **timeAgo()** — `src/components/merge/MergePreviewDialog.tsx:L16` · `mergepreviewdialog_timeago`
+- **timeAgo()** — `src/components/notifications/NotificationFeed.tsx:L23` · `notificationfeed_timeago`
+- **timeAgo()** — `src/components/dashboard/PotentialConflictsDialog.tsx:L14` · `potentialconflictsdialog_timeago`
+- **timeAgo()** — `src/components/locks/PushBlockedByLocksDialog.tsx:L19` · `pushblockedbylocksdialog_timeago`
+- **timeAgo()** — `src/components/changes/StashPanel.tsx:L17` · `stashpanel_timeago`
+- **timeAgo()** — `src/components/timeline/TimelinePanel.tsx:L52` · `timelinepanel_timeago`
+- **timeAgoStr()** — `src/components/map/RepoMapPanel.tsx:L69` · `repomappanel_timeagostr`
+- **timelineBranches()** — `src/lib/timelineBranches.ts:L3` · `timelinebranches_timelinebranches`
+- **toImgSrc()** — `src/components/viewer/AssetViewerPanel.tsx:L6` · `assetviewerpanel_toimgsrc`
+- **toggle()** — `src/components/changes/HunkStagingDialog.tsx:L96` · `hunkstagingdialog_toggle`
+- **toggle()** — `src/components/dashboard/PotentialConflictsDialog.tsx:L52` · `potentialconflictsdialog_toggle`
+- **toggleBranch()** — `src/components/history/HistoryPanel.tsx:L1128` · `historypanel_togglebranch`
+- **toggleBranch()** — `src/components/timeline/TimelinePanel.tsx:L1960` · `timelinepanel_togglebranch`
+- **toggleCollapse()** — `src/components/history/HistoryPanel.tsx:L1138` · `historypanel_togglecollapse`
+- **togglePicker()** — `src/components/repo/CloneDialog.tsx:L34` · `clonedialog_togglepicker`
+- **toggleSelect()** — `src/components/lfs/LfsPanel.tsx:L119` · `lfspanel_toggleselect`
+- **toggleStash()** — `src/components/timeline/TimelinePanel.tsx:L2006` · `timelinepanel_togglestash`
+- **toggleUser()** — `src/components/timeline/TimelinePanel.tsx:L1987` · `timelinepanel_toggleuser`
+- **truncate()** — `src/components/map/RepoMapPanel.tsx:L64` · `repomappanel_truncate`
+- **useAutoFetch()** — `src/lib/useAutoFetch.ts:L8` · `useautofetch_useautofetch`
+- **weightedProgress()** — `src/stores/operationStore.ts:L29` · `operationstore_weightedprogress`
+- **wrapApi()** — `src/ipc.ts:L1005` · `ipc_wrapapi`

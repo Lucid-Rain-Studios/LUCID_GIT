@@ -1,0 +1,209 @@
+# Desktop IPC and authentication
+
+[Back to index](index.md)
+
+## Source files
+
+- [LucidGit_ClaudeCode_Spec.md](../../LucidGit_ClaudeCode_Spec.md)
+- [electron/ipc/handlers.ts](../../electron/ipc/handlers.ts)
+- [electron/services/AuthService.ts](../../electron/services/AuthService.ts)
+- [electron/services/DesktopNotificationService.ts](../../electron/services/DesktopNotificationService.ts)
+- [electron/services/FirebasePresenceService.ts](../../electron/services/FirebasePresenceService.ts)
+- [electron/services/LockService.ts](../../electron/services/LockService.ts)
+- [electron/services/NotificationService.ts](../../electron/services/NotificationService.ts)
+- [electron/services/PRMonitorService.ts](../../electron/services/PRMonitorService.ts)
+- [electron/services/PermissionService.ts](../../electron/services/PermissionService.ts)
+- [electron/services/PresenceService.ts](../../electron/services/PresenceService.ts)
+- [electron/services/PresenceSession.ts](../../electron/services/PresenceSession.ts)
+- [electron/services/SettingsService.ts](../../electron/services/SettingsService.ts)
+- [electron/services/WebhookService.ts](../../electron/services/WebhookService.ts)
+- [electron/types.ts](../../electron/types.ts)
+- [electron/util/git-log-parse.ts](../../electron/util/git-log-parse.ts)
+- [electron/util/json-store.ts](../../electron/util/json-store.ts)
+- [electron/util/network.ts](../../electron/util/network.ts)
+
+## Entities and evidence
+
+- **handlers.ts** — `electron/ipc/handlers.ts:L1` · `electron_ipc_handlers_ts`
+- **LockService.ts** — `electron/services/LockService.ts:L1` · `electron_services_lockservice_ts`
+- **AuthService.ts** — `electron/services/AuthService.ts:L1` · `electron_services_authservice_ts`
+- **PRMonitorService.ts** — `electron/services/PRMonitorService.ts:L1` · `electron_services_prmonitorservice_ts`
+- **LockService** — `electron/services/LockService.ts:L43` · `lockservice_lockservice`
+- **FirebasePresenceService.ts** — `electron/services/FirebasePresenceService.ts:L1` · `electron_services_firebasepresenceservice_ts`
+- **PermissionService.ts** — `electron/services/PermissionService.ts:L1` · `electron_services_permissionservice_ts`
+- **types.ts** — `electron/types.ts:L1` · `electron_types_ts`
+- **json-store.ts** — `electron/util/json-store.ts:L1` · `electron_util_json_store_ts`
+- **NotificationService.ts** — `electron/services/NotificationService.ts:L1` · `electron_services_notificationservice_ts`
+- **PRMonitorService** — `electron/services/PRMonitorService.ts:L59` · `prmonitorservice_prmonitorservice`
+- **DesktopNotificationService.ts** — `electron/services/DesktopNotificationService.ts:L1` · `electron_services_desktopnotificationservice_ts`
+- **writeJson()** — `electron/util/json-store.ts:L34` · `json_store_writejson`
+- **.checkCurrent()** — `electron/services/PRMonitorService.ts:L319` · `prmonitorservice_prmonitorservice_checkcurrent`
+- **.listAccounts()** — `electron/services/AuthService.ts:L344` · `authservice_authservice_listaccounts`
+- **FirebasePresenceService** — `electron/services/FirebasePresenceService.ts:L48` · `firebasepresenceservice_firebasepresenceservice`
+- **SettingsService.ts** — `electron/services/SettingsService.ts:L1` · `electron_services_settingsservice_ts`
+- **WebhookService.ts** — `electron/services/WebhookService.ts:L1` · `electron_services_webhookservice_ts`
+- **readJson()** — `electron/util/json-store.ts:L19` · `json_store_readjson`
+- **.push()** — `electron/services/NotificationService.ts:L40` · `notificationservice_notificationservice_push`
+- **AuthService** — `electron/services/AuthService.ts:L137` · `authservice_authservice`
+- **.fetchPermissionSingle()** — `electron/services/PermissionService.ts:L96` · `permissionservice_permissionservice_fetchpermissionsingle`
+- **.listLocks()** — `electron/services/LockService.ts:L107` · `lockservice_lockservice_listlocks`
+- **.poll()** — `electron/services/LockService.ts:L511` · `lockservice_lockservice_poll`
+- **.pollDeviceFlowSingle()** — `electron/services/AuthService.ts:L210` · `authservice_authservice_polldeviceflowsingle`
+- **.checkMainMerges()** — `electron/services/PRMonitorService.ts:L193` · `prmonitorservice_prmonitorservice_checkmainmerges`
+- **.getStatus()** — `electron/services/PRMonitorService.ts:L121` · `prmonitorservice_prmonitorservice_getstatus`
+- **.getToken()** — `electron/services/AuthService.ts:L372` · `authservice_authservice_gettoken`
+- **PresenceService.ts** — `electron/services/PresenceService.ts:L1` · `electron_services_presenceservice_ts`
+- **Specified main-process singleton service layer** — `LucidGit_ClaudeCode_Spec.md:L54-L59` · `productdocs_main_services`
+- **.detectMainMerges()** — `electron/services/PRMonitorService.ts:L242` · `prmonitorservice_prmonitorservice_detectmainmerges`
+- **.unlockFileWithToken()** — `electron/services/LockService.ts:L282` · `lockservice_lockservice_unlockfilewithtoken`
+- **.withLfsLock()** — `electron/services/LockService.ts:L67` · `lockservice_lockservice_withlfslock`
+- **PresenceSession.ts** — `electron/services/PresenceSession.ts:L1` · `electron_services_presencesession_ts`
+- **readData()** — `electron/services/AuthService.ts:L36` · `authservice_readdata`
+- **.notify()** — `electron/services/DesktopNotificationService.ts:L64` · `desktopnotificationservice_desktopnotificationservice_notify`
+- **PermissionService** — `electron/services/PermissionService.ts:L57` · `permissionservice_permissionservice`
+- **boundedFetch()** — `electron/util/network.ts:L2` · `network_boundedfetch`
+- **loadState()** — `electron/services/PRMonitorService.ts:L43` · `prmonitorservice_loadstate`
+- **saveState()** — `electron/services/PRMonitorService.ts:L47` · `prmonitorservice_savestate`
+- **.cacheKey()** — `electron/services/PermissionService.ts:L59` · `permissionservice_permissionservice_cachekey`
+- **.getCachedPermission()** — `electron/services/PermissionService.ts:L61` · `permissionservice_permissionservice_getcachedpermission`
+- **.read()** — `electron/services/PresenceService.ts:L12` · `presenceservice_presenceservice_read`
+- **.resolveSlug()** — `electron/services/PRMonitorService.ts:L297` · `prmonitorservice_prmonitorservice_resolveslug`
+- **.test()** — `electron/services/FirebasePresenceService.ts:L144` · `firebasepresenceservice_firebasepresenceservice_test`
+- **.test()** — `electron/services/WebhookService.ts:L81` · `webhookservice_webhookservice_test`
+- **PresenceSession** — `electron/services/PresenceSession.ts:L6` · `presencesession_presencesession`
+- **Requirement: keychain OAuth token authenticates API and HTTPS Git subprocesses** — `LucidGit_ClaudeCode_Spec.md:L345-L358` · `productdocs_subprocess_auth`
+- **Specified typed contextBridge IPC boundary** — `LucidGit_ClaudeCode_Spec.md:L52-L59` · `productdocs_typed_ipc`
+- **readStore()** — `electron/services/PermissionService.ts:L20` · `permissionservice_readstore`
+- **writeData()** — `electron/services/AuthService.ts:L42` · `authservice_writedata`
+- **.assertStageAllowed()** — `electron/services/LockService.ts:L91` · `lockservice_lockservice_assertstageallowed`
+- **.currentChangedFileSet()** — `electron/services/PRMonitorService.ts:L443` · `prmonitorservice_prmonitorservice_currentchangedfileset`
+- **.currentUserLogin()** — `electron/services/LockService.ts:L615` · `lockservice_lockservice_currentuserlogin`
+- **.fetchPermission()** — `electron/services/PermissionService.ts:L87` · `permissionservice_permissionservice_fetchpermission`
+- **.getAll()** — `electron/services/SettingsService.ts:L73` · `settingsservice_settingsservice_getall`
+- **.key()** — `electron/services/FirebasePresenceService.ts:L78` · `firebasepresenceservice_firebasepresenceservice_key`
+- **.loadConfig()** — `electron/services/WebhookService.ts:L73` · `webhookservice_webhookservice_loadconfig`
+- **.logout()** — `electron/services/AuthService.ts:L349` · `authservice_authservice_logout`
+- **.refresh()** — `electron/services/LockService.ts:L395` · `lockservice_lockservice_refresh`
+- **.registerMember()** — `electron/services/FirebasePresenceService.ts:L169` · `firebasepresenceservice_firebasepresenceservice_registermember`
+- **.removeStale()** — `electron/services/PresenceService.ts:L60` · `presenceservice_presenceservice_removestale`
+- **.resolveMergedPRLockState()** — `electron/services/PRMonitorService.ts:L417` · `prmonitorservice_prmonitorservice_resolvemergedprlockstate`
+- **.send()** — `electron/services/WebhookService.ts:L98` · `webhookservice_webhookservice_send`
+- **.setCache()** — `electron/services/PermissionService.ts:L69` · `permissionservice_permissionservice_setcache`
+- **.unlockFiles()** — `electron/services/LockService.ts:L196` · `lockservice_lockservice_unlockfiles`
+- **.update()** — `electron/services/PresenceService.ts:L36` · `presenceservice_presenceservice_update`
+- **.validateTokenScopes()** — `electron/services/AuthService.ts:L435` · `authservice_authservice_validatetokenscopes`
+- **DesktopNotificationService** — `electron/services/DesktopNotificationService.ts:L29` · `desktopnotificationservice_desktopnotificationservice`
+- **PresenceService** — `electron/services/PresenceService.ts:L7` · `presenceservice_presenceservice`
+- **SettingsService** — `electron/services/SettingsService.ts:L66` · `settingsservice_settingsservice`
+- **isRecord()** — `electron/util/json-store.ts:L54` · `json_store_isrecord`
+- **.check()** — `electron/services/PRMonitorService.ts:L307` · `prmonitorservice_prmonitorservice_check`
+- **.ensureIgnored()** — `electron/services/PresenceService.ts:L48` · `presenceservice_presenceservice_ensureignored`
+- **.filePath()** — `electron/services/PresenceService.ts:L8` · `presenceservice_presenceservice_filepath`
+- **.invalidateCache()** — `electron/services/PermissionService.ts:L75` · `permissionservice_permissionservice_invalidatecache`
+- **.load()** — `electron/services/FirebasePresenceService.ts:L66` · `firebasepresenceservice_firebasepresenceservice_load`
+- **.saveConfig()** — `electron/services/WebhookService.ts:L77` · `webhookservice_webhookservice_saveconfig`
+- **.savePatch()** — `electron/services/SettingsService.ts:L90` · `settingsservice_settingsservice_savepatch`
+- **.stop()** — `electron/services/PresenceSession.ts:L42` · `presencesession_presencesession_stop`
+- **.tick()** — `electron/services/PresenceSession.ts:L35` · `presencesession_presencesession_tick`
+- **.unlockFile()** — `electron/services/LockService.ts:L185` · `lockservice_lockservice_unlockfile`
+- **.unlockFolderMine()** — `electron/services/LockService.ts:L470` · `lockservice_lockservice_unlockfoldermine`
+- **NotificationService** — `electron/services/NotificationService.ts:L26` · `notificationservice_notificationservice`
+- **Requirement: GitHub Device Flow authorization and polling** — `LucidGit_ClaudeCode_Spec.md:L332-L341` · `productdocs_device_flow`
+- **WebhookService** — `electron/services/WebhookService.ts:L72` · `webhookservice_webhookservice`
+- **fetchGitHubProfile()** — `electron/services/AuthService.ts:L79` · `authservice_fetchgithubprofile`
+- **load()** — `electron/services/NotificationService.ts:L15` · `notificationservice_load`
+- **validateFirebaseConfig()** — `electron/services/FirebasePresenceService.ts:L15` · `firebasepresenceservice_validatefirebaseconfig`
+- **writeStore()** — `electron/services/PermissionService.ts:L25` · `permissionservice_writestore`
+- **.authenticate()** — `electron/services/FirebasePresenceService.ts:L82` · `firebasepresenceservice_firebasepresenceservice_authenticate`
+- **.broadcastLocks()** — `electron/services/LockService.ts:L632` · `lockservice_lockservice_broadcastlocks`
+- **.checkNow()** — `electron/services/PRMonitorService.ts:L108` · `prmonitorservice_prmonitorservice_checknow`
+- **.clearCacheAndRefresh()** — `electron/services/LockService.ts:L405` · `lockservice_lockservice_clearcacheandrefresh`
+- **.current()** — `electron/services/FirebasePresenceService.ts:L140` · `firebasepresenceservice_firebasepresenceservice_current`
+- **.database()** — `electron/services/FirebasePresenceService.ts:L126` · `firebasepresenceservice_firebasepresenceservice_database`
+- **.diffNames()** — `electron/services/PRMonitorService.ts:L289` · `prmonitorservice_prmonitorservice_diffnames`
+- **.emitNotification()** — `electron/services/PRMonitorService.ts:L448` · `prmonitorservice_prmonitorservice_emitnotification`
+- **.filePath()** — `electron/services/SettingsService.ts:L69` · `settingsservice_settingsservice_filepath`
+- **.iconPath()** — `electron/services/DesktopNotificationService.ts:L34` · `desktopnotificationservice_desktopnotificationservice_iconpath`
+- **.isEnabled()** — `electron/services/DesktopNotificationService.ts:L40` · `desktopnotificationservice_desktopnotificationservice_isenabled`
+- **.isLockCacheCorruptError()** — `electron/services/LockService.ts:L500` · `lockservice_lockservice_islockcachecorrupterror`
+- **.isMissingFileUnlockCacheError()** — `electron/services/LockService.ts:L505` · `lockservice_lockservice_ismissingfileunlockcacheerror`
+- **.lockFolder()** — `electron/services/LockService.ts:L426` · `lockservice_lockservice_lockfolder`
+- **.markRead()** — `electron/services/NotificationService.ts:L67` · `notificationservice_notificationservice_markread`
+- **.markResolved()** — `electron/services/PRMonitorService.ts:L181` · `prmonitorservice_prmonitorservice_markresolved`
+- **.publish()** — `electron/services/FirebasePresenceService.ts:L195` · `firebasepresenceservice_firebasepresenceservice_publish`
+- **.recordPR()** — `electron/services/PRMonitorService.ts:L90` · `prmonitorservice_prmonitorservice_recordpr`
+- **.recordUnlock()** — `electron/services/LockService.ts:L350` · `lockservice_lockservice_recordunlock`
+- **.refreshAccessToken()** — `electron/services/AuthService.ts:L463` · `authservice_authservice_refreshaccesstoken`
+- **.save()** — `electron/services/FirebasePresenceService.ts:L73` · `firebasepresenceservice_firebasepresenceservice_save`
+- **.setCurrentAccount()** — `electron/services/AuthService.ts:L364` · `authservice_authservice_setcurrentaccount`
+- **.start()** — `electron/services/PresenceSession.ts:L16` · `presencesession_presencesession_start`
+- **.start()** — `electron/services/PRMonitorService.ts:L64` · `prmonitorservice_prmonitorservice_start`
+- **.startPolling()** — `electron/services/LockService.ts:L372` · `lockservice_lockservice_startpolling`
+- **.write()** — `electron/services/PresenceSession.ts:L26` · `presencesession_presencesession_write`
+- **Specified gitAuthArgs injects basic token via Git http.extraheader** — `LucidGit_ClaudeCode_Spec.md:L347-L358` · `productdocs_http_extraheader`
+- **refreshKey()** — `electron/services/AuthService.ts:L55` · `authservice_refreshkey`
+- **requireAdmin()** — `electron/ipc/handlers.ts:L188` · `handlers_requireadmin`
+- **requirePresenceAdmin()** — `electron/ipc/handlers.ts:L223` · `handlers_requirepresenceadmin`
+- **save()** — `electron/services/NotificationService.ts:L19` · `notificationservice_save`
+- **tokenKey()** — `electron/services/AuthService.ts:L51` · `authservice_tokenkey`
+- **.clearAll()** — `electron/services/NotificationService.ts:L27` · `notificationservice_notificationservice_clearall`
+- **.emitNotification()** — `electron/services/LockService.ts:L624` · `lockservice_lockservice_emitnotification`
+- **.isAdmin()** — `electron/services/PermissionService.ts:L81` · `permissionservice_permissionservice_isadmin`
+- **.isDev()** — `electron/services/DesktopNotificationService.ts:L30` · `desktopnotificationservice_desktopnotificationservice_isdev`
+- **.isLfsBusy()** — `electron/services/LockService.ts:L82` · `lockservice_lockservice_islfsbusy`
+- **.list()** — `electron/services/NotificationService.ts:L36` · `notificationservice_notificationservice_list`
+- **.lockFile()** — `electron/services/LockService.ts:L158` · `lockservice_lockservice_lockfile`
+- **.locksMaintenance()** — `electron/services/LockService.ts:L414` · `lockservice_lockservice_locksmaintenance`
+- **.pollDeviceFlow()** — `electron/services/AuthService.ts:L199` · `authservice_authservice_polldeviceflow`
+- **.read()** — `electron/services/FirebasePresenceService.ts:L231` · `firebasepresenceservice_firebasepresenceservice_read`
+- **.save()** — `electron/services/SettingsService.ts:L83` · `settingsservice_settingsservice_save`
+- **.startDeviceFlow()** — `electron/services/AuthService.ts:L164` · `authservice_authservice_startdeviceflow`
+- **.stopPolling()** — `electron/services/LockService.ts:L386` · `lockservice_lockservice_stoppolling`
+- **.watchFile()** — `electron/services/LockService.ts:L361` · `lockservice_lockservice_watchfile`
+- **Requirement: validate selected account and persist currentAccountId in auth.json** — `LucidGit_ClaudeCode_Spec.md:L370-L371` · `productdocs_auth_account_persistence`
+- **assertPresenceAccount()** — `electron/ipc/handlers.ts:L217` · `handlers_assertpresenceaccount`
+- **configFile()** — `electron/services/WebhookService.ts:L23` · `webhookservice_configfile`
+- **deviceId()** — `electron/services/FirebasePresenceService.ts:L37` · `firebasepresenceservice_deviceid`
+- **git-log-parse.ts** — `electron/util/git-log-parse.ts:L1` · `electron_util_git_log_parse_ts`
+- **hasRequiredScopes()** — `electron/services/AuthService.ts:L65` · `authservice_hasrequiredscopes`
+- **notifFile()** — `electron/services/NotificationService.ts:L10` · `notificationservice_notiffile`
+- **parseScopes()** — `electron/services/AuthService.ts:L60` · `authservice_parsescopes`
+- **postJson()** — `electron/services/WebhookService.ts:L44` · `webhookservice_postjson`
+- **requireWrite()** — `electron/ipc/handlers.ts:L207` · `handlers_requirewrite`
+- **sanitizeForLog()** — `electron/ipc/handlers.ts:L154` · `handlers_sanitizeforlog`
+- **stateFile()** — `electron/services/PRMonitorService.ts:L38` · `prmonitorservice_statefile`
+- **storePath()** — `electron/services/AuthService.ts:L32` · `authservice_storepath`
+- **storePath()** — `electron/services/PermissionService.ts:L16` · `permissionservice_storepath`
+- **validSettings()** — `electron/services/SettingsService.ts:L51` · `settingsservice_validsettings`
+- **.cancelDeviceFlow()** — `electron/services/AuthService.ts:L155` · `authservice_authservice_canceldeviceflow`
+- **.constructor()** — `electron/services/FirebasePresenceService.ts:L56` · `firebasepresenceservice_firebasepresenceservice_constructor`
+- **.constructor()** — `electron/util/json-store.ts:L12` · `json_store_jsonstorereaderror_constructor`
+- **.constructor()** — `electron/services/PresenceSession.ts:L10` · `presencesession_presencesession_constructor`
+- **.drain()** — `electron/services/FirebasePresenceService.ts:L229` · `firebasepresenceservice_firebasepresenceservice_drain`
+- **.filesUnderFolder()** — `electron/services/LockService.ts:L420` · `lockservice_lockservice_filesunderfolder`
+- **.focusMainWindow()** — `electron/services/DesktopNotificationService.ts:L51` · `desktopnotificationservice_desktopnotificationservice_focusmainwindow`
+- **.onChange()** — `electron/services/SettingsService.ts:L113` · `settingsservice_settingsservice_onchange`
+- **.setLocked()** — `electron/services/PresenceSession.ts:L24` · `presencesession_presencesession_setlocked`
+- **.stop()** — `electron/services/PRMonitorService.ts:L80` · `prmonitorservice_prmonitorservice_stop`
+- **JsonStoreReadError** — `electron/util/json-store.ts:L9` · `json_store_jsonstorereaderror`
+- **Specified keytar OS keychain for tokens** — `LucidGit_ClaudeCode_Spec.md:L25` · `productdocs_keychain`
+- **formatIpcFailure()** — `electron/ipc/handlers.ts:L177` · `handlers_formatipcfailure`
+- **isQuietHours()** — `electron/services/WebhookService.ts:L28` · `webhookservice_isquiethours`
+- **parseGitHubSlug()** — `electron/services/PRMonitorService.ts:L51` · `prmonitorservice_parsegithubslug`
+- **parseGitLog()** — `electron/util/git-log-parse.ts:L11` · `git_log_parse_parsegitlog`
+- **parseRemoteUrl()** — `electron/services/PermissionService.ts:L31` · `permissionservice_parseremoteurl`
+- **profileRetryDelayMs()** — `electron/services/AuthService.ts:L73` · `authservice_profileretrydelayms`
+- **sleep()** — `electron/services/AuthService.ts:L69` · `authservice_sleep`
+- **writeJsonAsync()** — `electron/util/json-store.ts:L56` · `json_store_writejsonasync`
+- **InvalidJsonSchema** — `electron/util/json-store.ts:L7` · `json_store_invalidjsonschema`
+- **Rationale: desktop callback URLs unreliable; Device Flow suits desktop** — `LucidGit_ClaudeCode_Spec.md:L334` · `productdocs_device_flow_rationale`
+- **Requirement: define IPC contract before services for stable interfaces** — `LucidGit_ClaudeCode_Spec.md:L233-L235` · `productdocs_ipc_first`
+- **Requirement: polling progress and explicit cancellation warning on close** — `LucidGit_ClaudeCode_Spec.md:L362-L368` · `productdocs_auth_close_guard`
+- **Specified dugite bundled Git and LFS binaries** — `LucidGit_ClaudeCode_Spec.md:L23` · `productdocs_bundled_git`
+- **Specified electron-store for non-secret settings** — `LucidGit_ClaudeCode_Spec.md:L26` · `productdocs_settings_storage`
+- **Specified worker threads and in-process p-queue for Git work** — `LucidGit_ClaudeCode_Spec.md:L62-L65` · `productdocs_workers`
+- **describeInFlightIpc()** — `electron/ipc/handlers.ts:L147` · `handlers_describeinflightipc`
+- **failureLabel()** — `electron/ipc/handlers.ts:L116` · `handlers_failurelabel`
+- **registerHandlers()** — `electron/ipc/handlers.ts:L230` · `handlers_registerhandlers`
+- **repoArgOf()** — `electron/ipc/handlers.ts:L110` · `handlers_repoargof`
+- **stopPresenceForQuit()** — `electron/ipc/handlers.ts:L140` · `handlers_stoppresenceforquit`

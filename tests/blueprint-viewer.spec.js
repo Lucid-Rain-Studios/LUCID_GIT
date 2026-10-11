@@ -32,6 +32,9 @@ test('UE 5.8 localized text keeps pin fields aligned and rejects truncated notes
   expect(output).toContain('5 localized-text alignment checks passed.')
   expect(output).toContain('8 native cast/pin retention checks passed.')
   expect(output).toContain('3 native pin-type property normalization checks passed.')
+  expect(output).toContain('3 tagged export static-index/empty/ambiguity checks passed.')
+  expect(output).toContain('5 compiled tagged-text overlay checks passed.')
+  expect(output).toContain('4 tagged-recovery boundary/profile checks passed.')
 })
 
 
@@ -41,9 +44,9 @@ test('old cached graphs are re-extracted and an outdated helper is rejected', as
   fs.writeFileSync(path.join(cache, key + '.json'), JSON.stringify({ schemaVersion: 1, readerVersion: 7, status: 'complete', graphs: [], diagnostics: [] }))
   const reader = new BlueprintRevisionService(helper, cache)
   const document = await reader.extract(key, fixture)
-  expect(document.readerVersion).toBe(10)
+  expect(document.readerVersion).toBe(14)
   expect(document.graphs.length).toBeGreaterThan(0)
-  expect(JSON.parse(fs.readFileSync(path.join(cache,key + '.json'),'utf8')).readerVersion).toBe(10)
+  expect(JSON.parse(fs.readFileSync(path.join(cache,key + '.json'),'utf8')).readerVersion).toBe(14)
   const stale = { ...document, graphs: [] }
   reader.cache.set(key, stale)
   fs.writeFileSync(path.join(cache,key + '.json'),JSON.stringify(stale))
@@ -103,6 +106,9 @@ test('exact root, rename, index, working and deletion sides; concurrent caching 
   expect(renamed.right.ref).toBe(second)
   const staged = await compare('HEAD', 'INDEX', 'New name.uasset')
   expect(staged.left.ref).toBe('HEAD'); expect(staged.right.ref).toBe('INDEX')
+  expect(staged.left.resolvedRef).toBe(second); expect(staged.right.resolvedRef).toBe('INDEX')
+  git(repo, 'commit', '--allow-empty', '-qm', 'advance HEAD after capture')
+  expect(staged.left.resolvedRef).not.toBe(git(repo, 'rev-parse', 'HEAD').trim())
   const concurrent = await Promise.all(Array.from({ length: 6 }, () => compare('INDEX', 'WORKING', 'New name.uasset')))
   expect(concurrent.every(r => r.right.document.status === 'complete')).toBe(true)
   expect(fs.readdirSync(cache).filter(f => f.endsWith('.json'))).toHaveLength(1)
@@ -212,11 +218,11 @@ test('real Klee canvas renders, pans, inspects and expands read-only without bro
     await page.getByLabel('Choose Blueprint graph or file').click()
     const graphMenu = page.getByRole('combobox', { name: 'Blueprint graph', exact: true })
     const otherGraph = document.graphs.find(g => g.name !== 'EventGraph').name
-    await graphMenu.click(); await page.getByRole('option', { name: otherGraph, exact: true }).click()
+    await graphMenu.click(); await page.getByRole('option').filter({ has: page.locator('.bp-choice-name', { hasText: otherGraph }) }).click()
     await expect(page.locator('.bp-active-graph')).toHaveText(otherGraph)
     await page.getByLabel('Choose Blueprint graph or file').click()
     await graphMenu.click()
-    await expect(page.getByRole('option').filter({ hasText: /^EventGraph/ })).toHaveText(/EventGraph\s*\(\d+ changes?\)/)
+    await expect(page.getByRole('option').filter({ hasText: /^EventGraph/ })).toHaveText(/EventGraph\s*\(Event graph, \d+ changes?\)/)
     expect(await page.getByRole('option').filter({ hasText: /^EventGraph/ }).locator('.bp-choice-detail').evaluate(element => { const probe = document.createElement('span'); probe.style.color = 'var(--lg-warning)'; element.append(probe); const matches = getComputedStyle(element).color === getComputedStyle(probe).color; probe.remove(); return matches })).toBe(true)
     await page.getByRole('option').filter({ hasText: /^EventGraph/ }).click()
     expect(await page.getByRole('dialog').count()).toBe(0)
@@ -256,7 +262,7 @@ test('real Klee canvas renders, pans, inspects and expands read-only without bro
     await expect(page.getByRole('option').filter({ hasText: 'BP_Pickup.uasset' })).toHaveText(/Unstaged\s*\.\.\.\/BP_Pickup.uasset/)
     await page.getByRole('option', { name: 'Other.uasset', exact: true }).click()
     expect(await page.evaluate(() => window.chosenFile)).toBe('Other.uasset')
-  } finally { await new Promise(resolve => server.close(resolve)) }
+  } finally { await page.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)) }
 })
 
 
@@ -285,7 +291,7 @@ test('Klee draws compiler errors only for an active saved compiler message', asy
       }, text)
       expect(labels.includes('ERROR!')).toBe(flag === true)
     }
-  } finally { await new Promise(resolve => server.close(resolve)) }
+  } finally { await page.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)) }
 })
 
 test('changed wires have text and stroke indicators; mutation shortcuts and node dragging remain read-only', async ({ page }) => {
@@ -334,7 +340,7 @@ test('changed wires have text and stroke indicators; mutation shortcuts and node
     expect(await page.evaluate(() => window.review.bounds())).toEqual(bounds)
     await page.evaluate(() => window.review.destroy())
     expect(await page.locator('canvas').evaluate(c => [c.width,c.height])).toEqual([1,1])
-  } finally { await new Promise(resolve => server.close(resolve)) }
+  } finally { await page.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)) }
 })
 
 test('extraction queue is bounded, shared reads deduplicate, and shutdown releases queued work', async () => {
@@ -359,7 +365,7 @@ test('extraction queue is bounded, shared reads deduplicate, and shutdown releas
   await expect.poll(() => reader.waiting.length).toBe(8)
   await expect.poll(() => outcomes.filter(r => r.error?.message.includes('busy')).length).toBe(1)
   expect(calls.every(call => call.options.timeout === 25000 && call.options.maxBuffer === 32 * 1024 * 1024)).toBe(true)
-  calls[0].callback(null, JSON.stringify({schemaVersion:1,readerVersion:10,status:'complete',graphs:[],diagnostics:[]}), '')
+  calls[0].callback(null, JSON.stringify({schemaVersion:1,readerVersion:14,status:'complete',graphs:[],diagnostics:[]}), '')
   expect((await jobs[0]).value.status).toBe('complete')
   expect((await shared).status).toBe('complete')
   await expect.poll(() => calls.length).toBe(3)
@@ -395,7 +401,7 @@ test('Content Browser previews one read-only graph and shared file actions open 
     expect(await page.evaluate(()=>window.reads.at(-1))).toMatchObject({filePath:'Ordinary.uasset',leftRef:'ABSENT',rightRef:'WORKING'})
     await page.getByLabel('Choose Blueprint graph or file').click();await page.getByRole('combobox',{name:'Blueprint graph',exact:true}).click()
     await expect(page.getByRole('option').filter({hasText:/added|removed|change/})).toHaveCount(0)
-    await page.getByRole('option',{name:otherGraph,exact:true}).click();await expect(page.locator('.bp-active-graph')).toHaveText(otherGraph)
+    await page.getByRole('option').filter({has:page.locator('.bp-choice-name',{hasText:otherGraph})}).click();await expect(page.locator('.bp-active-graph')).toHaveText(otherGraph)
     await page.getByRole('button',{name:'Full screen',exact:true}).click();await expect(page.getByRole('dialog')).toBeVisible()
     await page.keyboard.press('Escape');await expect(page.getByRole('dialog')).toHaveCount(0)
     await expect(page.getByRole('button',{name:'Full screen',exact:true})).toBeFocused()

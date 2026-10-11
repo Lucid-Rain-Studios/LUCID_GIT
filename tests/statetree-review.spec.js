@@ -9,9 +9,9 @@ const { assetChanges, reviewObjects } = component('src/lib/unrealAssetReview.ts'
 const id = n => n.toString(16).padStart(32, '0').toUpperCase()
 const task = (n, duration) => ({ ID: { ID: id(n) }, Node: { Node: { structType: '/Script/StateTreeModule.StateTreeDelayTask', fields: {} } }, Instance: { Instance: { structType: '/Script/StateTreeModule.StateTreeDelayTaskInstanceData', fields: { Duration: duration } } } })
 const object = (path, n, props) => ({ id: id(n), path, name: path.split('.').pop(), classPath: '/Script/StateTreeEditorModule.StateTreeState', outer: path.split('.').slice(0, -1).join('.'), properties: props, decoded: true, opaqueProperties: [], opaqueBytes: 0, opaqueHash: '', diagnostics: [] })
-const state = object('Tree.Root', 1, { Name: 'Root', Children: ['Tree.Root.Child'], Tasks: [task(3, 1), task(4, 2)], Transitions: [{ ID: { ID: id(5) }, Trigger: 'OnTick', State: { Name: 'Child', ID: { ID: id(2) }, LinkType: 'GotoState' }, Conditions: [task(6, 0)] }] })
+const state = object('Tree.Root', 1, { Name: 'Root', LinkedSubtree: { LinkedSubtree: { ID: { ID: id(2) }, Name: 'Child', LinkType: 'GotoState' } }, Children: ['Tree.Root.Child'], Tasks: [task(3, 1), task(4, 2)], Transitions: [{ ID: { ID: id(5) }, Trigger: 'OnTick', State: { Name: 'Child', ID: { ID: id(2) }, LinkType: 'GotoState' }, Conditions: [task(6, 0)] }] })
 const child = object('Tree.Root.Child', 2, { Name: 'Child', Parent: state.path })
-const side = objects => ({ ref: 'WORKING', path: 'Tree.uasset', status: 'ready', document: { schemaVersion: 1, readerVersion: 10, assetClass: '/Script/StateTreeModule.StateTree', graphs: [], status: 'unsupported', diagnostics: [], assetReview: { family: 'statetree', objects, coverage: ['Saved editor data only'], cooked: false } } })
+const side = objects => ({ ref: 'WORKING', path: 'Tree.uasset', status: 'ready', document: { schemaVersion: 1, readerVersion: 12, assetClass: '/Script/StateTreeModule.StateTree', graphs: [], status: 'unsupported', diagnostics: [], assetReview: { family: 'statetree', objects, coverage: ['Saved editor data only'], cooked: false } } })
 test.afterAll(cleanup)
 
 test('authored entry GUIDs preserve task edits/order, transition targets and incomplete fields', () => {
@@ -44,7 +44,7 @@ test('real saved StateTree preserves arrays, typed tasks and edited copied insta
   const file = process.env.UNREAL_REVIEW_STATETREE, bytes = fs.readFileSync(file)
   const read = asset => JSON.parse(execFileSync('dotnet', [path.join(root, 'tools/BlueprintExtractor/bin/Release/net10.0/BlueprintExtractor.dll'), asset], { encoding: 'utf8', windowsHide: true }))
   const before = read(file)
-  expect(before.readerVersion).toBe(10); expect(before.assetReview.family).toBe('statetree')
+  expect(before.readerVersion).toBe(14); expect(before.assetReview.family).toBe('statetree')
   expect(before.assetReview.objects.filter(item => item.classPath.endsWith('.StateTreeState'))).toHaveLength(15)
   const authored = stateTreeEntries(before.assetReview.objects).entries
   expect(authored.filter(entry => entry.classPath.endsWith('.Tasks'))).toHaveLength(20)
@@ -69,7 +69,7 @@ test('real saved StateTree preserves arrays, typed tasks and edited copied insta
   expect(fs.readFileSync(file)).toEqual(bytes)
 })
 
-test('browser expands authored hierarchy, inspects changed tasks and retains revision-side contents', async ({ page }) => {
+test('browser expands authored hierarchy, inspects changed tasks and retains revision-side contents', async ({ page }, testInfo) => {
   const dir = tmpDir('lg-statetree-browser-')
   const result = { left: side([state, child]), right: side([{ ...state, properties: { ...state.properties, Tasks: [task(3, 10), task(4, 2)] } }, child]) }
   const missing = object('Tree.Disconnected', 8, { Name: 'Disconnected', Children: ['Tree.Disconnected', 'Missing'] })
@@ -86,6 +86,13 @@ test('browser expands authored hierarchy, inspects changed tasks and retains rev
     await page.goto(`http://127.0.0.1:${server.address().port}`)
     await page.getByRole('button', { name: 'Preview', exact: true }).click()
     await expect(page.getByText('3 states · 4 authored entries.', { exact: false })).toBeVisible()
+    await page.getByRole('button',{name:'View linked subtree: Child',exact:true}).click()
+    await expect(page.locator('.uar-tree')).toContainText('Focused saved subtree: Child')
+    await expect(page.getByRole('region',{name:'Saved object details'})).toContainText('Child')
+    await expect(page.locator('.uar-tree-heading')).toHaveCount(1)
+    await page.screenshot({path:testInfo.outputPath('linked-subtree-preview.png')})
+    await page.getByRole('button',{name:'Show whole tree',exact:true}).click()
+    await expect(page.locator('.uar-tree-heading')).toHaveCount(3)
     await page.getByRole('button', { name: 'Collapse Root', exact: true }).click()
     await expect(page.locator('.uar-tree-state').filter({ hasText: /^Child/ })).toHaveCount(0)
     await page.getByRole('button', { name: 'Expand Root', exact: true }).click()

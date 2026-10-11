@@ -1,0 +1,14 @@
+{
+  "runs": [
+    {
+      "date": "2026-10-11T03:40:29.923367+00:00",
+      "input_tokens": null,
+      "output_tokens": null,
+      "usage_status": "not measured; graph extraction placeholders are not usage evidence",
+      "files": 278,
+      "scope": "Lucid Git first-party source, tests, scripts, helper source and documentation; generated, build, cloned dependencies, HTML mockups and media excluded"
+    }
+  ],
+  "total_input_tokens": 0,
+  "total_output_tokens": 0
+}

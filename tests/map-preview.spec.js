@@ -3,21 +3,93 @@ const fs = require('node:fs'), path = require('node:path'), http = require('node
 const { component } = require('./renderer-harness')
 const { tmpDir, cleanup } = require('./helpers')
 const root = path.resolve(__dirname, '..')
-const { mapPositions } = component('src/lib/mapReview.ts').exports
-const object = (name, x, y) => ({ id: '', name, path: 'Map.' + name, outer: 'Map.Level', classPath: '/Script/Engine.SceneComponent', properties: { RelativeLocation: { RelativeLocation: { X: x, Y: y } } }, decoded: true, opaqueBytes: 0, opaqueHash: '', diagnostics: [] })
+const { mapInventory } = component('src/lib/mapInventory.ts',{'./assetReferences':component('src/lib/assetReferences.ts').exports}).exports
+const { mapPositions, mapVisiblePositions } = component('src/lib/mapReview.ts').exports
+const { mapAttachmentPositions } = component('src/lib/mapTransforms.ts', {
+  './mapReview': component('src/lib/mapReview.ts').exports,
+  './meshReview': component('src/lib/meshReview.ts').exports,
+  './assetReferences': component('src/lib/assetReferences.ts').exports,
+}).exports
+const object = (name, x, y, z) => ({ id: '', name, path: 'Map.' + name, outer: 'Map.Level', classPath: '/Script/Engine.SceneComponent', properties: { RelativeLocation: { RelativeLocation: { X: x, Y: y, Z: z } } }, decoded: true, opaqueBytes: 0, opaqueHash: '', diagnostics: [] })
 test.afterAll(cleanup)
+
+const explicitTransform = (parent = 'None', yaw = 0) => ({ AttachParent: parent, AttachSocketName: 'None', bAbsoluteLocation: false, bAbsoluteRotation: false, bAbsoluteScale: false, RelativeRotation: { Pitch: 0, Yaw: yaw, Roll: 0 }, RelativeScale3D: { X: 2, Y: 2, Z: 2 } })
+test('saved map attachments compose explicit chains and reject unresolved defaults and identity', () => {
+  const root = object('Root', 100, 200, 300), child = object('Child', 10, 0, 5)
+  Object.assign(root.properties, explicitTransform('None', 90)); Object.assign(child.properties, explicitTransform(root.path))
+  let model = mapAttachmentPositions([root, child], [root], 'XY')
+  expect(model.unresolved.size).toBe(0)
+  expect(model.points[1].x).toBeCloseTo(100); expect(model.points[1].y).toBeCloseTo(220)
+  expect(mapAttachmentPositions([root, child], [root], 'XZ').points[1].y).toBeCloseTo(310)
+  const nested = object('Nested', 2, 0, 0); Object.assign(nested.properties, explicitTransform(child.path))
+  model = mapAttachmentPositions([root, child, nested], [root], 'XY')
+  expect(model.points[2].x).toBeCloseTo(100); expect(model.points[2].y).toBeCloseTo(228)
+  for (const edit of [p => delete p.RelativeRotation, p => p.bAbsoluteScale = true, p => p.AttachSocketName = 'hand', p => p.RelativeScale3D.Y = 3, p => p.RelativeLocation.RelativeLocation.X = Infinity]) {
+    const broken = structuredClone(child); edit(broken.properties)
+    expect(mapAttachmentPositions([root, broken], [root], 'XY').points).toHaveLength(1)
+  }
+  expect(mapAttachmentPositions([root, child, {...root}], [root], 'XY').points.every(point => point.object.name === 'Root')).toBe(true)
+  expect(mapAttachmentPositions([root, {...child, sourcePackage: 'Other'}], [root], 'XY').points).toHaveLength(1)
+  const cycle = structuredClone(root); cycle.properties.AttachParent = child.path
+  expect(mapAttachmentPositions([cycle, child], [cycle], 'XY').points).toEqual([])
+  expect(mapAttachmentPositions([root, child], [], 'XY').points).toEqual([])
+})
 
 test('map positions accept saved numbers and exclude absent, empty and invalid coordinates', () => {
   expect(mapPositions([object('Valid', '+0', 10), object('Blank', '', 10), object('Invalid', NaN, 1), object('Missing', undefined, 2), object('Infinity', Infinity, 2)])).toHaveLength(1)
   expect(mapPositions([object('Valid', '-100.5', 10)])[0]).toMatchObject({ x: -100.5, y: 10 })
+  const points=[object('Height',10,20,'-30'),object('Missing Z',10,20),object('No X',undefined,20,40),object('Blank Z',10,20,'')]
+  expect(mapPositions(points,'XZ').map(point=>[point.object.name,point.x,point.y])).toEqual([['Height',10,-30]])
+  expect(mapPositions(points,'YZ').map(point=>[point.object.name,point.x,point.y])).toEqual([['Height',20,-30],['No X',20,40]])
+  expect(mapPositions(points,'XY')).toHaveLength(3)
 })
 
-test('map dots hover/select, pan/zoom/focus and preserve camera across revisions and tabs', async ({ page }, testInfo) => {
+test('map search precedes the dot budget and selected matching results remain discoverable', () => {
+  const points = mapPositions(Array.from({length:1200},(_,i)=>object('Export '+i,i,i)))
+  const changedPaths = new Set(['Map.Export 1199'])
+  const names = new Map([['Map.Export 1199','Hidden actor label']])
+  const choose = options => mapVisiblePositions(points,{query:'',changedOnly:false,changedPaths,...options})
+  expect(choose({query:'hidden actor',names}).visible[0].object.name).toBe('Export 1199')
+  expect(choose({query:'export 1199'})).toMatchObject({total:1,omitted:0})
+  expect(choose({query:'scenecomponent'}).total).toBe(1200)
+  expect(choose({changedOnly:true}).visible[0].object.name).toBe('Export 1199')
+  expect(choose({selected:'Map.Export 1199'}).visible.at(-1).object.name).toBe('Export 1199')
+  expect(choose({query:'no match',selected:'Map.Export 1199'})).toEqual({visible:[],total:0,omitted:0})
+  expect(choose({query:'  '}).visible).toHaveLength(1000)
+  expect(choose({})).toMatchObject({total:1200,omitted:200})
+  points[1199].object.sourcePackage='Content/Maps/External/Late.uasset'
+  expect(choose({query:'external/late'}).total).toBe(1)
+})
+
+test('real map retains explicit height coordinates for all supported projections',()=>{
+  const file=process.env.UNREAL_REVIEW_MAP;test.skip(!file,'Set real map fixture')
+  const before=fs.readFileSync(file),doc=JSON.parse(require('node:child_process').execFileSync('dotnet',['tools/BlueprintExtractor/bin/Release/net10.0/BlueprintExtractor.dll',file],{cwd:root,encoding:'utf8',maxBuffer:32*1024*1024}))
+  const objects=doc.assetReview.objects
+  const inventory=mapInventory(objects)
+  expect(inventory.roots).toHaveLength(50);expect(inventory.actors).toHaveLength(51)
+  for(const plane of ['XY','XZ','YZ'])expect(mapPositions(inventory.roots,plane)).toHaveLength(47)
+  expect(mapPositions(objects,'XY')).toHaveLength(47);expect(mapPositions(objects,'XZ')).toHaveLength(47);expect(mapPositions(objects,'YZ')).toHaveLength(47)
+  expect(mapPositions(objects,'XZ').some(point=>point.y===-100)).toBe(true);expect(fs.readFileSync(file)).toEqual(before)
+})
+
+for(const actorScope of [false,true])test(`map dots ${actorScope?'with actor root scope':'without actor membership'} hover/select, pan/zoom/focus and preserve camera across revisions and tabs`, async ({ page }, testInfo) => {
   const dir = tmpDir('lg-map-camera-')
-  const objects = Array.from({ length: 100 }, (_, i) => object('Component ' + i, i % 10 * 20, Math.floor(i / 10) * 20))
-  objects.push(object('Overlap A', 0, 0), object('Overlap B', 0, 0), object('Far component', 10000, 9000))
-  const doc = objects => ({ schemaVersion: 1, readerVersion: 10, assetClass: '/Script/Engine.World', engineVersion: '5.8.0', graphs: [], status: 'unsupported', diagnostics: [], assetReview: { family: 'map', objects, coverage: ['Saved component-relative positions; inherited/world transforms unresolved'], cooked: false } })
-  const result = { left: { ref: 'HEAD', status: 'ready', document: doc(objects) }, right: { ref: 'WORKING', status: 'ready', document: doc(objects.map(item => item.name === 'Component 2' ? object(item.name, 600, 500) : item)) } }
+  const objects = Array.from({ length: 100 }, (_, i) => object('Component ' + i, i % 10 * 20, Math.floor(i / 10) * 20, i * 10))
+  objects.push(object('Overlap A', 0, 0), object('Overlap B', 0, 0, 50), object('Far component', 10000, 9000, 900))
+  if(actorScope){
+    Object.assign(objects.find(item=>item.name==='Far component').properties, explicitTransform())
+    const actors=['Component 2','Overlap B','Far component'].map((rootName,i)=>{
+      const actor={...object('Actor'+i),classPath:'/Script/Engine.Actor',properties:{RootComponent:'Map.'+rootName,ActorLabel:['Changed actor','Overlap actor','Far actor'][i]}}
+      objects.find(item=>item.name===rootName).outer=actor.path
+      return actor
+    })
+    objects.push(...actors,{...object('Level'),path:'Map.Level',classPath:'/Script/Engine.Level',properties:{Actors:actors.map(actor=>actor.path)}})
+  }
+  if(!actorScope)objects.push(...Array.from({length:1001},(_,i)=>object('Extra '+i,i%10*20,0,0)),object('Late export',20000,12000,400))
+  const totalPositions=mapPositions(objects).length
+  const farName=actorScope?'Far actor / Far component':'Far component'
+  const doc = objects => ({ schemaVersion: 1, readerVersion: 12, assetClass: '/Script/Engine.World', engineVersion: '5.8.0', graphs: [], status: 'unsupported', diagnostics: [], assetReview: { family: 'map', objects, coverage: ['Saved component-relative positions; inherited/world transforms unresolved'], cooked: false } })
+  const result = { left: { ref: 'HEAD', status: 'ready', document: doc(objects) }, right: { ref: 'WORKING', status: 'ready', document: doc(objects.map(item => item.name === 'Component 2' ? {...item,properties:object(item.name,600,500,450).properties} : actorScope && item.name==='Component 3' ? {...item,properties:object(item.name,80,80,180).properties} : item)) } }
   await require('esbuild').build({ stdin: { contents: `import React from 'react';import {createRoot} from 'react-dom/client';import {UnrealAssetReview} from './src/components/diff/UnrealAssetReview';import './src/index.css';createRoot(document.getElementById('root')).render(<UnrealAssetReview repoPath="test" request={{filePath:'Map.umap',leftRef:'HEAD',rightRef:'WORKING'}}/>);`, resolveDir: root, loader: 'tsx' }, alias: { '@': path.join(root, 'src') }, outfile: path.join(dir, 'app.js'), bundle: true, format: 'esm' })
   const server = http.createServer((req, res) => {
     if (req.url === '/') { res.setHeader('Content-Type', 'text/html'); return res.end(`<html><link rel="stylesheet" href="/app.css"><style>html,body,#root{margin:0;width:100%;height:100%;display:flex}</style><div id="root"></div><script>window.calls=[];window.lucidGit={blueprintCompare:async(_,r)=>{window.calls.push(r);return ${JSON.stringify(result)}},blueprintCancel:async()=>{}}</script><script type="module" src="/app.js"></script></html>`) }
@@ -29,37 +101,117 @@ test('map dots hover/select, pan/zoom/focus and preserve camera across revisions
     await page.setViewportSize({ width: 1200, height: 820 })
     await page.goto(`http://127.0.0.1:${server.address().port}`)
     await page.getByRole('button', { name: 'Preview', exact: true }).click()
-    await expect(page.locator('.uar-map-dot')).toHaveCount(103)
+    if(actorScope){
+      await expect(page.locator('.uar-map-dot')).toHaveCount(3)
+      await expect(page.getByRole('button',{name:'Actor roots',exact:true})).toHaveAttribute('aria-pressed','true')
+      await expect(page.getByLabel('Far actor: X 10000, Y 9000 cm',{exact:true})).toBeVisible()
+      await page.getByRole('button',{name:'Compare saved positions',exact:true}).click()
+      await expect(page.locator('.uar-map-guides line')).toHaveCount(1)
+      await page.getByRole('button',{name:'Compare saved positions',exact:true}).click()
+      await page.getByRole('button',{name:'All positioned exports',exact:true}).click()
+      await expect(page.locator('.uar-map-tools small').first()).toHaveText('100%')
+    }
+    await expect(page.locator('.uar-map-dot')).toHaveCount(Math.min(1000,totalPositions))
+    if(!actorScope){
+      await page.getByLabel('Filter map positions').fill('Late export')
+      await expect(page.locator('.uar-map-dot')).toHaveCount(1)
+      await expect(page.getByLabel('Late export: X 20000, Y 12000 cm',{exact:true})).toBeVisible()
+      await page.getByRole('button',{name:'Fit results',exact:true}).click()
+      const lateBox=await page.locator('.uar-map-dot').boundingBox(),lateField=await page.getByRole('region',{name:'Serialized component-relative positions'}).boundingBox()
+      expect(lateBox.x+6).toBeCloseTo(lateField.x+lateField.width/2,0)
+      await page.getByRole('button',{name:'Base',exact:true}).click()
+      await page.getByRole('button',{name:'Contents',exact:true}).click();await page.getByRole('button',{name:'Preview',exact:true}).click()
+      await expect(page.getByLabel('Filter map positions')).toHaveValue('Late export')
+      await expect(page.locator('.uar-map-dot')).toHaveCount(1)
+      await page.screenshot({path:testInfo.outputPath('map-search-late-export.png')})
+      await page.getByLabel('Filter map positions').fill('not present')
+      await expect(page.getByRole('button',{name:'Fit results',exact:true})).toBeDisabled()
+      await expect(page.getByText('No captured positions match these filters.',{exact:false})).toBeVisible()
+      await page.getByLabel('Filter map positions').fill('')
+      await page.getByRole('button',{name:'Changed dots only',exact:true}).click()
+      await expect(page.locator('.uar-map-dot')).toHaveCount(1)
+      await page.getByRole('button',{name:'Selected',exact:true}).click()
+      await expect(page.getByRole('button',{name:'Changed dots only',exact:true})).toHaveAttribute('aria-pressed','true')
+      await expect(page.locator('.uar-map-dot')).toHaveCount(1)
+      await page.getByRole('button',{name:'Changed dots only',exact:true}).click()
+      await page.getByRole('button',{name:'Fit map',exact:true}).click()
+    }
     expect(await page.locator('.uar-map-dot').evaluateAll(dots => dots.every(dot => dot.textContent === '' && dot.getBoundingClientRect().width === 12))).toBe(true)
-    const far = page.getByLabel('Far component: X 10000, Y 9000 cm', { exact: true })
+    const far = page.getByLabel(`${farName}: X 10000, Y 9000 cm`, { exact: true })
     await far.hover(); await expect(page.getByRole('tooltip')).toContainText('Far component')
     await far.focus(); await page.keyboard.press('Enter')
     await expect(far).toHaveAttribute('aria-pressed', 'true')
     await expect(page.getByRole('region', { name: 'Saved object details' })).toContainText('Far component')
+    await page.getByRole('button', { name: 'Compare saved positions', exact: true }).click()
+    await expect(page.locator('.uar-map-guides line')).toHaveCount(actorScope?2:1)
+    const guide = await page.locator('.uar-map-guides line').first().getAttribute('x1')
     const field = page.getByRole('region', { name: 'Serialized component-relative positions' })
+    await field.focus()
+    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))
     const before = await far.boundingBox(), box = await field.boundingBox()
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
     await page.mouse.down(); await page.mouse.move(box.x + box.width / 2 + 35, box.y + box.height / 2 + 20); await page.mouse.up()
+    expect(await page.locator('.uar-map-guides line').first().getAttribute('x1')).not.toBe(guide)
     const after = await far.boundingBox(); expect(after.x - before.x).toBeCloseTo(35, 0); expect(after.y - before.y).toBeCloseTo(20, 0)
     await field.focus(); await page.keyboard.press('+')
-    await expect(page.locator('.uar-map-tools small')).toHaveText('150%')
+    await expect(page.locator('.uar-map-tools small').first()).toHaveText('150%')
     await page.getByRole('button', { name: 'Base', exact: true }).click()
-    await expect(page.locator('.uar-map-tools small')).toHaveText('150%')
+    await expect(page.locator('.uar-map-tools small').first()).toHaveText('150%')
     await page.getByRole('button', { name: 'Contents', exact: true }).click(); await page.getByRole('button', { name: 'Preview', exact: true }).click()
-    await expect(page.locator('.uar-map-tools small')).toHaveText('150%')
+    await expect(page.locator('.uar-map-tools small').first()).toHaveText('150%')
     await page.getByRole('button', { name: 'Focus selected', exact: true }).click()
     const center = await far.boundingBox(), fieldBox = await field.boundingBox()
     expect(center.x + 6).toBeCloseTo(fieldBox.x + fieldBox.width / 2, 0)
     await page.mouse.move(fieldBox.x + fieldBox.width / 2 + 60, fieldBox.y + fieldBox.height / 2); await page.mouse.wheel(0, -70)
-    await expect(page.locator('.uar-map-tools small')).not.toHaveText('150%')
+    await expect(page.locator('.uar-map-tools small').first()).not.toHaveText('150%')
     await page.getByRole('button', { name: 'Fit map', exact: true }).click()
-    await expect(page.locator('.uar-map-tools small')).toHaveText('100%')
+    await expect(page.locator('.uar-map-tools small').first()).toHaveText('100%')
     await page.locator('.uar-map-list summary').click(); await page.getByLabel('Filter map positions').fill('Overlap B')
     await page.locator('.uar-map-list .uar-row').click()
     await expect(page.getByRole('region', { name: 'Saved object details' })).toContainText('Overlap B')
     await page.getByLabel('Filter map positions').fill('')
     await page.getByRole('button', { name: 'Fit map', exact: true }).click()
     await page.screenshot({ path: testInfo.outputPath('map-dots-preview.png') })
+    await page.getByRole('button',{name:'Front (XZ)',exact:true}).click()
+    await expect(page.locator('.uar-map-dot')).toHaveCount(Math.min(1000,totalPositions-1))
+    await expect(page.getByLabel(`${farName}: X 10000, Z 900 cm`,{exact:true})).toBeVisible()
+    await expect(page.locator('.uar-map-axis')).toHaveText('↑ Z · X →')
+    await page.getByRole('button',{name:'Compare saved positions',exact:true}).click()
+    await expect(page.locator('.uar-map-guides line')).toHaveCount(actorScope?2:1)
+    await field.focus();await page.keyboard.press('+')
+    await page.getByRole('button',{name:'Selected',exact:true}).click()
+    await expect(page.locator('.uar-map-tools small').first()).toHaveText('150%')
+    await page.getByRole('button',{name:'Contents',exact:true}).click();await page.getByRole('button',{name:'Preview',exact:true}).click()
+    await expect(page.getByRole('button',{name:'Front (XZ)',exact:true})).toHaveAttribute('aria-pressed','true')
+    await expect(page.locator('.uar-map-tools small').first()).toHaveText('150%')
+    await page.getByRole('button',{name:'Side (YZ)',exact:true}).click()
+    await expect(page.getByLabel(`${farName}: Y 9000, Z 900 cm`,{exact:true})).toBeVisible()
+    await expect(page.locator('.uar-map-tools small').first()).toHaveText('100%')
+    await page.screenshot({path:testInfo.outputPath('map-height-preview.png')})
+    if(actorScope){
+      await page.getByRole('button',{name:'Actor roots',exact:true}).click()
+      await expect(page.locator('.uar-map-dot')).toHaveCount(3)
+      await field.focus();await page.keyboard.press('+')
+      await page.getByRole('button',{name:'Base',exact:true}).click()
+      await page.getByRole('button',{name:'Contents',exact:true}).click();await page.getByRole('button',{name:'Preview',exact:true}).click()
+      await expect(page.getByRole('button',{name:'Actor roots',exact:true})).toHaveAttribute('aria-pressed','true')
+      await expect(page.locator('.uar-map-dot')).toHaveCount(3)
+      await expect(page.locator('.uar-map-tools small').first()).toHaveText('150%')
+      await page.screenshot({path:testInfo.outputPath('map-actor-roots.png')})
+      await page.getByRole('button',{name:'Saved attachments',exact:true}).click()
+      await expect(page.locator('.uar-map-dot')).toHaveCount(1)
+      await expect(page.getByLabel('Far actor: Y 9000, Z 900 cm',{exact:true})).toBeVisible()
+      await expect(page.getByRole('region',{name:'Serialized attachment-composed positions'})).toBeVisible()
+      await expect(page.getByText('Explicit saved chains only;', {exact:false})).toContainText('unresolved')
+      await page.getByRole('button',{name:'Selected',exact:true}).click()
+      await page.getByRole('button',{name:'Contents',exact:true}).click(); await page.getByRole('button',{name:'Preview',exact:true}).click()
+      await expect(page.getByRole('button',{name:'Saved attachments',exact:true})).toHaveAttribute('aria-pressed','true')
+      await expect(page.locator('.uar-map-dot')).toHaveCount(1)
+      await expect(page.getByRole('button',{name:'Compare saved positions',exact:true})).toHaveCount(0)
+      await page.screenshot({path:testInfo.outputPath('map-saved-attachments.png')})
+      await page.getByRole('button',{name:'Relative positions',exact:true}).click()
+      await expect(page.locator('.uar-map-dot')).toHaveCount(3)
+    }
     await page.setViewportSize({ width: 480, height: 640 })
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     expect(await page.evaluate(() => window.calls.length)).toBe(1)

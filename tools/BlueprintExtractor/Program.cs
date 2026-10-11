@@ -8,6 +8,7 @@ try
 {
     if (new FileInfo(args[0]).Length > 256 * 1024 * 1024) throw new InvalidDataException("Asset exceeds the 256 MB limit.");
     var asset = new UAsset(args[0], EngineVersion.UNKNOWN);
+    TaggedExportRecovery.Apply(asset);
     var document = JObject.FromObject(GraphExtractor.Extract(asset));
     document["assetReview"] = AssetExtractor.Extract(asset, document.Value<string>("assetClass") ?? "");
     Console.Write(document.ToString(Formatting.None));

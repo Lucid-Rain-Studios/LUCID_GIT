@@ -1,0 +1,170 @@
+# Asset review contracts
+
+[Back to index](index.md)
+
+## Source files
+
+- [LucidGit_ClaudeCode_Spec.md](../../LucidGit_ClaudeCode_Spec.md)
+- [docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md](../../docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md)
+- [docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION_PLAN.md](../../docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION_PLAN.md)
+- [docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md](../../docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md)
+- [docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION_PLAN.md](../../docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION_PLAN.md)
+- [src/components/layout/Sidebar.tsx](../../src/components/layout/Sidebar.tsx)
+- [src/components/settings/GeneralSettings.tsx](../../src/components/settings/GeneralSettings.tsx)
+- [tools/BlueprintExtractor/THIRD-PARTY-NOTICES.md](../../tools/BlueprintExtractor/THIRD-PARTY-NOTICES.md)
+
+## Entities and evidence
+
+- **docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L1` · `assetdocs_doc_uar`
+- **docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L1` · `assetdocs_doc_bp`
+- **Sidebar.tsx** — `src/components/layout/Sidebar.tsx:L1` · `src_components_layout_sidebar_tsx`
+- **GeneralSettings.tsx** — `src/components/settings/GeneralSettings.tsx:L1` · `src_components_settings_generalsettings_tsx`
+- **docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION_PLAN.md** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION_PLAN.md:L1` · `assetdocs_doc_bpp`
+- **Uasset/umap reuse revision service .uexp/Git/LFS/queue/cache/cancellation rather than parallel IPC** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L8` · `assetdocs_reuse`
+- **Changed package/companion manifests freeze commit refs and recheck mutable capture membership** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L43` · `assetdocs_externalcapture`
+- **Content/companion/extractor/schema keyed caches retain 8 documents/identities; disk cache 256 MB** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L45` · `assetdocs_cache`
+- **Failed LFS reads cached 15 seconds in bounded 32 entries; credential identity hashed into key** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L155` · `assetdocs_lfsfailcache`
+- **LinkedSubtree GotoState resolves only unique saved ID/path within captured source package** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L138` · `assetdocs_localtree`
+- **Planned integration modules name BlueprintRevisionService, BlueprintExtractor, BlueprintDiff and BlueprintCanvas** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION_PLAN.md:L55` · `assetdocs_modules`
+- **Requirement: collapsible Workspace, Tools and Admin navigation groups** — `LucidGit_ClaudeCode_Spec.md:L1422-L1436` · `productdocs_sidebar`
+- **Segment ranges require explicit trim/start/rate/loop fields; absolute notify/section links only** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L185` · `assetdocs_timing`
+- **Shared inspector resolves unique local objects and supported /Game/root Content hard assets** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L95` · `assetdocs_refnavigation`
+- **tools/BlueprintExtractor/THIRD-PARTY-NOTICES.md** — `tools/BlueprintExtractor/THIRD-PARTY-NOTICES.md:L1` · `assetdocs_doc_license`
+- **Async .uproject discovery shared by Sidebar, Unreal header and review is repository-session guarded** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L103` · `assetdocs_projectmetadata`
+- **BlendSpace/AimOffset class routing renders only finite saved sample coordinates with explicit bounds** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L209` · `assetdocs_blendspace`
+- **BlueprintExtractor reads actual bytes with UAssetAPI and independent native pin decoding** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L9` · `assetdocs_extractor`
+- **CUE4Parse cooked render branch/TODO property bags and ThreeNative marketplace tools cannot prove uncooked formats** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L230` · `assetdocs_decoderdecision`
+- **Captured worktree LFS pointers smudge to temporary files with OID/size validation** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L41` · `assetdocs_lfs`
+- **Changed mutable metadata during grouped capture discards actor data with Retry guidance** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L43` · `assetdocs_externalinvalidate`
+- **Current project EngineAssociation metadata never changes historical save version or parser inputs** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L103` · `assetdocs_metadataisolation`
+- **Explicit Retry bypasses each selected LFS failure once per comparison without repository-wide fetch** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L155` · `assetdocs_lfsretry`
+- **External folder is candidate only; saved ActorGuid plus exact map/PersistentLevel ownership required** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L41` · `assetdocs_ownership`
+- **Git/index asset and .uexp identities resolve to immutable blob IDs** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L41` · `assetdocs_capture`
+- **Helper ships complete UAssetAPI/Newtonsoft/ZstdSharp/.NET notices and Klee renderer license** — `tools/BlueprintExtractor/THIRD-PARTY-NOTICES.md:L3-L12` · `assetdocs_licenses`
+- **Historical and working-pointer reads share exact SHA256/size validation and origin/account scoped resolver** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L155` · `assetdocs_lfsshared`
+- **Historical dependency navigation retains captured commit separately from blob ID; HEAD advance cannot retarget** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L95` · `assetdocs_provenance`
+- **Klee adapter exposes cameras, selection, decorations and disposal without editable Application/Controller** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L10` · `assetdocs_klee`
+- **Latest documented92 cross-family tests include all optional realGit/LFS/OFPA/browser fixtures** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L226` · `assetdocs_latesttests`
+- **Merge choices remain whole revisions and review never edits Unreal packages** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L3` · `assetdocs_wholefile`
+- **Native render/skin/LOD, StateTree bags/custom payloads, inherited/socket/cross-package placement remain gates** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L230` · `assetdocs_gates`
+- **No reference dependencies prefetch or silent substitution from worktree** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L95` · `assetdocs_noprefetch`
+- **Planned architecture validates repository/ref/path in main; renderer gets no unrestricted file/Git/helper access** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION_PLAN.md:L53` · `assetdocs_security`
+- **Portable Windows workflow must publish current self-contained reader before packaging** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L33` · `assetdocs_portable`
+- **Read-only TextPropertyData overlay generated from hash-verified pinned source in .blueprint-build; checkout unchanged** — `tools/BlueprintExtractor/THIRD-PARTY-NOTICES.md:L16` · `assetdocs_overlay`
+- **Reader14 build-only SHA256-verified UAssetAPI TextProperty overlay handles tagged localization notes** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L220` · `assetdocs_reader14text`
+- **Renderer advertises retained content/config/version keys for compact deduplicated IPC hydration** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L47` · `assetdocs_ipc`
+- **Repository slots cover identity/byte capture; CPU extraction runs after slot release** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L43` · `assetdocs_slots`
+- **Required read-only contract forbids move/default/node/wire/delete/save mutations** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION_PLAN.md:L9` · `assetdocs_readonlycontract`
+- **Reusable read-only asset host integrates Timeline, Content Browser, context actions and PR review/merge workspace** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L3` · `assetdocs_host`
+- **Self-contained Windows reader14 runs real asset families with unchanged hashes/notices; not desktop/platform parity** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L224` · `assetdocs_win14`
+- **Service bounds: 256 MB inputs, 20000 nodes, 25 seconds, 32 MB output, 2 active/8 queued helpers** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L45` · `assetdocs_limits`
+- **SphylElem cylinder length excludes caps; explicit body-local preview does not infer skeleton transforms** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L156` · `assetdocs_capsules`
+- **Typed hard references separate from arbitrary strings;128 per object and8192 per package** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L93` · `assetdocs_hardrefs`
+- **UAssetAPI objects require normalized-to-Klee clipboard conversion; feasibility risk is adapter** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION_PLAN.md:L34` · `assetdocs_clipboardrisk`
+- **Viewer cancellation detaches subscriptions; shared extraction retains bounded lifetime** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L43` · `assetdocs_cancel`
+- **Windows/Linux publish x64; macOS publishes x64/arm64 selected by Electron architecture** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L31` · `assetdocs_architectures`
+- **loadOpenPrCount()** — `src/components/layout/Sidebar.tsx:L156` · `sidebar_loadopenprcount`
+- **parseGitHubSlug()** — `src/components/layout/Sidebar.tsx:L78` · `sidebar_parsegithubslug`
+- **savedRotation rejects dual profiles; quaternion finite XYZW near-unit norm normalized for roundoff** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L165` · `assetdocs_rotation`
+- **Actor inventory follows saved Level.Actors/verified external ownership with All objects recovery** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L89` · `assetdocs_actors`
+- **Actor ownership bounded: depth32,100 owned rows/actor,1000 across expanded groups** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L89` · `assetdocs_actorbounds`
+- **Actor-root dots require uniquely owned saved roots; component view recovers unassigned exports** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L174` · `assetdocs_roots`
+- **Actor-root markers describe root-component changes; shared scope/camera does not imply world placement** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L176` · `assetdocs_rootmarkers`
+- **Actual Electron fullscreen prior-window-state restoration remains unchecked** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION_PLAN.md:L133` · `assetdocs_windowgate`
+- **Actual bundled Git LFS controlled authenticated endpoint proves download, rejection, missing/offline and Retry** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L157` · `assetdocs_lfsproof`
+- **Authored state/task/transition GUID matching is conservative; duplicate GUIDs unknown and runtime indexes excluded** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L57` · `assetdocs_stateidentity`
+- **Binding identities use saved struct IDs and ordered segments, never invented GUID/runtime indexes** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L71` · `assetdocs_bindings`
+- **Blueprint plan: integrated core across phases 1-7, release acceptance partial** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION_PLAN.md:L3` · `assetdocs_planstatus`
+- **Captured actor/object/package search precedes1000-dot limit and preserves selected matching late result** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L198` · `assetdocs_mapsearch`
+- **Changed-only/fit/filter persist across views; default shared bounds remain and no extraction occurs** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L200` · `assetdocs_mapfilter`
+- **Checked checklist items indicate scoped evidence; no entire phase proven by fixture/component checks** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION_PLAN.md:L59` · `assetdocs_phaseproof`
+- **Collision extents/topology do not imply render/source geometry, skin/LOD or unchanged opaque payload** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L79` · `assetdocs_collisiononly`
+- **Cooked, non-K2, unknown native and externally mapped unversioned packages retain diagnostics/fallback** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L95` · `assetdocs_unsupported`
+- **Dedicated collapsed-graph fixture and live editor parity acceptance remain pending** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L64-L75` · `assetdocs_collapsed`
+- **Documented real Blueprint fixtures span saved UE 4.27.2, 5.7.4 and 5.0.0; not broad compatibility proof** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L53-L60` · `assetdocs_fixtures`
+- **DynamicCast purity enum decoding preserves valid pins and native state; unknown tails stay incomplete** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L121` · `assetdocs_dynamiccast`
+- **EdGraphPinType package indexes normalize into resolved type fields; unknown tails explicitly fail** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L168` · `assetdocs_pintypes`
+- **Editor ground truth,large-asset measurement,packaged Timeline/PR/merge and cross-platform acceptance remain** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L232` · `assetdocs_acceptance`
+- **Epic FAnimNotifyEvent https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/Engine/FAnimNotifyEvent?lang=en-US** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L193` · `assetdocs_epicnotify`
+- **Epic FAnimSegment https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/Engine/FAnimSegment** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L193` · `assetdocs_epicsegment`
+- **Epic FBlendSample / FBlendParameter / Python BlendSample field semantics** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L215` · `assetdocs_epicblend`
+- **Epic FKSphylElem length semantics https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/Engine/FKSphylElem** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L156` · `assetdocs_epiccapsule`
+- **Epic FStateTreeStateLink schema https://dev.epicgames.com/documentation/unreal-engine/API/Plugins/StateTreeModule/FStateTreeStateLink?lang=en-US** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L138` · `assetdocs_epicstate`
+- **Epic OFPA external actor storage https://dev.epicgames.com/documentation/en-us/unreal-engine/one-file-per-actor-in-unreal-engine** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION_PLAN.md:L82` · `assetdocs_epicofpa`
+- **Epic unit quaternion vector rotation https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/Core/VectorQuaternionRotateVector** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L165` · `assetdocs_epicquat`
+- **External capture bounds: 16 packages, shared 64 MB bytes/16 MB documents, 2 MB manifest/32 MB index hash** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L45` · `assetdocs_externalbounds`
+- **Full normalized document contract acceptance remains unchecked** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION_PLAN.md:L90` · `assetdocs_normalizedgate`
+- **Full running-app attempted mutation invariants remain unchecked** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION_PLAN.md:L146` · `assetdocs_readinvariants`
+- **Graph comparison supports stable identities and visibly identified unique graph-name fallback** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L11` · `assetdocs_compare`
+- **INDEX/WORKING dependency links retain explicit scopes and capture current dependency bytes on open** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L95` · `assetdocs_mutablerefs`
+- **Independent native decoder redistributes no Epic source and needs no runtime Unreal** — `tools/BlueprintExtractor/THIRD-PARTY-NOTICES.md:L14` · `assetdocs_noepic`
+- **Inventories/reference models/camera controls memoize captured data without new scans or resources** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L97` · `assetdocs_memo`
+- **Keyboard Graphs & files menu retains staged/unstaged identities and nested Escape dismissal** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L111` · `assetdocs_graphsfiles`
+- **Klee pinned commit 3c694f280ea1702624f81e7b0d20b9292d635cc5; MIT** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L22` · `assetdocs_kleepin`
+- **LG-055 and UI-060 remain unchecked; documented functional/UI progress 79/85 and 1/60** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L99` · `assetdocs_audit`
+- **Local subtree hierarchy guards unique paths/cycles and caps1000 states without external evaluation** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L140` · `assetdocs_treebounds`
+- **Map dots support hover/focus, pan/wheel/keyboard zoom, fit and coincident selection without invented coordinates** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L67` · `assetdocs_mapcamera`
+- **Missing/cross-package/ambiguous parents,cycles,defaults/nonuniform scale remain unresolved** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L223` · `assetdocs_attachmentunknown`
+- **Modern AnimGraph tagged-field recovery stays within declared bounds; unsupported structs opaque/raw preserved** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L221` · `assetdocs_reader14recovery`
+- **Mutation commands disabled at both renderer and host boundaries** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION_PLAN.md:L122` · `assetdocs_mutationboundary`
+- **Native pin decoder version-gates UE5.8 translator developer notes at Fortnite-main custom version 260** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L113` · `assetdocs_localizedpins`
+- **Newtonsoft.Json13.0.4 MIT https://github.com/JamesNK/Newtonsoft.Json/blob/13.0.4/LICENSE.md** — `tools/BlueprintExtractor/THIRD-PARTY-NOTICES.md:L9` · `assetdocs_newtonsoftlicense`
+- **Opt-in owning-map/changed-external-actor review retains selected refs and rename paths** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L39` · `assetdocs_externalactions`
+- **Per-platform packaged helper verification remains unchecked** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION_PLAN.md:L98` · `assetdocs_platformgate`
+- **Per-request snapshots preserve advertised documents during concurrent cache eviction** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L47` · `assetdocs_eviction`
+- **Private fixtures are read unchanged and not redistributed; observations are not benchmarks** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L19` · `assetdocs_fixturepreserve`
+- **Project discovery root-first BFS depth 3, 256 directories, 1 MB manifests; skips generated trees/symlinks** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L105` · `assetdocs_discovery`
+- **Raw tagged fields are excluded from decoded edits and unavailable sides cannot become adds/removes** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L9` · `assetdocs_unknown`
+- **Reader compatibility markers reject stale helper output; Retry bypasses chosen identity/document caches** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L123` · `assetdocs_stalehelper`
+- **Reader14 real ABP_Unarmed AnimGraph8 nodes/17 pins and reciprocal wires; not custom-node/playback proof** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L222` · `assetdocs_poseproof`
+- **Real UE4.9.2 eel fixture proves27 explicit Orientation capsule readback and source preservation** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L167` · `assetdocs_legacyproof`
+- **Real UE5.8.3 BlendSpace27 samples andUE5.0.3 1D3 samples preserve bytes; AimOffset/editor pending** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L211` · `assetdocs_blendproof`
+- **Real disposable OFPA fixture detects saved X edit 300 to350 with unchanged root/source hashes** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L49` · `assetdocs_ofpaproof`
+- **Recorded asset save version is distinct from inferred serialization profile** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L27` · `assetdocs_profiles`
+- **Release dependency order: extraction, exact capture, service/cache, comparison, UI, fullscreen, package** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION_PLAN.md:L157` · `assetdocs_releaseorder`
+- **Representative timing/resource/cache/canvas budgets remain unchecked** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION_PLAN.md:L149` · `assetdocs_performancegate`
+- **Required-companion materialization acceptance remains unchecked** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION_PLAN.md:L83` · `assetdocs_companiongate`
+- **Requirement: persistent settings/explorer/terminal/repository toolbar** — `LucidGit_ClaudeCode_Spec.md:L1438-L1448` · `productdocs_sidebar_toolbar`
+- **Retry requests fresh documents; compact transfers still resolve/capture revisions** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L47` · `assetdocs_retry`
+- **Row()** — `src/components/settings/GeneralSettings.tsx:L50` · `generalsettings_row`
+- **SKM_Manny_Simple seven exports verifies opaque skeletal native fallback, not skin/geometry profile** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L91` · `assetdocs_skeletalfallback`
+- **ST_Shooter UE5.8.0 source reader exposes15 states/20 tasks/17 transitions/28 bindings and copied GUID task edit** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L61` · `assetdocs_stateproof`
+- **Saved ConvexElems require explicit vertices/indices and full quaternion/translation/scale** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L79` · `assetdocs_convex`
+- **Saved attachment composition requires explicit finite transforms,positive uniform scale,nonabsolute flags,no socket** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L223` · `assetdocs_attachments`
+- **Saved boxes require finite center/degree rotation and nonnegative full dimensions; planar zero thickness supported** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L130` · `assetdocs_boxes`
+- **Saved states/aliases and reciprocal transition endpoints use500 nodes/100 alias refs limits** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L118` · `assetdocs_statemachine`
+- **Section()** — `src/components/settings/GeneralSettings.tsx:L37` · `generalsettings_section`
+- **Semantic diff ignores only unused hidden pin identity while retaining serialized fields and referenced identities** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L163` · `assetdocs_hiddenpins`
+- **Sequence/montage metadata and timing schematic reuse captured documents and inspector** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L183` · `assetdocs_animationmeta`
+- **Serialized export class and supported graph capability determine graph versus binary routing** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L8` · `assetdocs_routing`
+- **Shared host keeps map camera across tabs/sides using union bounds and loaded data only** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L69` · `assetdocs_mapstate`
+- **Shared host supplies Changes/Contents/Preview, exact labels, inspectors, recovery and coverage** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L7` · `assetdocs_views`
+- **Shared modal isolation and browser fullscreen preserve review state and restore focus** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L12` · `assetdocs_fullscreen`
+- **Shutdown stops owned helper processes and rejects queued extraction** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L43` · `assetdocs_shutdown`
+- **StateTree authored view bounded to32 traversal levels and5000 entries; raw/opaque groups stay incomplete** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L59` · `assetdocs_statebounds`
+- **StateTree simplifier preserves repeated arrays/sets and resolved InstancedStruct types** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L55` · `assetdocs_statetypes`
+- **Static tagged fields use Name[index], preserving sparse entries; ambiguous duplicate/negative indexes opaque** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L207` · `assetdocs_staticindexes`
+- **Timeline comparison uses parent/commit, HEAD/index or index/worktree and retains rename identities** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L7` · `assetdocs_timeline`
+- **Timing sections/segments/notifies share1000 entries and12000-character inspector cap** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L187` · `assetdocs_timingbounds`
+- **UAssetAPI pinned commit 3228c1e86261aa08131f7ec0ff1a395f5d0b2a84; MIT** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L21` · `assetdocs_uassetapi`
+- **UE5.8.3 montage and sequence readbacks preserve sources; real notify/editor fixture remains pending** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L189` · `assetdocs_timingproof`
+- **Ubulk/trailers not newly captured; full-world/render/playback profiles remain open** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L35` · `assetdocs_bulkremaining`
+- **Unique captured BoundGraph links use20-entry Back history and existing Klee controls** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L118` · `assetdocs_graphnavigation`
+- **User reports simple/complex UE5.8 visual comparison and running Timeline acceptance; not automated exact-count proof** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L85` · `assetdocs_useracceptance`
+- **Viewer uses application tokens and narrow-pane inspector overlays** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L13` · `assetdocs_theme`
+- **XY/XZ/YZ require both explicit finite coordinates; omitted axes never defaulted** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L124` · `assetdocs_projection`
+- **handleCheckUpdates()** — `src/components/settings/GeneralSettings.tsx:L140` · `generalsettings_handlecheckupdates`
+- **handleConfirmBranchToggle()** — `src/components/settings/GeneralSettings.tsx:L105` · `generalsettings_handleconfirmbranchtoggle`
+- **handleDownloadUpdate()** — `src/components/settings/GeneralSettings.tsx:L161` · `generalsettings_handledownloadupdate`
+- **handleSave()** — `src/components/settings/GeneralSettings.tsx:L126` · `generalsettings_handlesave`
+- **handler()** — `src/components/layout/Sidebar.tsx:L211` · `sidebar_handler`
+- **load()** — `src/components/settings/GeneralSettings.tsx:L79` · `generalsettings_load`
+- **load()** — `src/components/layout/Sidebar.tsx:L196` · `sidebar_load`
+- **loadCollapsed()** — `src/components/layout/Sidebar.tsx:L86` · `sidebar_loadcollapsed`
+- **loadSync()** — `src/components/layout/Sidebar.tsx:L134` · `sidebar_loadsync`
+- **loadVisibility()** — `src/components/layout/Sidebar.tsx:L90` · `sidebar_loadvisibility`
+- **openPopoverFor()** — `src/components/layout/Sidebar.tsx:L328` · `sidebar_openpopoverfor`
+- **toggleGroup()** — `src/components/layout/Sidebar.tsx:L310` · `sidebar_togglegroup`
+- **toggleItemVisibility()** — `src/components/layout/Sidebar.tsx:L316` · `sidebar_toggleitemvisibility`
+- **update()** — `src/components/settings/GeneralSettings.tsx:L111` · `generalsettings_update`
+- **updateFeatureVisibility()** — `src/components/settings/GeneralSettings.tsx:L117` · `generalsettings_updatefeaturevisibility`

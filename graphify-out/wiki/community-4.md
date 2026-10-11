@@ -1,0 +1,179 @@
+# UI audit and locks
+
+[Back to index](index.md)
+
+## Source files
+
+- [audit/LUCID-GIT-UI-AUDIT.md](../../audit/LUCID-GIT-UI-AUDIT.md)
+- [src/components/activity/ActivityPanel.tsx](../../src/components/activity/ActivityPanel.tsx)
+- [src/components/changelog/ChangelogPanel.tsx](../../src/components/changelog/ChangelogPanel.tsx)
+- [src/components/errors/ErrorPanel.tsx](../../src/components/errors/ErrorPanel.tsx)
+- [src/components/heatmap/ForecastPanel.tsx](../../src/components/heatmap/ForecastPanel.tsx)
+- [src/components/heatmap/LockHeatmap.tsx](../../src/components/heatmap/LockHeatmap.tsx)
+- [src/components/hooks/HooksManager.tsx](../../src/components/hooks/HooksManager.tsx)
+- [src/components/locks/LockedFilesPanel.tsx](../../src/components/locks/LockedFilesPanel.tsx)
+- [src/components/pr/PRReviewWorkspace.tsx](../../src/components/pr/PRReviewWorkspace.tsx)
+- [src/components/presence/PresencePanel.tsx](../../src/components/presence/PresencePanel.tsx)
+- [src/components/shared/BlueprintFileAction.tsx](../../src/components/shared/BlueprintFileAction.tsx)
+- [src/components/shared/RevisionFileActions.tsx](../../src/components/shared/RevisionFileActions.tsx)
+- [src/components/ui/AppRightSelectionOptions.tsx](../../src/components/ui/AppRightSelectionOptions.tsx)
+- [src/lib/useBlueprintFileMenu.tsx](../../src/lib/useBlueprintFileMenu.tsx)
+- [src/stores/assetViewerStore.ts](../../src/stores/assetViewerStore.ts)
+
+## Entities and evidence
+
+- **Separate UI audit: 1/60 findings checked** — `audit/LUCID-GIT-UI-AUDIT.md:L1-L5` · `audits_ui_report`
+- **UI acceptance must pass before checking; partial work remains unchecked; shared consumers verified; LG/UI completion tracked independently** — `audit/LUCID-GIT-UI-AUDIT.md:L1223` · `audits_ui_independent_completion`
+- **LockedFilesPanel.tsx** — `src/components/locks/LockedFilesPanel.tsx:L1` · `src_components_locks_lockedfilespanel_tsx`
+- **ErrorPanel.tsx** — `src/components/errors/ErrorPanel.tsx:L1` · `src_components_errors_errorpanel_tsx`
+- **ActivityPanel.tsx** — `src/components/activity/ActivityPanel.tsx:L1` · `src_components_activity_activitypanel_tsx`
+- **ChangelogPanel.tsx** — `src/components/changelog/ChangelogPanel.tsx:L1` · `src_components_changelog_changelogpanel_tsx`
+- **AppRightSelectionOptions.tsx** — `src/components/ui/AppRightSelectionOptions.tsx:L1` · `src_components_ui_apprightselectionoptions_tsx`
+- **LockHeatmap.tsx** — `src/components/heatmap/LockHeatmap.tsx:L1` · `src_components_heatmap_lockheatmap_tsx`
+- **PRReviewWorkspace.tsx** — `src/components/pr/PRReviewWorkspace.tsx:L1` · `src_components_pr_prreviewworkspace_tsx`
+- **HooksManager.tsx** — `src/components/hooks/HooksManager.tsx:L1` · `src_components_hooks_hooksmanager_tsx`
+- **BlueprintFileAction.tsx** — `src/components/shared/BlueprintFileAction.tsx:L1` · `src_components_shared_blueprintfileaction_tsx`
+- **Errors and recovery audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L233` · `audits_ui_category_233`
+- **Locked Files audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L85` · `audits_ui_category_85`
+- **PresencePanel.tsx** — `src/components/presence/PresencePanel.tsx:L1` · `src_components_presence_presencepanel_tsx`
+- **UI-016: Shared PR/Timeline RevisionFileActions verified by controlled browser; other surfaces and full capability/parity matrix remain [Partial; unchecked; Source / suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L363-L379` · `audits_UI_016`
+- **ForecastPanel.tsx** — `src/components/heatmap/ForecastPanel.tsx:L1` · `src_components_heatmap_forecastpanel_tsx`
+- **Lock selection uses visible order and captured anchor; additive owner checkboxes are explicit; right-click targets deliberate selection; force-unlock lists owners/paths** — `audit/LUCID-GIT-UI-AUDIT.md:L21-L27` · `audits_lock_selection_contract`
+- **RevisionFileActions.tsx** — `src/components/shared/RevisionFileActions.tsx:L1` · `src_components_shared_revisionfileactions_tsx`
+- **UI-004: Right-click must target the clicked row or deliberate selection [Unchecked finding; Source]** — `audit/LUCID-GIT-UI-AUDIT.md:L141-L157` · `audits_UI_004`
+- **UI-036: Admin Team distinguishes unavailable/empty/stale presence with Retry and truthful Firebase/local coverage; isolated tests pass; no live visual/accessibility proof [Implemented and verified; Source]** — `audit/LUCID-GIT-UI-AUDIT.md:L741-L759` · `audits_UI_036`
+- **UI-001: Use the displayed row order for Shift selection [Unchecked finding; Source-derived reproduction]** — `audit/LUCID-GIT-UI-AUDIT.md:L87-L103` · `audits_UI_001`
+- **UI-002: Capture the range anchor before scheduling state updates [Unchecked finding; Source-derived reproduction]** — `audit/LUCID-GIT-UI-AUDIT.md:L105-L121` · `audits_UI_002`
+- **UI-003: Make owner selection scope explicit [Unchecked finding; Source-derived reproduction / design choice]** — `audit/LUCID-GIT-UI-AUDIT.md:L123-L139` · `audits_UI_003`
+- **UI-009: Increase error text readability and respect appearance settings [Unchecked finding; Source]** — `audit/LUCID-GIT-UI-AUDIT.md:L235-L251` · `audits_UI_009`
+- **UI-013: Guarded Index Recovery adds diagnosis/backup/repair/rollback with controlled browser and real Git tests; general repairs and packaged UI acceptance outstanding [Partial; unchecked; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L307-L323` · `audits_UI_013`
+- **UI-023: Share commit menus and explain current-file versus historical actions [Unchecked finding; Source / suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L495-L511` · `audits_UI_023`
+- **UI-031: Fix View History navigation and retain the target file [Unchecked finding; Source]** — `audit/LUCID-GIT-UI-AUDIT.md:L647-L663` · `audits_UI_031`
+- **UI-060: Modal stack/focus/responsive controls and bounded read-only asset review partially verified in controlled browser; broad dialog/editor/installed-desktop acceptance remains [Partial; unchecked; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L1197-L1213` · `audits_UI_060`
+- **Shared menus and selection audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L361` · `audits_ui_category_361`
+- **UI-006: Give lock selection a real keyboard and checkbox contract [Unchecked finding; Source]** — `audit/LUCID-GIT-UI-AUDIT.md:L177-L193` · `audits_UI_006`
+- **UI-007: Bulk-unlock bounded workers and persistent partial results verified by controlled renderer/service and real LFS tests; owner/dirty preview, Retry failed and cancellation remain [Partial; unchecked; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L195-L213` · `audits_UI_007`
+- **UI-014: Foreground error/repair dialogs pass controlled browser focus/dismissal checks; inline unification, persistent history and installed/screen-reader acceptance remain [Partial; unchecked; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L325-L341` · `audits_UI_014`
+- **UI-019: Scoped changed/added discard preserves failed locks; themed menu geometry and keyboard checks pass; broad bulk scope/failed-selection acceptance remains [Partial; unchecked; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L417-L435` · `audits_UI_019`
+- **UI-024: Add useful non-destructive commit selection and search [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L513-L531` · `audits_UI_024`
+- **UI-026: Explain checkbox meaning and provide stash inspection before apply [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L551-L569` · `audits_UI_026`
+- **UI-032: Content Browser read-only Blueprint action and preview verified in Chromium with exact revision/class routing; folder/editor/watch-unlock scope remains [Partial; unchecked; Source / suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L665-L683` · `audits_UI_032`
+- **UI-035: Teammate contextual-work navigation remains proposed; user removed branch/file details and chose admin Active/Away/Offline status-only scope [Scope changed; proposed work unchecked; Source / suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L723-L739` · `audits_UI_035`
+- **UI-040: Label metric meaning, freshness and export scope [Unchecked finding; Source / suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L817-L835` · `audits_UI_040`
+- **UI-042: Expose fetch health and selectable coverage without hiding current limits [Unchecked finding; Source / suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L855-L873` · `audits_UI_042`
+- **UI-054: Explain composed checks and preserve custom hooks visibly [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L1083-L1101` · `audits_UI_054`
+- **UI-057: Make setting save scope and unsaved changes obvious [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L1141-L1157` · `audits_UI_057`
+- **UI-058: Show capability and policy status rather than only controls [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L1159-L1177` · `audits_UI_058`
+- **UI-059: Contextual exact-revision shared asset review partially verified on real assets/Git/browser/helper; full native geometry, property bags, world placement and editor/desktop acceptance pending [Partial; unchecked; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L1179-L1195` · `audits_UI_059`
+- **useBlueprintFileMenu.tsx** — `src/lib/useBlueprintFileMenu.tsx:L1` · `src_lib_useblueprintfilemenu_tsx`
+- **Changes, staging and stashes audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L531` · `audits_ui_category_531`
+- **UI-005: Correct unlock labels and enrich the lock menu [Unchecked finding; Source]** — `audit/LUCID-GIT-UI-AUDIT.md:L159-L175` · `audits_UI_005`
+- **UI-008: Share lock inspection and selected-file workflows across surfaces [Unchecked finding; Source / suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L215-L233` · `audits_UI_008`
+- **UI-010: Replace competing overlays and nested scrolling with one error drawer [Unchecked finding; Source]** — `audit/LUCID-GIT-UI-AUDIT.md:L253-L269` · `audits_UI_010`
+- **UI-011: Give repair failures their own state and styling [Unchecked finding; Source]** — `audit/LUCID-GIT-UI-AUDIT.md:L271-L287` · `audits_UI_011`
+- **UI-012: Preview history without creating another error event [Unchecked finding; Source]** — `audit/LUCID-GIT-UI-AUDIT.md:L289-L305` · `audits_UI_012`
+- **UI-015: Report clipboard failures and offer sanitized diagnostic copying [Unchecked finding; Source]** — `audit/LUCID-GIT-UI-AUDIT.md:L343-L361` · `audits_UI_015`
+- **UI-017: Clamp menus and support keyboard menu navigation [Unchecked finding; Source]** — `audit/LUCID-GIT-UI-AUDIT.md:L381-L397` · `audits_UI_017`
+- **UI-018: Keep menus open while moving between items [Unchecked finding; Source]** — `audit/LUCID-GIT-UI-AUDIT.md:L399-L415` · `audits_UI_018`
+- **UI-020: Add cross-page navigation that carries the selected entity [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L437-L455` · `audits_UI_020`
+- **UI-021: Make summary counts and lock rows useful shortcuts [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L457-L473` · `audits_UI_021`
+- **UI-022: Show stale or unavailable card data independently [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L475-L493` · `audits_UI_022`
+- **UI-025: Fill single-file and bulk menu gaps [Unchecked finding; Source / suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L533-L549` · `audits_UI_025`
+- **UI-027: Full remote branch identity fixed with renderer/real Git checks; additional actions, acceptance matrix and installed-app visuals remain [Partial; unchecked; Source / suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L571-L587` · `audits_UI_027`
+- **UI-028: Make branch comparisons and switch consequences visible [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L589-L607` · `audits_UI_028`
+- **UI-029: Replace raw-hash guessing with guided operation previews [Unchecked finding; Source / suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L609-L625` · `audits_UI_029`
+- **UI-030: Link tool results directly to recovery and affected files [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L627-L645` · `audits_UI_030`
+- **UI-033: Add an actionable inspector and file/folder context menus [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L685-L701` · `audits_UI_033`
+- **UI-034: Provide a searchable list alternative to spatial navigation [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L703-L721` · `audits_UI_034`
+- **UI-037: Make activity entries navigable and copyable [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L761-L777` · `audits_UI_037`
+- **UI-038: Show filter scope and event provenance clearly [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L779-L797` · `audits_UI_038`
+- **UI-039: Link hotspots to the relevant file workflows [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L799-L815` · `audits_UI_039`
+- **UI-041: Turn warnings into comparisons and follow-up actions [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L837-L853` · `audits_UI_041`
+- **UI-043: Make admin summaries drill into scoped details [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L875-L891` · `audits_UI_043`
+- **UI-044: Distinguish unknown, stale and approximate metrics [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L893-L911` · `audits_UI_044`
+- **UI-045: Improve range selection and link generated commits [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L913-L929` · `audits_UI_045`
+- **UI-046: Make empty and export results explain themselves [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L931-L949` · `audits_UI_046`
+- **UI-047: Add contextual pattern/file actions and explain pointer states [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L951-L967` · `audits_UI_047`
+- **UI-048: Make scan coverage and destructive scope prominent [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L969-L987` · `audits_UI_048`
+- **UI-049: Use the whole page for maintenance instead of an empty split pane [Unchecked finding; Source / suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L989-L1005` · `audits_UI_049`
+- **UI-050: Add a maintenance plan and clear before/after results [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L1007-L1025` · `audits_UI_050`
+- **UI-051: Group setup by readiness and provide useful target actions [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L1027-L1043` · `audits_UI_051`
+- **UI-052: Show configuration changes as editable previews [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L1045-L1063` · `audits_UI_052`
+- **UI-053: Add practical hook inspection and test actions [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L1065-L1081` · `audits_UI_053`
+- **UI-055: Bug Logs durable Clear and awaited Copy feedback verified; search/filter/selection copy/sanitized export remain [Partial; unchecked; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L1103-L1119` · `audits_UI_055`
+- **UI-056: Provide wrap/font controls and meaningful log navigation [Unchecked proposal; Suggestion]** — `audit/LUCID-GIT-UI-AUDIT.md:L1121-L1139` · `audits_UI_056`
+- **assetViewerStore.ts** — `src/stores/assetViewerStore.ts:L1` · `src_stores_assetviewerstore_ts`
+- **Activity audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L759` · `audits_ui_category_759`
+- **Branches audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L569` · `audits_ui_category_569`
+- **Bug Logs audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L1101` · `audits_ui_category_1101`
+- **Changelog audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L911` · `audits_ui_category_911`
+- **Cleanup audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L987` · `audits_ui_category_987`
+- **Content Browser audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L645` · `audits_ui_category_645`
+- **Dashboard audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L455` · `audits_ui_category_455`
+- **File Map audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L683` · `audits_ui_category_683`
+- **Forecast audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L835` · `audits_ui_category_835`
+- **Heatmap audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L797` · `audits_ui_category_797`
+- **Hooks audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L1063` · `audits_ui_category_1063`
+- **LFS audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L949` · `audits_ui_category_949`
+- **Overview audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L873` · `audits_ui_category_873`
+- **PR, merge and asset dialogs audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L1177` · `audits_ui_category_1177`
+- **Settings audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L1139` · `audits_ui_category_1139`
+- **Team audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L721` · `audits_ui_category_721`
+- **Timeline and History audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L493` · `audits_ui_category_493`
+- **Tools audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L607` · `audits_ui_category_607`
+- **Unreal audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L1025` · `audits_ui_category_1025`
+- **formatDayHeading()** — `src/components/changelog/ChangelogPanel.tsx:L23` · `changelogpanel_formatdayheading`
+- **isoDay()** — `src/components/changelog/ChangelogPanel.tsx:L12` · `changelogpanel_isoday`
+- **load()** — `src/components/hooks/HooksManager.tsx:L17` · `hooksmanager_load`
+- **Locks in Dashboard and dialogs audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L213` · `audits_ui_category_213`
+- **Shared navigation and layout audit category** — `audit/LUCID-GIT-UI-AUDIT.md:L435` · `audits_ui_category_435`
+- **buildDiscord()** — `src/components/changelog/ChangelogPanel.tsx:L55` · `changelogpanel_builddiscord`
+- **buildMarkdown()** — `src/components/changelog/ChangelogPanel.tsx:L29` · `changelogpanel_buildmarkdown`
+- **dispatch()** — `src/components/errors/ErrorPanel.tsx:L39` · `errorpanel_dispatch`
+- **handleDismiss()** — `src/components/errors/ErrorPanel.tsx:L28` · `errorpanel_handledismiss`
+- **install()** — `src/components/hooks/HooksManager.tsx:L52` · `hooksmanager_install`
+- **isoDaysAgo()** — `src/components/changelog/ChangelogPanel.tsx:L21` · `changelogpanel_isodaysago`
+- **todayIso()** — `src/components/changelog/ChangelogPanel.tsx:L20` · `changelogpanel_todayiso`
+- **toggle()** — `src/components/hooks/HooksManager.tsx:L36` · `hooksmanager_toggle`
+- **BlueprintFileAction()** — `src/components/shared/BlueprintFileAction.tsx:L5` · `blueprintfileaction_blueprintfileaction`
+- **UI Source means inspected implementation; Suggestion means proposed improvement; isolated selection reproduction is not end-to-end UI proof** — `audit/LUCID-GIT-UI-AUDIT.md:L11` · `audits_ui_evidence_labels`
+- **UI audit baseline uses current source and isolated selection functions; no live screenshots, screen reader or measured contrast proof** — `audit/LUCID-GIT-UI-AUDIT.md:L7-L11` · `audits_ui_baseline`
+- **UI navigation/menus/filtering reuse loaded data; fetch history/blob/comparison only on request; preserve bounded work and caching** — `audit/LUCID-GIT-UI-AUDIT.md:L15-L19` · `audits_ui_optimization`
+- **accent()** — `src/components/errors/ErrorPanel.tsx:L135` · `errorpanel_accent`
+- **authorColor()** — `src/components/activity/ActivityPanel.tsx:L93` · `activitypanel_authorcolor`
+- **authorColor()** — `src/components/locks/LockedFilesPanel.tsx:L28` · `lockedfilespanel_authorcolor`
+- **clearContextMenu()** — `src/components/locks/LockedFilesPanel.tsx:L127` · `lockedfilespanel_clearcontextmenu`
+- **closeMenu()** — `src/components/pr/PRReviewWorkspace.tsx:L53` · `prreviewworkspace_closemenu`
+- **copyToClipboard()** — `src/components/errors/ErrorPanel.tsx:L33` · `errorpanel_copytoclipboard`
+- **dayLabel()** — `src/components/activity/ActivityPanel.tsx:L83` · `activitypanel_daylabel`
+- **doBulkUnlock()** — `src/components/locks/LockedFilesPanel.tsx:L187` · `lockedfilespanel_dobulkunlock`
+- **doCopyPath()** — `src/components/locks/LockedFilesPanel.tsx:L269` · `lockedfilespanel_docopypath`
+- **doShowInExplorer()** — `src/components/locks/LockedFilesPanel.tsx:L273` · `lockedfilespanel_doshowinexplorer`
+- **doUnlock()** — `src/components/locks/LockedFilesPanel.tsx:L243` · `lockedfilespanel_dounlock`
+- **doUnlockAllMine()** — `src/components/locks/LockedFilesPanel.tsx:L219` · `lockedfilespanel_dounlockallmine`
+- **e()** — `src/components/activity/ActivityPanel.tsx:L141` · `activitypanel_e`
+- **exportSVG()** — `src/components/heatmap/LockHeatmap.tsx:L107` · `lockheatmap_exportsvg`
+- **fmtDuration()** — `src/components/heatmap/LockHeatmap.tsx:L28` · `lockheatmap_fmtduration`
+- **getGroupSelectionState()** — `src/components/locks/LockedFilesPanel.tsx:L141` · `lockedfilespanel_getgroupselectionstate`
+- **initials()** — `src/components/activity/ActivityPanel.tsx:L100` · `activitypanel_initials`
+- **initials()** — `src/components/locks/LockedFilesPanel.tsx:L35` · `lockedfilespanel_initials`
+- **keys()** — `src/components/pr/PRReviewWorkspace.tsx:L73` · `prreviewworkspace_keys`
+- **load()** — `src/components/presence/PresencePanel.tsx:L27` · `presencepanel_load`
+- **mapNotificationKind()** — `src/components/activity/ActivityPanel.tsx:L51` · `activitypanel_mapnotificationkind`
+- **matchesFilter()** — `src/components/activity/ActivityPanel.tsx:L62` · `activitypanel_matchesfilter`
+- **openMenu()** — `src/components/pr/PRReviewWorkspace.tsx:L54` · `prreviewworkspace_openmenu`
+- **openTimeline()** — `src/components/heatmap/LockHeatmap.tsx:L99` · `lockheatmap_opentimeline`
+- **outside()** — `src/components/pr/PRReviewWorkspace.tsx:L72` · `prreviewworkspace_outside`
+- **run()** — `src/components/shared/RevisionFileActions.tsx:L19` · `revisionfileactions_run`
+- **scoreToColor()** — `src/components/heatmap/LockHeatmap.tsx:L17` · `lockheatmap_scoretocolor`
+- **select()** — `src/components/pr/PRReviewWorkspace.tsx:L52` · `prreviewworkspace_select`
+- **selectAllInGroup()** — `src/components/locks/LockedFilesPanel.tsx:L129` · `lockedfilespanel_selectallingroup`
+- **severityLabel()** — `src/components/errors/ErrorPanel.tsx:L136` · `errorpanel_severitylabel`
+- **timeAgo()** — `src/components/activity/ActivityPanel.tsx:L74` · `activitypanel_timeago`
+- **timeAgo()** — `src/components/heatmap/ForecastPanel.tsx:L22` · `forecastpanel_timeago`
+- **timeAgo()** — `src/components/heatmap/LockHeatmap.tsx:L37` · `lockheatmap_timeago`
+- **timeAgoStr()** — `src/components/locks/LockedFilesPanel.tsx:L19` · `lockedfilespanel_timeagostr`
+- **toggleExpand()** — `src/components/hooks/HooksManager.tsx:L65` · `hooksmanager_toggleexpand`
+- **toggleLockSelection()** — `src/components/locks/LockedFilesPanel.tsx:L162` · `lockedfilespanel_togglelockselection`
+- **toggleOwner()** — `src/components/locks/LockedFilesPanel.tsx:L148` · `lockedfilespanel_toggleowner`
+- **useBlueprintFileMenu()** — `src/lib/useBlueprintFileMenu.tsx:L8` · `useblueprintfilemenu_useblueprintfilemenu`

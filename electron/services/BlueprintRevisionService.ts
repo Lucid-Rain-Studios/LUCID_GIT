@@ -10,8 +10,8 @@ import { confirmsMapOwnership, discoverExternalActors, emptyExternalReview, esti
 import { withRepoSlot } from '../util/repo-gate'
 import type { BlueprintComparison, BlueprintDocument, BlueprintRequest, BlueprintSide } from '../blueprintTypes'
 
-const EXTRACTOR_VERSION = '10-uassetapi-3228c1e8'
-const READER_VERSION = 10
+const EXTRACTOR_VERSION = '14-uassetapi-3228c1e8'
+const READER_VERSION = 14
 const MAX_BYTES = 256 * 1024 * 1024
 const MAX_CACHE_BYTES = 256 * 1024 * 1024
 const sha = (b: string | Buffer) => crypto.createHash('sha256').update(b).digest('hex')
@@ -136,7 +136,7 @@ export class BlueprintRevisionService {
   private async side(repo: string, file: string, ref: string, signal?: AbortSignal, refreshKeys?: Set<string>, byteLimit = MAX_BYTES): Promise<BlueprintSide> {
     const snapshot = await withRepoSlot(repo, 'read', () => this.resolveSide(repo, file, ref, signal))
     if ('status' in snapshot) return snapshot
-    const { identity, resolved, companionIdentity, companionResolved } = snapshot
+    const { identity, resolved, companionIdentity, companionResolved, revisionRef } = snapshot
     if (byteLimit < MAX_BYTES) {
       const estimate = await withRepoSlot(repo, 'read', async () => await estimatedCaptureBytes(repo, file, resolved) + await estimatedCaptureBytes(repo, file.replace(/\.(uasset|umap)$/i, '.uexp'), companionResolved))
       if (estimate > byteLimit) return { ref, path: file, status: 'unavailable', reason: 'External actor package exceeds the remaining 64 MB capture budget.' }
@@ -153,10 +153,10 @@ export class BlueprintRevisionService {
       }, () => { this.identities.delete(key) })
     }
     const result = await promise
-    return (result.sourceBytes ?? 0) > byteLimit ? { ref, path: file, status: 'unavailable', reason: 'External actor package exceeds the remaining 64 MB capture budget.' } : result
+    return (result.sourceBytes ?? 0) > byteLimit ? { ref, path: file, status: 'unavailable', reason: 'External actor package exceeds the remaining 64 MB capture budget.' } : { ...result, resolvedRef: revisionRef }
   }
 
-  private async resolveSide(repo: string, file: string, ref: string, signal?: AbortSignal): Promise<BlueprintSide | { identity: string; resolved: string; companionIdentity: string; companionResolved: string }> {
+  private async resolveSide(repo: string, file: string, ref: string, signal?: AbortSignal): Promise<BlueprintSide | { identity: string; resolved: string; companionIdentity: string; companionResolved: string; revisionRef: string }> {
     if (signal?.aborted) throw new Error('Blueprint review cancelled.')
     if (ref === 'ABSENT') return { ref, path: file, status: 'absent' }
     let identity: string, resolved = ref, companionRef = ref
@@ -204,7 +204,7 @@ export class BlueprintRevisionService {
         companionResolved = 'BLOB:' + companionIdentity
       }
     }
-    return { identity, resolved, companionIdentity, companionResolved }
+    return { identity, resolved, companionIdentity, companionResolved, revisionRef: companionRef }
   }
 
   private async loadSide(repo: string, file: string, resolved: string, ref: string, companionRef: string, companionIdentity: string, refreshKeys?: Set<string>, byteLimit = MAX_BYTES): Promise<BlueprintSide> {

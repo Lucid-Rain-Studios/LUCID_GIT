@@ -1,0 +1,314 @@
+# Regression harness and fixtures
+
+[Back to index](index.md)
+
+## Source files
+
+- [docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md](../../docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md)
+- [docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md](../../docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md)
+- [tests/amend-status.spec.js](../../tests/amend-status.spec.js)
+- [tests/animation-review.spec.js](../../tests/animation-review.spec.js)
+- [tests/animation-sequence-review.spec.js](../../tests/animation-sequence-review.spec.js)
+- [tests/asset-inventory.spec.js](../../tests/asset-inventory.spec.js)
+- [tests/blend-space-review.spec.js](../../tests/blend-space-review.spec.js)
+- [tests/blueprint-diff.spec.js](../../tests/blueprint-diff.spec.js)
+- [tests/blueprint-lfs.spec.js](../../tests/blueprint-lfs.spec.js)
+- [tests/blueprint-viewer.spec.js](../../tests/blueprint-viewer.spec.js)
+- [tests/branch-menu.spec.js](../../tests/branch-menu.spec.js)
+- [tests/branch-switch.spec.js](../../tests/branch-switch.spec.js)
+- [tests/bulk-unlock.spec.js](../../tests/bulk-unlock.spec.js)
+- [tests/discard-lock.spec.js](../../tests/discard-lock.spec.js)
+- [tests/discard-toolbar.spec.js](../../tests/discard-toolbar.spec.js)
+- [tests/discard.spec.js](../../tests/discard.spec.js)
+- [tests/easy-git.spec.js](../../tests/easy-git.spec.js)
+- [tests/easy-p3.spec.js](../../tests/easy-p3.spec.js)
+- [tests/easy-renderer.spec.js](../../tests/easy-renderer.spec.js)
+- [tests/external-actor-review.spec.js](../../tests/external-actor-review.spec.js)
+- [tests/firebase-presence.spec.js](../../tests/firebase-presence.spec.js)
+- [tests/force-push.spec.js](../../tests/force-push.spec.js)
+- [tests/gate.spec.js](../../tests/gate.spec.js)
+- [tests/helpers.js](../../tests/helpers.js)
+- [tests/index-help.spec.js](../../tests/index-help.spec.js)
+- [tests/index-recovery.spec.js](../../tests/index-recovery.spec.js)
+- [tests/index-unblock.spec.js](../../tests/index-unblock.spec.js)
+- [tests/lfs.spec.js](../../tests/lfs.spec.js)
+- [tests/lock-list-timeout.spec.js](../../tests/lock-list-timeout.spec.js)
+- [tests/map-preview.spec.js](../../tests/map-preview.spec.js)
+- [tests/medium-p1.spec.js](../../tests/medium-p1.spec.js)
+- [tests/medium-p2-integrations.spec.js](../../tests/medium-p2-integrations.spec.js)
+- [tests/medium-p2-ui.spec.js](../../tests/medium-p2-ui.spec.js)
+- [tests/medium-p2.spec.js](../../tests/medium-p2.spec.js)
+- [tests/medium-p3.spec.js](../../tests/medium-p3.spec.js)
+- [tests/merge-resolve-gate.spec.js](../../tests/merge-resolve-gate.spec.js)
+- [tests/pr-create-preview.spec.js](../../tests/pr-create-preview.spec.js)
+- [tests/pr-review.spec.js](../../tests/pr-review.spec.js)
+- [tests/pr-revisions.spec.js](../../tests/pr-revisions.spec.js)
+- [tests/presence.spec.js](../../tests/presence.spec.js)
+- [tests/push-branch.spec.js](../../tests/push-branch.spec.js)
+- [tests/push-preflight.spec.js](../../tests/push-preflight.spec.js)
+- [tests/remote.spec.js](../../tests/remote.spec.js)
+- [tests/renderer-harness.js](../../tests/renderer-harness.js)
+- [tests/responsiveness.spec.js](../../tests/responsiveness.spec.js)
+- [tests/shutdown.spec.js](../../tests/shutdown.spec.js)
+- [tests/stash-conflict.spec.js](../../tests/stash-conflict.spec.js)
+- [tests/statetree-review.spec.js](../../tests/statetree-review.spec.js)
+- [tests/status-refresh.spec.js](../../tests/status-refresh.spec.js)
+- [tests/unreal-asset-review.spec.js](../../tests/unreal-asset-review.spec.js)
+- [tests/unreal-detection.spec.js](../../tests/unreal-detection.spec.js)
+- [tests/update-regressions.spec.js](../../tests/update-regressions.spec.js)
+
+## Entities and evidence
+
+- **helpers.js** — `tests/helpers.js:L1` · `tests_helpers_js`
+- **renderer-harness.js** — `tests/renderer-harness.js:L1` · `tests_renderer_harness_js`
+- **git()** — `tests/helpers.js:L9` · `helpers_git`
+- **tmpDir()** — `tests/helpers.js:L25` · `helpers_tmpdir`
+- **component()** — `tests/renderer-harness.js:L8` · `renderer_harness_component`
+- **medium-p2-ui.spec.js** — `tests/medium-p2-ui.spec.js:L1` · `tests_medium_p2_ui_spec_js`
+- **find()** — `tests/renderer-harness.js:L53` · `renderer_harness_find`
+- **firebase-presence.spec.js** — `tests/firebase-presence.spec.js:L1` · `tests_firebase_presence_spec_js`
+- **medium-p1.spec.js** — `tests/medium-p1.spec.js:L1` · `tests_medium_p1_spec_js`
+- **blueprint-diff.spec.js** — `tests/blueprint-diff.spec.js:L1` · `tests_blueprint_diff_spec_js`
+- **merge-resolve-gate.spec.js** — `tests/merge-resolve-gate.spec.js:L1` · `tests_merge_resolve_gate_spec_js`
+- **Element** — `tests/medium-p2-ui.spec.js:L49` · `medium_p2_ui_spec_element`
+- **medium-p2.spec.js** — `tests/medium-p2.spec.js:L1` · `tests_medium_p2_spec_js`
+- **index-unblock.spec.js** — `tests/index-unblock.spec.js:L1` · `tests_index_unblock_spec_js`
+- **pr-create-preview.spec.js** — `tests/pr-create-preview.spec.js:L1` · `tests_pr_create_preview_spec_js`
+- **animation-sequence-review.spec.js** — `tests/animation-sequence-review.spec.js:L1` · `tests_animation_sequence_review_spec_js`
+- **branch-menu.spec.js** — `tests/branch-menu.spec.js:L1` · `tests_branch_menu_spec_js`
+- **bulk-unlock.spec.js** — `tests/bulk-unlock.spec.js:L1` · `tests_bulk_unlock_spec_js`
+- **medium-p3.spec.js** — `tests/medium-p3.spec.js:L1` · `tests_medium_p3_spec_js`
+- **pr-revisions.spec.js** — `tests/pr-revisions.spec.js:L1` · `tests_pr_revisions_spec_js`
+- **statetree-review.spec.js** — `tests/statetree-review.spec.js:L1` · `tests_statetree_review_spec_js`
+- **store()** — `tests/renderer-harness.js:L59` · `renderer_harness_store`
+- **amend-status.spec.js** — `tests/amend-status.spec.js:L1` · `tests_amend_status_spec_js`
+- **blueprint-lfs.spec.js** — `tests/blueprint-lfs.spec.js:L1` · `tests_blueprint_lfs_spec_js`
+- **blueprint-viewer.spec.js** — `tests/blueprint-viewer.spec.js:L1` · `tests_blueprint_viewer_spec_js`
+- **discard-toolbar.spec.js** — `tests/discard-toolbar.spec.js:L1` · `tests_discard_toolbar_spec_js`
+- **index-recovery.spec.js** — `tests/index-recovery.spec.js:L1` · `tests_index_recovery_spec_js`
+- **map-preview.spec.js** — `tests/map-preview.spec.js:L1` · `tests_map_preview_spec_js`
+- **medium-p2-integrations.spec.js** — `tests/medium-p2-integrations.spec.js:L1` · `tests_medium_p2_integrations_spec_js`
+- **presence.spec.js** — `tests/presence.spec.js:L1` · `tests_presence_spec_js`
+- **unreal-asset-review.spec.js** — `tests/unreal-asset-review.spec.js:L1` · `tests_unreal_asset_review_spec_js`
+- **Session** — `tests/firebase-presence.spec.js:L252` · `firebase_presence_spec_session`
+- **animation-review.spec.js** — `tests/animation-review.spec.js:L1` · `tests_animation_review_spec_js`
+- **blend-space-review.spec.js** — `tests/blend-space-review.spec.js:L1` · `tests_blend_space_review_spec_js`
+- **easy-p3.spec.js** — `tests/easy-p3.spec.js:L1` · `tests_easy_p3_spec_js`
+- **external-actor-review.spec.js** — `tests/external-actor-review.spec.js:L1` · `tests_external_actor_review_spec_js`
+- **index-help.spec.js** — `tests/index-help.spec.js:L1` · `tests_index_help_spec_js`
+- **lock-list-timeout.spec.js** — `tests/lock-list-timeout.spec.js:L1` · `tests_lock_list_timeout_spec_js`
+- **setup()** — `tests/external-actor-review.spec.js:L16` · `external_actor_review_spec_setup`
+- **asset-inventory.spec.js** — `tests/asset-inventory.spec.js:L1` · `tests_asset_inventory_spec_js`
+- **discard.spec.js** — `tests/discard.spec.js:L1` · `tests_discard_spec_js`
+- **easy-renderer.spec.js** — `tests/easy-renderer.spec.js:L1` · `tests_easy_renderer_spec_js`
+- **fixture()** — `tests/discard-lock.spec.js:L8` · `discard_lock_spec_fixture`
+- **gate.spec.js** — `tests/gate.spec.js:L1` · `tests_gate_spec_js`
+- **graph()** — `tests/blueprint-diff.spec.js:L7` · `blueprint_diff_spec_graph`
+- **push-preflight.spec.js** — `tests/push-preflight.spec.js:L1` · `tests_push_preflight_spec_js`
+- **unreal-detection.spec.js** — `tests/unreal-detection.spec.js:L1` · `tests_unreal_detection_spec_js`
+- **update-regressions.spec.js** — `tests/update-regressions.spec.js:L1` · `tests_update_regressions_spec_js`
+- **.querySelector()** — `tests/medium-p2-ui.spec.js:L58` · `medium_p2_ui_spec_element_queryselector`
+- **Chromium evidence covers graph render, pan/zoom, focus, fullscreen and narrow viewport** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L79` · `assetdocs_browser`
+- **auth()** — `tests/medium-p2.spec.js:L93` · `medium_p2_spec_auth`
+- **branch-switch.spec.js** — `tests/branch-switch.spec.js:L1` · `tests_branch_switch_spec_js`
+- **conflictedRepo()** — `tests/discard.spec.js:L35` · `discard_spec_conflictedrepo`
+- **dialog()** — `tests/pr-create-preview.spec.js:L63` · `pr_create_preview_spec_dialog`
+- **dirtyRepo()** — `tests/discard.spec.js:L15` · `discard_spec_dirtyrepo`
+- **discard-lock.spec.js** — `tests/discard-lock.spec.js:L1` · `tests_discard_lock_spec_js`
+- **easy-git.spec.js** — `tests/easy-git.spec.js:L1` · `tests_easy_git_spec_js`
+- **harness()** — `tests/discard-toolbar.spec.js:L9` · `discard_toolbar_spec_harness`
+- **id()** — `tests/statetree-review.spec.js:L9` · `statetree_review_spec_id`
+- **lfsRepo()** — `tests/helpers.js:L44` · `helpers_lfsrepo`
+- **panel()** — `tests/presence.spec.js:L100` · `presence_spec_panel`
+- **remote.spec.js** — `tests/remote.spec.js:L1` · `tests_remote_spec_js`
+- **repo()** — `tests/easy-git.spec.js:L9` · `easy_git_spec_repo`
+- **repo()** — `tests/index-recovery.spec.js:L9` · `index_recovery_spec_repo`
+- **repo()** — `tests/index-unblock.spec.js:L12` · `index_unblock_spec_repo`
+- **repo()** — `tests/medium-p1.spec.js:L11` · `medium_p1_spec_repo`
+- **repo()** — `tests/medium-p2.spec.js:L11` · `medium_p2_spec_repo`
+- **repo()** — `tests/pr-revisions.spec.js:L8` · `pr_revisions_spec_repo`
+- **repoStore()** — `tests/medium-p1.spec.js:L278` · `medium_p1_spec_repostore`
+- **repoWithOrigin()** — `tests/remote.spec.js:L13` · `remote_spec_repowithorigin`
+- **repoWithStaleStatData()** — `tests/status-refresh.spec.js:L23` · `status_refresh_spec_repowithstalestatdata`
+- **repoWithStashConflict()** — `tests/stash-conflict.spec.js:L17` · `stash_conflict_spec_repowithstashconflict`
+- **repository()** — `tests/update-regressions.spec.js:L78` · `update_regressions_spec_repository`
+- **result()** — `tests/blueprint-diff.spec.js:L195` · `blueprint_diff_spec_result`
+- **seedRepo()** — `tests/index-help.spec.js:L51` · `index_help_spec_seedrepo`
+- **shutdown.spec.js** — `tests/shutdown.spec.js:L1` · `tests_shutdown_spec_js`
+- **status-refresh.spec.js** — `tests/status-refresh.spec.js:L1` · `tests_status_refresh_spec_js`
+- **topBar()** — `tests/push-preflight.spec.js:L68` · `push_preflight_spec_topbar`
+- **ui()** — `tests/index-unblock.spec.js:L217` · `index_unblock_spec_ui`
+- **.add()** — `tests/medium-p2-ui.spec.js:L51` · `medium_p2_ui_spec_element_add`
+- **.closest()** — `tests/medium-p2-ui.spec.js:L54` · `medium_p2_ui_spec_element_closest`
+- **.constructor()** — `tests/medium-p2-ui.spec.js:L50` · `medium_p2_ui_spec_element_constructor`
+- **.contains()** — `tests/medium-p2-ui.spec.js:L53` · `medium_p2_ui_spec_element_contains`
+- **.focus()** — `tests/medium-p2-ui.spec.js:L52` · `medium_p2_ui_spec_element_focus`
+- **.getClientRects()** — `tests/medium-p2-ui.spec.js:L56` · `medium_p2_ui_spec_element_getclientrects`
+- **.hasAttribute()** — `tests/medium-p2-ui.spec.js:L55` · `medium_p2_ui_spec_element_hasattribute`
+- **.querySelectorAll()** — `tests/medium-p2-ui.spec.js:L57` · `medium_p2_ui_spec_element_queryselectorall`
+- **.setLocked()** — `tests/firebase-presence.spec.js:L252` · `firebase_presence_spec_session_setlocked`
+- **.start()** — `tests/firebase-presence.spec.js:L252` · `firebase_presence_spec_session_start`
+- **.stop()** — `tests/firebase-presence.spec.js:L252` · `firebase_presence_spec_session_stop`
+- **.tick()** — `tests/firebase-presence.spec.js:L252` · `firebase_presence_spec_session_tick`
+- **Development requires .NET 10; installed helper is self-contained outside ASAR** — `docs/BLUEPRINT_REVISION_VIEWER_IMPLEMENTATION.md:L31` · `assetdocs_publish`
+- **Inventory first page 250 rows; existing service bounds preserved** — `docs/UNREAL_ASSET_REVIEW_IMPLEMENTATION.md:L15` · `assetdocs_paging`
+- **asset()** — `tests/medium-p1.spec.js:L27` · `medium_p1_spec_asset`
+- **badge()** — `tests/amend-status.spec.js:L25` · `amend_status_spec_badge`
+- **breakToPointer()** — `tests/helpers.js:L60` · `helpers_breaktopointer`
+- **button()** — `tests/index-recovery.spec.js:L220` · `index_recovery_spec_button`
+- **button()** — `tests/push-preflight.spec.js:L96` · `push_preflight_spec_button`
+- **checkbox()** — `tests/amend-status.spec.js:L26` · `amend_status_spec_checkbox`
+- **client()** — `tests/firebase-presence.spec.js:L65` · `firebase_presence_spec_client`
+- **commit()** — `tests/pr-create-preview.spec.js:L20` · `pr_create_preview_spec_commit`
+- **commit()** — `tests/pr-revisions.spec.js:L20` · `pr_revisions_spec_commit`
+- **confirm()** — `tests/medium-p2-ui.spec.js:L40` · `medium_p2_ui_spec_confirm`
+- **confirm()** — `tests/pr-revisions.spec.js:L147` · `pr_revisions_spec_confirm`
+- **controlledAsset()** — `tests/blueprint-lfs.spec.js:L12` · `blueprint_lfs_spec_controlledasset`
+- **diff()** — `tests/blueprint-diff.spec.js:L55` · `blueprint_diff_spec_diff`
+- **discardButton()** — `tests/discard-toolbar.spec.js:L27` · `discard_toolbar_spec_discardbutton`
+- **entry()** — `tests/pr-create-preview.spec.js:L8` · `pr_create_preview_spec_entry`
+- **finishOld()** — `tests/medium-p1.spec.js:L293` · `medium_p1_spec_finishold`
+- **flush()** — `tests/medium-p1.spec.js:L9` · `medium_p1_spec_flush`
+- **gate()** — `tests/medium-p1.spec.js:L138` · `medium_p1_spec_gate`
+- **gitError()** — `tests/index-help.spec.js:L62` · `index_help_spec_giterror`
+- **index()** — `tests/index-recovery.spec.js:L17` · `index_recovery_spec_index`
+- **index()** — `tests/index-unblock.spec.js:L19` · `index_unblock_spec_index`
+- **indexPath()** — `tests/index-help.spec.js:L61` · `index_help_spec_indexpath`
+- **labels()** — `tests/blueprint-diff.spec.js:L236` · `blueprint_diff_spec_labels`
+- **loadService()** — `tests/easy-p3.spec.js:L37` · `easy_p3_spec_loadservice`
+- **makeGraph()** — `tests/blueprint-diff.spec.js:L228` · `blueprint_diff_spec_makegraph`
+- **menuAction()** — `tests/branch-menu.spec.js:L47` · `branch_menu_spec_menuaction`
+- **mountHandlers()** — `tests/merge-resolve-gate.spec.js:L11` · `merge_resolve_gate_spec_mounthandlers`
+- **node()** — `tests/blueprint-diff.spec.js:L6` · `blueprint_diff_spec_node`
+- **object()** — `tests/statetree-review.spec.js:L11` · `statetree_review_spec_object`
+- **pr-review.spec.js** — `tests/pr-review.spec.js:L1` · `tests_pr_review_spec_js`
+- **presenceFile()** — `tests/update-regressions.spec.js:L14` · `update_regressions_spec_presencefile`
+- **processRegistry()** — `tests/index-unblock.spec.js:L111` · `index_unblock_spec_processregistry`
+- **push-branch.spec.js** — `tests/push-branch.spec.js:L1` · `tests_push_branch_spec_js`
+- **reader()** — `tests/blueprint-lfs.spec.js:L96` · `blueprint_lfs_spec_reader`
+- **refresh()** — `tests/medium-p2-ui.spec.js:L80` · `medium_p2_ui_spec_refresh`
+- **registry()** — `tests/shutdown.spec.js:L6` · `shutdown_spec_registry`
+- **remoteRow()** — `tests/branch-menu.spec.js:L46` · `branch_menu_spec_remoterow`
+- **reviewServer()** — `tests/pr-review.spec.js:L36` · `pr_review_spec_reviewserver`
+- **saved()** — `tests/external-actor-review.spec.js:L13` · `external_actor_review_spec_saved`
+- **select()** — `tests/discard-toolbar.spec.js:L28` · `discard_toolbar_spec_select`
+- **service()** — `tests/bulk-unlock.spec.js:L9` · `bulk_unlock_spec_service`
+- **service()** — `tests/pr-create-preview.spec.js:L10` · `pr_create_preview_spec_service`
+- **setup()** — `tests/lock-list-timeout.spec.js:L8` · `lock_list_timeout_spec_setup`
+- **setup()** — `tests/medium-p3.spec.js:L10` · `medium_p3_spec_setup`
+- **sha()** — `tests/pr-create-preview.spec.js:L7` · `pr_create_preview_spec_sha`
+- **stash-conflict.spec.js** — `tests/stash-conflict.spec.js:L1` · `tests_stash_conflict_spec_js`
+- **task()** — `tests/statetree-review.spec.js:L10` · `statetree_review_spec_task`
+- **undo()** — `tests/medium-p1.spec.js:L21` · `medium_p1_spec_undo`
+- **write()** — `tests/external-actor-review.spec.js:L15` · `external_actor_review_spec_write`
+- **Window()** — `tests/medium-p2-ui.spec.js:L124` · `medium_p2_ui_spec_window`
+- **anchor()** — `tests/animation-sequence-review.spec.js:L5` · `animation_sequence_review_spec_anchor`
+- **choose()** — `tests/map-preview.spec.js:L51` · `map_preview_spec_choose`
+- **cleanup()** — `tests/helpers.js:L31` · `helpers_cleanup`
+- **compare()** — `tests/blueprint-viewer.spec.js:L99` · `blueprint_viewer_spec_compare`
+- **countGitSpawns()** — `tests/helpers.js:L84` · `helpers_countgitspawns`
+- **database()** — `tests/firebase-presence.spec.js:L28` · `firebase_presence_spec_database`
+- **deferred()** — `tests/amend-status.spec.js:L5` · `amend_status_spec_deferred`
+- **deferred()** — `tests/easy-renderer.spec.js:L4` · `easy_renderer_spec_deferred`
+- **deferred()** — `tests/lock-list-timeout.spec.js:L6` · `lock_list_timeout_spec_deferred`
+- **deferred()** — `tests/medium-p1.spec.js:L10` · `medium_p1_spec_deferred`
+- **deferred()** — `tests/medium-p2-integrations.spec.js:L6` · `medium_p2_integrations_spec_deferred`
+- **deferred()** — `tests/medium-p2.spec.js:L7` · `medium_p2_spec_deferred`
+- **deferred()** — `tests/medium-p2-ui.spec.js:L6` · `medium_p2_ui_spec_deferred`
+- **delayed()** — `tests/firebase-presence.spec.js:L236` · `firebase_presence_spec_delayed`
+- **doc()** — `tests/animation-sequence-review.spec.js:L60` · `animation_sequence_review_spec_doc`
+- **doc()** — `tests/asset-inventory.spec.js:L71` · `asset_inventory_spec_doc`
+- **doc()** — `tests/blend-space-review.spec.js:L45` · `blend_space_review_spec_doc`
+- **doc()** — `tests/map-preview.spec.js:L91` · `map_preview_spec_doc`
+- **end()** — `tests/medium-p1.spec.js:L261` · `medium_p1_spec_end`
+- **entry()** — `tests/firebase-presence.spec.js:L9` · `firebase_presence_spec_entry`
+- **error()** — `tests/index-unblock.spec.js:L181` · `index_unblock_spec_error`
+- **error()** — `tests/medium-p2.spec.js:L123` · `medium_p2_spec_error`
+- **error()** — `tests/merge-resolve-gate.spec.js:L109` · `merge_resolve_gate_spec_error`
+- **error()** — `tests/presence.spec.js:L90` · `presence_spec_error`
+- **event()** — `tests/medium-p3.spec.js:L23` · `medium_p3_spec_event`
+- **explicitTransform()** — `tests/map-preview.spec.js:L16` · `map_preview_spec_explicittransform`
+- **flush()** — `tests/amend-status.spec.js:L4` · `amend_status_spec_flush`
+- **flush()** — `tests/branch-menu.spec.js:L6` · `branch_menu_spec_flush`
+- **flush()** — `tests/branch-switch.spec.js:L9` · `branch_switch_spec_flush`
+- **flush()** — `tests/bulk-unlock.spec.js:L8` · `bulk_unlock_spec_flush`
+- **flush()** — `tests/discard-toolbar.spec.js:L7` · `discard_toolbar_spec_flush`
+- **flush()** — `tests/easy-p3.spec.js:L5` · `easy_p3_spec_flush`
+- **flush()** — `tests/easy-renderer.spec.js:L3` · `easy_renderer_spec_flush`
+- **flush()** — `tests/firebase-presence.spec.js:L7` · `firebase_presence_spec_flush`
+- **flush()** — `tests/index-unblock.spec.js:L9` · `index_unblock_spec_flush`
+- **flush()** — `tests/lock-list-timeout.spec.js:L5` · `lock_list_timeout_spec_flush`
+- **flush()** — `tests/medium-p2-integrations.spec.js:L5` · `medium_p2_integrations_spec_flush`
+- **flush()** — `tests/medium-p2.spec.js:L8` · `medium_p2_spec_flush`
+- **flush()** — `tests/medium-p2-ui.spec.js:L5` · `medium_p2_ui_spec_flush`
+- **flush()** — `tests/merge-resolve-gate.spec.js:L8` · `merge_resolve_gate_spec_flush`
+- **flush()** — `tests/pr-create-preview.spec.js:L6` · `pr_create_preview_spec_flush`
+- **flush()** — `tests/pr-revisions.spec.js:L148` · `pr_revisions_spec_flush`
+- **flush()** — `tests/presence.spec.js:L6` · `presence_spec_flush`
+- **flush()** — `tests/shutdown.spec.js:L4` · `shutdown_spec_flush`
+- **flush()** — `tests/unreal-detection.spec.js:L7` · `unreal_detection_spec_flush`
+- **force-push.spec.js** — `tests/force-push.spec.js:L1` · `tests_force_push_spec_js`
+- **gatedTask()** — `tests/gate.spec.js:L17` · `gate_spec_gatedtask`
+- **globalFilters()** — `tests/remote.spec.js:L82` · `remote_spec_globalfilters`
+- **info()** — `tests/medium-p2.spec.js:L123` · `medium_p2_spec_info`
+- **invalidateStatCache()** — `tests/status-refresh.spec.js:L41` · `status_refresh_spec_invalidatestatcache`
+- **invoke()** — `tests/medium-p3.spec.js:L88` · `medium_p3_spec_invoke`
+- **key()** — `tests/medium-p2-ui.spec.js:L65` · `medium_p2_ui_spec_key`
+- **lfs.spec.js** — `tests/lfs.spec.js:L1` · `tests_lfs_spec_js`
+- **lock()** — `tests/medium-p3.spec.js:L102` · `medium_p3_spec_lock`
+- **manifest()** — `tests/unreal-detection.spec.js:L8` · `unreal_detection_spec_manifest`
+- **markConflictsResolved()** — `tests/merge-resolve-gate.spec.js:L113` · `merge_resolve_gate_spec_markconflictsresolved`
+- **measureLoopTicks()** — `tests/helpers.js:L71` · `helpers_measureloopticks`
+- **node()** — `tests/animation-review.spec.js:L12` · `animation_review_spec_node`
+- **noop()** — `tests/medium-p2-integrations.spec.js:L7` · `medium_p2_integrations_spec_noop`
+- **noop()** — `tests/medium-p2-ui.spec.js:L7` · `medium_p2_ui_spec_noop`
+- **noop()** — `tests/medium-p3.spec.js:L6` · `medium_p3_spec_noop`
+- **noop()** — `tests/pr-revisions.spec.js:L125` · `pr_revisions_spec_noop`
+- **object()** — `tests/animation-sequence-review.spec.js:L7` · `animation_sequence_review_spec_object`
+- **object()** — `tests/asset-inventory.spec.js:L11` · `asset_inventory_spec_object`
+- **object()** — `tests/blend-space-review.spec.js:L6` · `blend_space_review_spec_object`
+- **object()** — `tests/map-preview.spec.js:L13` · `map_preview_spec_object`
+- **object()** — `tests/unreal-asset-review.spec.js:L11` · `unreal_asset_review_spec_object`
+- **onClose()** — `tests/blueprint-diff.spec.js:L261` · `blueprint_diff_spec_onclose`
+- **onFallback()** — `tests/blueprint-diff.spec.js:L21` · `blueprint_diff_spec_onfallback`
+- **pin()** — `tests/animation-review.spec.js:L11` · `animation_review_spec_pin`
+- **preemptRepoReads()** — `tests/merge-resolve-gate.spec.js:L108` · `merge_resolve_gate_spec_preemptreporeads`
+- **preventDefault()** — `tests/branch-menu.spec.js:L49` · `branch_menu_spec_preventdefault`
+- **preventDefault()** — `tests/easy-renderer.spec.js:L187` · `easy_renderer_spec_preventdefault`
+- **preventDefault()** — `tests/medium-p1.spec.js:L194` · `medium_p1_spec_preventdefault`
+- **props()** — `tests/blueprint-diff.spec.js:L189` · `blueprint_diff_spec_props`
+- **read()** — `tests/animation-review.spec.js:L9` · `animation_review_spec_read`
+- **read()** — `tests/animation-sequence-review.spec.js:L35` · `animation_sequence_review_spec_read`
+- **read()** — `tests/blueprint-viewer.spec.js:L9` · `blueprint_viewer_spec_read`
+- **read()** — `tests/presence.spec.js:L93` · `presence_spec_read`
+- **read()** — `tests/statetree-review.spec.js:L45` · `statetree_review_spec_read`
+- **read()** — `tests/unreal-asset-review.spec.js:L9` · `unreal_asset_review_spec_read`
+- **recordConflictEvent()** — `tests/merge-resolve-gate.spec.js:L113` · `merge_resolve_gate_spec_recordconflictevent`
+- **recordStatusCalls()** — `tests/discard.spec.js:L65` · `discard_spec_recordstatuscalls`
+- **removeObject()** — `tests/blueprint-lfs.spec.js:L95` · `blueprint_lfs_spec_removeobject`
+- **render()** — `tests/amend-status.spec.js:L24` · `amend_status_spec_render`
+- **render()** — `tests/bulk-unlock.spec.js:L133` · `bulk_unlock_spec_render`
+- **render()** — `tests/firebase-presence.spec.js:L278` · `firebase_presence_spec_render`
+- **repair()** — `tests/index-recovery.spec.js:L18` · `index_recovery_spec_repair`
+- **request()** — `tests/blueprint-lfs.spec.js:L97` · `blueprint_lfs_spec_request`
+- **responsiveness.spec.js** — `tests/responsiveness.spec.js:L1` · `tests_responsiveness_spec_js`
+- **sample()** — `tests/blend-space-review.spec.js:L7` · `blend_space_review_spec_sample`
+- **save()** — `tests/medium-p2-ui.spec.js:L114` · `medium_p2_ui_spec_save`
+- **segment()** — `tests/animation-sequence-review.spec.js:L6` · `animation_sequence_review_spec_segment`
+- **setTheme()** — `tests/easy-p3.spec.js:L111` · `easy_p3_spec_settheme`
+- **settle()** — `tests/gate.spec.js:L30` · `gate_spec_settle`
+- **side()** — `tests/statetree-review.spec.js:L14` · `statetree_review_spec_side`
+- **side()** — `tests/unreal-asset-review.spec.js:L12` · `unreal_asset_review_spec_side`
+- **sizeOf()** — `tests/helpers.js:L64` · `helpers_sizeof`
+- **start()** — `tests/index-unblock.spec.js:L121` · `index_unblock_spec_start`
+- **state()** — `tests/unreal-asset-review.spec.js:L94` · `unreal_asset_review_spec_state`
+- **stopPropagation()** — `tests/branch-menu.spec.js:L49` · `branch_menu_spec_stoppropagation`
+- **stub()** — `tests/merge-resolve-gate.spec.js:L98` · `merge_resolve_gate_spec_stub`
+- **targets()** — `tests/bulk-unlock.spec.js:L22` · `bulk_unlock_spec_targets`
+- **text()** — `tests/bulk-unlock.spec.js:L134` · `bulk_unlock_spec_text`
+- **text()** — `tests/presence.spec.js:L109` · `presence_spec_text`
+- **track()** — `tests/blueprint-viewer.spec.js:L359` · `blueprint_viewer_spec_track`
+- **valid()** — `tests/medium-p2-integrations.spec.js:L13` · `medium_p2_integrations_spec_valid`
+- **walk()** — `tests/medium-p2.spec.js:L138` · `medium_p2_spec_walk`
+- **warn()** — `tests/medium-p2.spec.js:L123` · `medium_p2_spec_warn`
+- **warn()** — `tests/merge-resolve-gate.spec.js:L109` · `merge_resolve_gate_spec_warn`

@@ -1,6 +1,6 @@
 const { test, expect } = require('@playwright/test')
 const { component, find } = require('./renderer-harness')
-const { stateTreeEntries, stateTreeLinks } = component('src/lib/stateTreeReview.ts').exports
+const { stateTreeEntries, stateTreeLinks, stateTreeHierarchy } = component('src/lib/stateTreeReview.ts').exports
 const { assetChanges } = component('src/lib/unrealAssetReview.ts').exports
 const guid = n => n.toString(16).padStart(32, '0')
 const endpoint = (id, name) => ({ StructID: { StructID: id }, Segments: [{ Name: name, ArrayIndex: -1 }] })
@@ -37,7 +37,34 @@ test('binding inspection uses only the captured side and links context/parameter
   expect(stateTreeLinks({ ...state, properties: { InstanceObject: instance.path } }, [instance])[0].object).toBe(instance)
   let selected
   const harness = component('src/components/diff/UnrealAssetReview.tsx', { '../../lib/stateTreeReview': { stateTreeLinks }, '@/lib/unrealAssetReview': component('src/lib/unrealAssetReview.ts').exports }, { __privateExports: ['ObjectInspector'] })
-  const tree = harness.render('ObjectInspector', { object: entries[0], objects: [schema, state, ...entries], onSelect: value => { selected = value } })
+  const tree = harness.render('ObjectInspector', { object: entries[0], objects: [schema, state, ...entries], linkSides: [], onOpen() {}, onSelect: value => { selected = value } })
   const button = find(tree, node => node.type === 'button' && node.props.children.flat().join('') === 'Inspect binding source')
   expect(button).toBeTruthy(); button.props.onClick(); expect(selected).toBe(schema)
+})
+
+
+test('linked subtrees resolve only direct unique state GUIDs within the captured source package',()=>{
+  const linked={...a,properties:{LinkedSubtree:{LinkedSubtree:{ID:{ID:b.id},Name:'Old target name',LinkType:'EStateTreeTransitionType::GotoState'}}}}
+  expect(stateTreeLinks(linked,[a,b])[0]).toMatchObject({label:'Linked subtree',object:b})
+  expect(stateTreeLinks(linked,[b,{...b,path:'Duplicate'}])[0].object).toBeUndefined()
+  expect(stateTreeLinks(linked,[b,{...b,id:guid(99)}])[0].object).toBeUndefined()
+  expect(stateTreeLinks(linked,[{...b,sourcePackage:'Other.uasset'}])[0].object).toBeUndefined()
+  expect(stateTreeLinks({...linked,opaqueProperties:['LinkedSubtree']},[b])[0].object).toBeUndefined()
+  expect(stateTreeLinks({...linked,properties:{LinkedSubtree:{ID:{ID:b.id},LinkType:'NextState'}}},[b])[0].object).toBeUndefined()
+  expect(stateTreeLinks({...linked,properties:{LinkedSubtree:{ID:{ID:b.id}}}},[b])[0].object).toBeUndefined()
+  expect(stateTreeLinks({...linked,properties:{LinkedSubtree:{ID:{ID:b.id},LinkType:'GotoState'}}},[])[0].object).toBeUndefined()
+})
+
+test('hierarchy avoids ambiguous child paths, collapse leaks, cycles and excessive preview rows',()=>{
+  const root={...a,properties:{Children:[b.path]}},child={...b,properties:{Children:[a.path,'Missing']}}
+  const cycle=stateTreeHierarchy([root,child],new Set())
+  expect(cycle.rows).toHaveLength(2);expect(cycle.unresolved).toBe(2)
+  const collapsed=stateTreeHierarchy([root,b],new Set([a.path]))
+  expect(collapsed.rows.map(row=>row.state.path)).toEqual([a.path])
+  const duplicate=stateTreeHierarchy([root,b,{...b}],new Set())
+  expect(duplicate.rows.map(row=>row.state.path)).toEqual([a.path]);expect(duplicate.unresolved).toBeGreaterThan(0)
+  expect(stateTreeHierarchy([root,b],new Set(),b.path).rows.map(row=>row.state.path)).toEqual([b.path])
+  expect(stateTreeHierarchy([root,b],new Set(),'Unavailable').unresolved).toBe(1)
+  const large=Array.from({length:1005},(_,i)=>({...b,path:'Tree.'+i}))
+  expect(stateTreeHierarchy(large,new Set())).toMatchObject({omitted:5});expect(stateTreeHierarchy(large,new Set()).rows).toHaveLength(1000)
 })

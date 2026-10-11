@@ -356,3 +356,16 @@
 .bp-comment-diff { display:flex; flex-direction:column; gap:6px; margin:12px 0; }
 .bp-comment-diff span { color:var(--lg-text-secondary); }
 .bp-comment-diff pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+
+.bp-state-overview { flex-shrink:0; border-bottom:1px solid var(--lg-border); }
+.bp-state-overview>summary { padding:8px 12px; cursor:pointer; color:var(--lg-text-secondary); }
+.bp-state-sides { display:flex; max-height:240px; overflow:auto; }
+.bp-state-machine { flex:1; min-width:0; display:flex; flex-direction:column; gap:6px; padding:10px; }
+.bp-state-machine>small,.bp-state-row>small,.bp-bound-graph>small { color:var(--lg-text-secondary); overflow-wrap:anywhere; }
+.bp-state-row { display:flex; flex-direction:column; align-items:flex-start; gap:4px; padding:8px 0; border-top:1px solid var(--lg-border); }
+.bp-state-row>button:first-child { width:100%; justify-content:space-between; text-align:left; }
+.bp-state-row button { white-space:normal; overflow-wrap:anywhere; }
+.bp-state-row button[aria-pressed=true] { border-color:var(--lg-accent); background:rgba(var(--lg-accent-rgb),.1); }
+.bp-state-row button small { color:var(--lg-text-secondary); }
+.bp-bound-graph { display:flex; flex-direction:column; gap:5px; margin:10px 0; }
+@media(max-width:600px) { .bp-state-sides { flex-direction:column; } }
