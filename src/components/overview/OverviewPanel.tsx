@@ -1,5 +1,6 @@
 import { useDialogOverlayDismiss } from '@/lib/useDialogOverlayDismiss'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   ipc, SyncStatus,
   CommitEntry, BranchActivity, SizeBreakdown, PullRequest, ConflictPreviewFile,
@@ -437,6 +438,7 @@ export function ResolveDialog({
   const currentBranch   = useRepoStore(s => s.currentBranch)
   const refreshStatus   = useRepoStore(s => s.refreshStatus)
   const [choice, setChoice] = useState<'accept' | 'decline'>('accept')
+  const [expanded, setExpanded] = useState(false)
   const showStatusToast = useStatusToastStore(s => s.show)
   const pushError       = useErrorStore(s => s.pushRaw)
   const [conflicts, setConflicts] = useState<ConflictPreviewFile[]>([])
@@ -617,11 +619,12 @@ export function ResolveDialog({
     : conflicts.length ? pending ? `${pending} of ${conflicts.length} files need a choice` : `${conflicts.length} file choices ready`
     : 'No merge conflicts detected'
 
-  return <div {...modal} style={{ position: 'fixed', inset: 0, zIndex: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)' }}>
-    <div className="pr-review-dialog">
+  return createPortal(<div {...modal} style={{ position: 'fixed', inset: 0, zIndex: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)' }}>
+    <div className={'pr-review-dialog' + (expanded ? ' pr-review-expanded' : '')}>
       <header className="pr-review-title">
         <span className="pr-review-number">#{pr.number}</span><h2>{pr.title}</h2><span className="pr-review-pill">Open</span>
         <span className="pr-review-spacer" />
+        <button aria-label={expanded ? 'Restore PR review size' : 'Expand PR review'} aria-pressed={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? 'Restore' : 'Expand'}</button>
         <details className="pr-review-pr-menu"><summary aria-label="Pull request actions">⋮</summary>
           <button disabled={busy} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); setChoice(choice === 'accept' ? 'decline' : 'accept') }}>{choice === 'accept' ? 'Close PR' : 'Review merge'}</button>
         </details>
@@ -635,6 +638,7 @@ export function ResolveDialog({
         : <div className="pr-review-decline-warning">This will close PR #{pr.number} without merging. The branch will remain intact.<div style={{ marginTop: 14 }}><button disabled={busy} onClick={() => setChoice('accept')}>Back to review</button></div></div>}
       <footer className="pr-review-footer">
         <span role="status">{choice === 'accept' ? reviewStatus : 'Close without merging'}</span><span className="pr-review-spacer" />
+        {!expanded && <small className="pr-review-resize-note">Drag bottom-right corner to resize</small>}
         <button onClick={onClose} disabled={busy}>Cancel</button>
         <button className={choice === 'accept' ? 'pr-review-confirm' : 'pr-review-decline'} onClick={handleConfirm} disabled={disabled}
           title={waitingForConflictChoices ? 'Choose a revision for every conflicting file.' : undefined}>
@@ -642,7 +646,7 @@ export function ResolveDialog({
         </button>
       </footer>
     </div>
-  </div>
+  </div>, document.body)
 }
 
 // ── Admin PR management card ──────────────────────────────────────────────────

@@ -6,6 +6,15 @@ using UAssetAPI.ExportTypes;
 // Read-only tagged-property inventory. Native bytes remain explicit opaque data;
 // no current-project defaults or dependencies are used to fill a historical side.
 static class AssetExtractor {
+    static IEnumerable<string> PackageNames(UAsset asset) => asset.Imports.Where(import => import.ClassName.ToString() == "Package").Select(import => import.ObjectName.ToString())
+        .Concat(asset.SoftPackageReferenceList?.Select(value => value.ToString()) ?? [])
+        .Concat(asset.SoftObjectPathList?.Select(value => value.AssetPath.PackageName.ToString()) ?? [])
+        .Where(value => value.StartsWith('/')).Distinct();
+    internal static JArray Packages(UAsset asset) => new(PackageNames(asset).Order().Take(4096));
+    internal static bool PackagesComplete(UAsset asset) => PackageNames(asset).Take(4097).Count() <= 4096;
+    internal static JArray ActorNames(UAsset asset) => new(asset.Exports.Where(export => GraphExtractor.ObjectPath(asset, export.OuterIndex.Index).EndsWith(".PersistentLevel")).Select(export => export.ObjectName.ToString()).Distinct().Take(10000));
+    internal static JArray ActorCandidates(UAsset asset) => new(asset.Exports.Select((export,index) => (export,index)).Where(value => GraphExtractor.ObjectPath(asset,value.export.OuterIndex.Index).EndsWith(".PersistentLevel")).Take(10000).Select(value => new JObject { ["path"] = GraphExtractor.ObjectPath(asset,value.index + 1), ["classPath"] = GraphExtractor.ObjectPath(asset,value.export.ClassIndex.Index) }));
+    internal static bool ActorCandidatesComplete(UAsset asset) => asset.Exports.Count(export => GraphExtractor.ObjectPath(asset,export.OuterIndex.Index).EndsWith(".PersistentLevel")) <= 10000;
     // Keep typed object references separate from arbitrary saved text. Only the
     // resolved package indexes are used for navigation; never guess from labels.
     static JArray References(UAsset asset, JToken token, ref int remaining) {
@@ -158,6 +167,10 @@ static class AssetExtractor {
         };
         return new JObject {
             ["family"] = family, ["objects"] = objects,
+            ["packages"] = Packages(asset), ["packageReferencesComplete"] = PackagesComplete(asset),
+            ["actorNames"] = ActorNames(asset),
+            ["actorCandidates"] = ActorCandidates(asset),
+            ["actorCandidatesComplete"] = ActorCandidatesComplete(asset),
             ["coverage"] = new JArray("Serialized package objects and tagged properties only. Typed object-reference links are bounded to 128 per object and 8,192 per package; soft/native references and custom mounts are unresolved.",
                 "Native payloads are fingerprinted, not interpreted. Raw tagged fields are labeled and excluded from decoded property edits. Omitted defaults and external dependencies are unresolved.",
                 family == "mesh" ? "Saved collision arrays are preserved. Explicit convex vertices, triangle indices and transforms support a collision-only preview; native render/source geometry, materials, LODs and skin data remain unresolved." : family == "statetree" ? "Saved editor arrays and instanced struct types are preserved. Compiled runtime fields are separate; opaque property bags and custom native payloads are unresolved." : family == "map" ? "External actor packages, sublevels and generated world data are not included in this package inventory." : "Geometry, textures and runtime behavior are not reconstructed."),

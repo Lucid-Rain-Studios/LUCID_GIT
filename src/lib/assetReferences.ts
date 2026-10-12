@@ -1,5 +1,19 @@
 import type { UnrealAssetObject } from '../../electron/blueprintTypes'
 
+/** Match engine actor paths to captured exports, never actor labels or bare names. */
+export function nativeSceneObject(actorPath: string, objects: UnrealAssetObject[], reviewedPackage: string) {
+  if (!actorPath.startsWith('/Game/') || !actorPath.includes(':PersistentLevel.')) return undefined
+  const target = actorPath.replace(':', '.')
+  const matches = objects.filter(object => {
+    const serialized = object.serializedPath ?? object.path
+    if (serialized.startsWith('/Game/')) return serialized.replace(':', '.') === target
+    const file = object.sourcePackage ?? reviewedPackage
+    if (!file.startsWith('Content/')) return false
+    return '/Game/' + file.slice(8).replace(/\.(uasset|umap)$/i, '') + '.' + serialized === target
+  })
+  return matches.length === 1 ? matches[0] : undefined
+}
+
 export function savedObjectIndex(objects: UnrealAssetObject[]) {
   const index = new Map<string, UnrealAssetObject[]>()
   for (const object of objects) {

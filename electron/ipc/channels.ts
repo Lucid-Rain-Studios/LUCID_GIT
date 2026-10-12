@@ -176,6 +176,7 @@ export const CHANNELS = {
   ASSET_DIFF_PREVIEW:      'asset:diff-preview',
   BLUEPRINT_COMPARE:       'asset:blueprint-compare',
   BLUEPRINT_CANCEL:        'asset:blueprint-cancel',
+  NATIVE_SCENE_READ:       'asset:native-scene-read',
   ASSET_RENDER_THUMBNAIL:  'asset:render-thumbnail',
   ASSET_EXTRACT_METADATA:  'asset:extract-metadata',
 

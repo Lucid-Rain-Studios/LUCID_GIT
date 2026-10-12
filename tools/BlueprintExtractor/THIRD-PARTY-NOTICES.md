@@ -4,6 +4,8 @@ UAssetAPI is used at commit `3228c1e86261aa08131f7ec0ff1a395f5d0b2a84` under the
 
 Klee is used at commit `3c694f280ea1702624f81e7b0d20b9292d635cc5` under the MIT license. Its complete license is distributed as `blueprint/KLEE-LICENSE.txt` in the renderer resources.
 
+The optional scene viewer uses three.js 0.186.1 under the MIT license, including its GLTFLoader and OrbitControls addons. The complete license is distributed as `licenses/THREE-LICENSE.txt` in the renderer resources. Native scene and StateTree extraction calls the user's installed Unreal Engine through an independently authored Python glue script; no Unreal binaries or proprietary source are distributed.
+
 The self-contained helper includes Newtonsoft.Json 13.0.4 (MIT), ZstdSharp.Port 0.8.1 (MIT) and the Microsoft .NET runtime (MIT). Their upstream license and notice sources are:
 
 - https://github.com/JamesNK/Newtonsoft.Json/blob/13.0.4/LICENSE.md

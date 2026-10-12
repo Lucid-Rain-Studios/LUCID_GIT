@@ -136,3 +136,22 @@ test('PR file switching ignores stale text responses and unsupported assets keep
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true)
   } finally { server.closeAllConnections(); await new Promise(resolve=>server.close(resolve)) }
 })
+test('PR review escapes transformed page containers, resizes and expands without recapturing review state',async({page},info)=>{
+ const {server,url}=await reviewServer()
+ try{
+  await page.setViewportSize({width:2200,height:1200});await page.goto(url);await expect(page.locator('.bp-revisions canvas')).toHaveCount(2)
+  await page.addStyleTag({content:'#root{transform:translateZ(0);width:700px!important;height:340px!important;margin-top:100px}'})
+  const dialog=page.locator('.pr-review-dialog'),bounds=await dialog.boundingBox()
+  expect(bounds.x).toBeCloseTo(24,0);expect(bounds.y).toBeCloseTo(24,0);expect(bounds.width).toBeCloseTo(2152,0);expect(bounds.height).toBeCloseTo(1152,0)
+  await expect(page.getByRole('button',{name:'Close PR review',exact:true})).toBeInViewport()
+  const choice=page.getByRole('complementary',{name:'PR changed files'}).getByRole('button',{name:'Accept dev_Jake',exact:true}).first();await choice.click()
+  await page.mouse.move(bounds.x+bounds.width-4,bounds.y+bounds.height-4);await page.mouse.down();await page.mouse.move(bounds.x+bounds.width-184,bounds.y+bounds.height-124,{steps:8});await page.mouse.up()
+  await expect.poll(async()=> (await dialog.boundingBox()).width).toBeLessThan(bounds.width-50)
+  expect(await page.evaluate(()=>window.closedReview)).toBe(0)
+  await page.getByRole('button',{name:'Expand PR review',exact:true}).click();expect((await dialog.boundingBox()).width).toBeCloseTo(2184,0);await expect(choice).toHaveAttribute('aria-pressed','true')
+  await page.setViewportSize({width:1500,height:900});const expanded=await dialog.boundingBox();expect(expanded.width).toBeCloseTo(1484,0);expect(expanded.height).toBeCloseTo(884,0)
+  await page.screenshot({path:info.outputPath('pr-review-responsive.png')})
+  await page.getByRole('button',{name:'Restore PR review size',exact:true}).click();await page.setViewportSize({width:560,height:640});const small=await dialog.boundingBox();expect(small.x).toBeGreaterThanOrEqual(8);expect(small.y).toBeGreaterThanOrEqual(8);expect(small.width).toBeLessThanOrEqual(544);expect(small.height).toBeLessThanOrEqual(624)
+  await expect(page.getByRole('button',{name:'Cancel',exact:true})).toBeInViewport();expect(await page.evaluate(()=>window.calls.filter(call=>call[0]==='graph').length)).toBe(1);expect(await page.evaluate(()=>window.calls.filter(call=>call[0]==='mergePR'||call[0]==='closePR').length)).toBe(0)
+ }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve))}
+})

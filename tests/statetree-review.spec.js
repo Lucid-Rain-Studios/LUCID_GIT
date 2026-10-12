@@ -44,7 +44,7 @@ test('real saved StateTree preserves arrays, typed tasks and edited copied insta
   const file = process.env.UNREAL_REVIEW_STATETREE, bytes = fs.readFileSync(file)
   const read = asset => JSON.parse(execFileSync('dotnet', [path.join(root, 'tools/BlueprintExtractor/bin/Release/net10.0/BlueprintExtractor.dll'), asset], { encoding: 'utf8', windowsHide: true }))
   const before = read(file)
-  expect(before.readerVersion).toBe(14); expect(before.assetReview.family).toBe('statetree')
+  expect(before.readerVersion).toBe(16); expect(before.assetReview.family).toBe('statetree')
   expect(before.assetReview.objects.filter(item => item.classPath.endsWith('.StateTreeState'))).toHaveLength(15)
   const authored = stateTreeEntries(before.assetReview.objects).entries
   expect(authored.filter(entry => entry.classPath.endsWith('.Tasks'))).toHaveLength(20)

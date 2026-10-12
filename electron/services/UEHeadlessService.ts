@@ -1,6 +1,6 @@
 import * as fs from 'fs'
 import * as path from 'path'
-import { execSync, spawn } from 'child_process'
+import { execFile, execSync, spawn } from 'child_process'
 
 export interface CommandletResult {
   success: boolean
@@ -70,32 +70,38 @@ export class UEHeadlessService {
     params: string[]
     timeoutMs: number
     signal?: AbortSignal
+    rendering?: boolean
   }): Promise<CommandletResult> {
     return new Promise((resolve) => {
       if (args.signal?.aborted) { resolve({ success: false, output: '', outputPath: null, error: 'Asset preview cancelled.' }); return }
       const argv = [
         args.projectPath,
         `-run=${args.commandlet}`,
-        '-unattended', '-nopause', '-nosplash', '-nullrhi',
+        '-unattended', '-nopause', '-nosplash', '-NoCrashDialog', '-NoErrorDialogs', ...(args.rendering ? ['-RenderOffscreen', '-AllowCommandletRendering'] : ['-nullrhi']),
         ...args.params,
       ]
 
       let output = ''
       let settled = false
 
-      const proc = spawn(args.editorBin, argv, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      const proc = spawn(args.editorBin, argv, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' })
       // Engine startup is verbose. Retain a bounded diagnostic tail, never the full log.
       const append = (b: Buffer) => { output = (output + b.toString()).slice(-1024 * 1024) }
       proc.stdout?.on('data', append)
       proc.stderr?.on('data', append)
       let stopped: string | null = null
-      const cancel = () => { stopped = 'Asset preview cancelled.'; proc.kill() }
+      const kill = () => {
+        if (process.platform === 'win32' && proc.pid) execFile('taskkill.exe',['/PID',String(proc.pid),'/T','/F'],{windowsHide:true,timeout:5000},() => proc.kill())
+        else if (proc.pid) { try { process.kill(-proc.pid,'SIGKILL') } catch { proc.kill() } }
+        else proc.kill()
+      }
+      const cancel = () => { stopped = 'Asset preview cancelled.'; kill() }
       args.signal?.addEventListener('abort', cancel, { once: true })
 
       const timer = setTimeout(() => {
         if (settled) return
         stopped = `Timed out after ${args.timeoutMs}ms`
-        proc.kill()
+        kill()
       }, args.timeoutMs)
 
       proc.on('close', (code) => {

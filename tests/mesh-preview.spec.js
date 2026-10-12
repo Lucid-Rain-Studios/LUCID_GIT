@@ -202,7 +202,7 @@ test('real static mesh fixture retains convex arrays and accurate collision coun
   test.skip(!fixture, 'Set UNREAL_REVIEW_MESH to a local saved convex cube fixture')
   const before = require('node:crypto').createHash('sha256').update(fs.readFileSync(fixture)).digest('hex')
   const doc = JSON.parse(execFileSync('dotnet', ['tools/BlueprintExtractor/bin/Release/net10.0/BlueprintExtractor.dll',fixture], { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }))
-  expect(doc.readerVersion).toBe(14)
+  expect(doc.readerVersion).toBe(16)
   expect(doc.assetReview.family).toBe('mesh')
   const decoded = collisionHulls(doc.assetReview.objects)
   expect(decoded).toMatchObject({ vertices: 8, triangles: 12, omitted: 0 })
@@ -262,6 +262,7 @@ for(const profile of ['convex','box','sphere','capsule','physics','legacyphysics
   try {
     await page.setViewportSize({ width: 1100,height: 800 }); await page.goto(`http://127.0.0.1:${server.address().port}`)
     await page.getByRole('button',{ name: 'Preview',exact: true }).click()
+    if (!physics) { await expect(page.getByRole('region',{ name: 'Saved collision preview' })).toHaveCount(0); await page.getByRole('button',{name:'Collision',exact:true}).click() }
     const field = page.getByRole('region',{ name: 'Saved collision preview' })
     if(physics){
       await expect(page.getByRole('region',{name:'Saved physics bodies'})).toContainText('Selected body local coordinates')
@@ -280,10 +281,10 @@ for(const profile of ['convex','box','sphere','capsule','physics','legacyphysics
     await page.mouse.move(box.x + box.width / 2,box.y + box.height / 2); await page.mouse.down(); await page.mouse.move(box.x + box.width / 2 + 50,box.y + box.height / 2 + 20); await page.mouse.up()
     expect(await field.locator('polygon').first().getAttribute('points')).not.toBe(before)
     await field.focus(); await page.keyboard.press('+'); await expect(page.locator('.uar-mesh .uar-map-tools small')).toHaveText('150%')
-    await page.getByRole('button',{ name: 'Wireframe',exact: true }).click(); await expect(field.locator('polygon').first()).toHaveAttribute('fill','none')
+    if (physics) { await page.getByRole('button',{ name: 'Wireframe',exact: true }).click(); await expect(field.locator('polygon').first()).toHaveAttribute('fill','none') }
     await page.locator('.uar-mesh .uar-row').click(); await expect(page.getByRole('region',{ name: 'Saved object details' })).toContainText('BodySetup')
     await page.getByRole('button',{ name: 'Base',exact: true }).click(); await expect(page.locator('.uar-mesh .uar-map-tools small')).toHaveText('150%')
-    await page.getByRole('button',{ name: 'Contents',exact: true }).click(); await expect(page.getByRole('region', { name: 'Saved mesh metadata' })).toContainText('AggGeom'); await page.getByRole('button', { name: 'All objects', exact: true }).click(); await expect(page.locator('.uar-content .uar-row')).toHaveCount(physics?3:1); await page.getByRole('button',{ name: 'Preview',exact: true }).click(); await expect(page.getByRole('button',{ name: 'Wireframe',exact: true })).toHaveAttribute('aria-pressed','true')
+    await page.getByRole('button',{ name: 'Contents',exact: true }).click(); await expect(page.getByRole('region', { name: 'Saved mesh metadata' })).toContainText('AggGeom'); await page.getByRole('button', { name: 'All objects', exact: true }).click(); await expect(page.locator('.uar-content .uar-row')).toHaveCount(physics?3:1); await page.getByRole('button',{ name: 'Preview',exact: true }).click(); await expect(page.getByRole('button',{ name: physics ? 'Wireframe' : 'Collision',exact: true })).toHaveAttribute('aria-pressed','true')
     await page.getByRole('button',{ name: 'Fit collision',exact: true }).click(); await expect(page.locator('.uar-mesh .uar-map-tools small')).toHaveText('100%')
     await page.mouse.move(box.x + box.width / 2,box.y + box.height / 2); await page.mouse.wheel(0,-70); await expect(page.locator('.uar-mesh .uar-map-tools small')).not.toHaveText('100%')
     await page.screenshot({ path: testInfo.outputPath('mesh-collision-preview.png') })
@@ -303,6 +304,7 @@ for(const profile of ['convex','box','sphere','capsule','physics','legacyphysics
       await page.getByRole('button',{name:'Mesh metadata',exact:true}).click()
       await expect(page.getByRole('region',{name:'Saved mesh metadata'})).toContainText('BoneName')
     }
-    expect(await page.evaluate(() => window.calls.length)).toBe(1); expect(errors).toEqual([])
+    expect(await page.evaluate(() => window.calls.length)).toBe(physics ? 1 : 2); if (!physics) { await page.getByRole('button',{name:'Wireframe',exact:true}).click();await expect(field).toHaveCount(0);await expect(page.locator('.uar-mesh')).toContainText('No source geometry available') }
+    expect(errors).toEqual([])
   } finally { await page.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)) }
 })

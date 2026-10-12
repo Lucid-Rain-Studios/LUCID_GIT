@@ -65,12 +65,19 @@ export interface UnrealAssetObject {
   diagnostics: string[]
 }
 export interface UnrealAssetDocument {
+  packages?: string[]
+  actorNames?: string[]
+  actorCandidates?: Array<{ path: string; classPath: string }>
+  actorCandidatesComplete?: boolean
+  packageReferencesComplete?: boolean
   family: 'map' | 'mesh' | 'statetree' | 'animation' | 'blueprint' | 'texture' | 'animation-sequence' | 'asset'
   objects: UnrealAssetObject[]
   coverage: string[]
   cooked: boolean
 }
 export interface BlueprintSide {
+  snapshotHash?: string
+  scene?: NativeSceneReview
   geometry?: NativeMeshGeometry
   resolvedRef?: string
   ref: string
@@ -83,6 +90,9 @@ export interface BlueprintSide {
   document?: BlueprintDocument
 }
 export interface BlueprintRequest {
+  nativeScene?: boolean
+  sceneBakeMaterials?: boolean
+  sceneLod?: number
   nativeGeometry?: boolean
   externalActors?: boolean
   knownDocuments?: string[]
@@ -92,6 +102,21 @@ export interface BlueprintRequest {
   leftRef: string
   rightRef: string
   requestId: string
+}
+export interface NativeSceneReview {
+  actorInventory?: { expected: number; matched: number; missing: string[]; diagnostics: string[] }
+  actorInventoryComplete?: boolean
+  renderLod?: { requested: number; count: number }
+  status: 'ready' | 'unavailable'
+  reason?: string
+  key?: string
+  engineVersion: string
+  packages: Array<{ path: string; hash: string; bytes: number }>
+  diagnostics: string[]
+  complete: boolean
+  stats?: { nodes: number; meshes: number; materials: number; textures: number; skins: number; animations: number; vertices: number; triangles: number }
+  actors?: Array<{ name: string; path: string; location: [number, number, number]; saved?: boolean }>
+  bags?: Array<{ object: string; property: string; text: string }>
 }
 export interface NativeMeshGeometry {
   status: 'ready' | 'unavailable'

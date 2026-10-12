@@ -11,6 +11,8 @@ function component(file, mocks = {}, globals = {}) {
   const React = {
     createElement: (type, props, ...children) => ({ type, props: { ...props, children } }),
     Fragment: 'fragment',
+    Suspense: 'suspense',
+    lazy: () => 'LazyScenePreview',
     useState: initial => {
       const index = cursor++
       if (!(index in slots)) slots[index] = typeof initial === 'function' ? initial() : initial
@@ -33,6 +35,7 @@ function component(file, mocks = {}, globals = {}) {
   vm.runInNewContext(source + exposed, {
     module, exports: module.exports,
     require: name => name === 'react' ? React : mocks[name] || (
+      name === 'react-dom' ? { createPortal: node => node } :
       name === './stateTreeReview' ? component('src/lib/stateTreeReview.ts', {}, globals).exports :
       ['../util/network', '../util/git-paths', '../util/json-store', '../util/external-actors', '@/lib/staging'].includes(name)
         ? component(name === '@/lib/staging' ? 'src/lib/staging.ts' : 'electron/util/' + name.split('/').pop() + '.ts', {}, globals).exports

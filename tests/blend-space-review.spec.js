@@ -29,7 +29,7 @@ test('sample budget and shared observed bounds preserve omitted defaults',()=>{
 for(const [variable,dimensions,count] of [['UNREAL_REVIEW_BLENDSPACE',2,27],['UNREAL_REVIEW_BLENDSPACE1D',1,3]])test(`real ${dimensions}D BlendSpace exposes saved samples and static axis fields without changing bytes`,()=>{
  const file=process.env[variable];test.skip(!file,'Set real BlendSpace fixture')
  const bytes=fs.readFileSync(file),doc=JSON.parse(execFileSync('dotnet',['tools/BlueprintExtractor/bin/Release/net10.0/BlueprintExtractor.dll',file],{cwd:root,encoding:'utf8',maxBuffer:32*1024*1024})),model=blendSpaceModel(doc.assetReview.objects)
- expect(doc.readerVersion).toBe(14);expect(model.object.decoded).toBe(true);expect(model.object.diagnostics).toEqual([])
+ expect(doc.readerVersion).toBe(16);expect(model.object.decoded).toBe(true);expect(model.object.diagnostics).toEqual([])
  expect(model.dimensions).toBe(dimensions);expect(model.entries).toHaveLength(count);expect(model.entries.every(e=>e.positioned)).toBe(true)
  expect(model.axes[dimensions-1].min).toBeUndefined()
  expect(model.object.references.some(r=>r.propertyPath==='SampleData[0].Animation'&&r.className==='AnimSequence')).toBe(true)
@@ -42,7 +42,7 @@ test('shared BlendSpace UI retains sample selection, common scale, exact referen
  const base=object({SampleData:[sample(-90,300),sample(90,600)],'BlendParameters[0]':{DisplayName:'Direction',Min:-180,Max:180},'BlendParameters[1]':{DisplayName:'Speed',Max:600}})
  base.references=[{propertyPath:'SampleData[0].Animation',target:'/Game/Anim/Walk.Walk',className:'AnimSequence'}]
  const edited=JSON.parse(JSON.stringify(base));edited.properties.SampleData[0].SampleValue.SampleValue.X=-45
- const doc=object=>({schemaVersion:1,readerVersion:14,assetClass:object.classPath,engineVersion:'5.8.3',graphs:[],status:'unsupported',diagnostics:[],assetReview:{family:'asset',objects:[object],coverage:['Saved samples; native poses unavailable'],cooked:false}})
+ const doc=object=>({schemaVersion:1,readerVersion:16,assetClass:object.classPath,engineVersion:'5.8.3',graphs:[],status:'unsupported',diagnostics:[],assetReview:{family:'asset',objects:[object],coverage:['Saved samples; native poses unavailable'],cooked:false}})
  const result={left:{status:'ready',ref:'HEAD',resolvedRef:commit,document:doc(base)},right:{status:'ready',ref:'WORKING',document:doc(edited)}}
  await require('esbuild').build({stdin:{contents:`import React from 'react';import {createRoot} from 'react-dom/client';import {UnrealAssetReview} from './src/components/diff/UnrealAssetReview';import {useAssetViewerStore} from './src/stores/assetViewerStore';import './src/index.css';useAssetViewerStore.subscribe(state=>window.opened={path:state.filePath,ref:state.revision});createRoot(document.getElementById('root')).render(<UnrealAssetReview repoPath="test" request={{filePath:'Content/Anim/Blend.uasset',leftRef:'HEAD',rightRef:'WORKING'}}/>);`,resolveDir:root,loader:'tsx'},alias:{'@':path.join(root,'src')},outfile:path.join(dir,'app.js'),bundle:true,format:'esm'})
  const server=http.createServer((req,res)=>{

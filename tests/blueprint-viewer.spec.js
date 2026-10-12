@@ -44,9 +44,9 @@ test('old cached graphs are re-extracted and an outdated helper is rejected', as
   fs.writeFileSync(path.join(cache, key + '.json'), JSON.stringify({ schemaVersion: 1, readerVersion: 7, status: 'complete', graphs: [], diagnostics: [] }))
   const reader = new BlueprintRevisionService(helper, cache)
   const document = await reader.extract(key, fixture)
-  expect(document.readerVersion).toBe(14)
+  expect(document.readerVersion).toBe(16)
   expect(document.graphs.length).toBeGreaterThan(0)
-  expect(JSON.parse(fs.readFileSync(path.join(cache,key + '.json'),'utf8')).readerVersion).toBe(14)
+  expect(JSON.parse(fs.readFileSync(path.join(cache,key + '.json'),'utf8')).readerVersion).toBe(16)
   const stale = { ...document, graphs: [] }
   reader.cache.set(key, stale)
   fs.writeFileSync(path.join(cache,key + '.json'),JSON.stringify(stale))
@@ -349,6 +349,7 @@ test('extraction queue is bounded, shared reads deduplicate, and shutdown releas
   const { BlueprintRevisionService: Reader } = component('electron/services/BlueprintRevisionService.ts', {
     electron: { app: { getPath: () => cache } },
     './NativeMeshService': { nativeMeshService: { stop: () => nativeStops.push(true) } },
+    './NativeSceneService': { nativeSceneService: { stop() {} } },
     'node:child_process': { execFile: (_, __, options, callback) => {
       const call = { options, callback, killed: false }
       calls.push(call)
@@ -366,7 +367,7 @@ test('extraction queue is bounded, shared reads deduplicate, and shutdown releas
   await expect.poll(() => reader.waiting.length).toBe(8)
   await expect.poll(() => outcomes.filter(r => r.error?.message.includes('busy')).length).toBe(1)
   expect(calls.every(call => call.options.timeout === 25000 && call.options.maxBuffer === 32 * 1024 * 1024)).toBe(true)
-  calls[0].callback(null, JSON.stringify({schemaVersion:1,readerVersion:14,status:'complete',graphs:[],diagnostics:[]}), '')
+  calls[0].callback(null, JSON.stringify({schemaVersion:1,readerVersion:16,status:'complete',graphs:[],diagnostics:[]}), '')
   expect((await jobs[0]).value.status).toBe('complete')
   expect((await shared).status).toBe('complete')
   await expect.poll(() => calls.length).toBe(3)

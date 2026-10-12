@@ -49,3 +49,12 @@
 .uar-timing-track>span{position:absolute;top:1px;bottom:1px;min-width:2px;background:var(--lg-accent);max-width:100%}
 
 .uar-blend-list{max-height:260px;overflow:auto}.uar-blend-field{height:280px}
+.uar-scene-field { width: 100%; height: min(60vh, 600px); min-height: 300px; overflow: hidden; border: 1px solid var(--lg-border); border-radius: 6px; background: var(--lg-bg-secondary); }
+.uar-scene-field canvas { display: block; width: 100%; height: 100%; outline-offset: -3px; }
+.uar-scene details small { display: block; }
+.uar-native-bags table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:12px}.uar-native-bags th,.uar-native-bags td{padding:8px;text-align:left;vertical-align:top;overflow-wrap:anywhere;border-bottom:1px solid var(--lg-border)}.uar-native-bags .uar-native-bag-values{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.uar-native-search{min-width:0;max-width:100%;flex:1 1 180px;padding:7px 9px;background:var(--lg-bg-secondary);color:var(--lg-text-primary);border:1px solid var(--lg-border);border-radius:4px}.uar-native-actors .uar-row{flex-wrap:wrap}.uar-native-search:focus-visible{outline:2px solid var(--lg-accent);outline-offset:2px}
+.uar-mesh-loading { min-height: 180px; display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--lg-text-secondary); }
+.uar-preview-spinner { animation: uar-preview-spin 1s linear infinite; flex-shrink: 0; }
+@keyframes uar-preview-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .uar-preview-spinner { animation: none; } }

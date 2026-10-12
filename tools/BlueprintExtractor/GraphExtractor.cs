@@ -10,7 +10,7 @@ using UAssetAPI.UnrealTypes;
 // source is embedded or required at runtime. Unsupported versions/tails are explicit.
 static class GraphExtractor
 {
-    const int ReaderVersion = 14;
+    const int ReaderVersion = 16;
     static string Name(UAsset a, int index) => index switch {
         > 0 when index <= a.Exports.Count => a.Exports[index - 1].ObjectName.ToString(),
         < 0 when -index <= a.Imports.Count => a.Imports[-index - 1].ObjectName.ToString(),
