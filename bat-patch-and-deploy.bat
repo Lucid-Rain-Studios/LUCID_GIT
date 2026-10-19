@@ -24,7 +24,7 @@ if errorlevel 1 (
   echo   nvm list
   echo   nvm use 20
   echo.
-  echo Then reopen this window and run bat-patch.bat again.
+  echo Then reopen this window and run bat-patch-and-deploy.bat again.
   goto :fail
 )
 where npm >nul 2>&1
@@ -39,10 +39,32 @@ if errorlevel 1 (
   echo   nvm list
   echo   nvm use 20
   echo.
-  echo Then reopen this window and run bat-patch.bat again.
+  echo Then reopen this window and run bat-patch-and-deploy.bat again.
   goto :fail
 )
 
+:: Match the release workflow before npm ci or any Git changes. Use an installed
+:: nvm runtime only in this process; do not change the machine-wide nvm symlink.
+node -e "process.exit(process.versions.node.split('.')[0] === '20' ? 0 : 1)"
+if errorlevel 1 (
+  set "BUILD_NODE_DIR="
+  if defined NVM_HOME (
+    for /f "delims=" %%d in ('dir /b /ad /o-n "%NVM_HOME%\v20.*" 2^>nul') do (
+      if not defined BUILD_NODE_DIR if exist "%NVM_HOME%\%%d\node.exe" if exist "%NVM_HOME%\%%d\npm.cmd" set "BUILD_NODE_DIR=%NVM_HOME%\%%d"
+    )
+  )
+  if defined BUILD_NODE_DIR set "PATH=!BUILD_NODE_DIR!;!PATH!"
+)
+node -e "process.exit(process.versions.node.split('.')[0] === '20' ? 0 : 1)"
+if errorlevel 1 (
+  echo ERROR: This release requires Node.js 20, matching GitHub Actions.
+  echo The locked native dependencies cannot be installed with the active Node version:
+  node --version
+  echo Install Node.js 20, or run nvm install 20 and retry this script.
+  goto :fail
+)
+echo [preflight] Release runtime:
+node --version
 echo [preflight] Tool paths:
 where git
 where node
