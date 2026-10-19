@@ -2,7 +2,7 @@ import { app } from 'electron'
 import * as fs from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { execFile, type ChildProcess } from 'node:child_process'
+import { BlueprintReaderWorker } from './BlueprintReaderWorker'
 import { assetDiffService } from './AssetDiffService'
 import { nativeMeshService } from './NativeMeshService'
 import { nativeSceneService } from './NativeSceneService'
@@ -14,8 +14,8 @@ import { confirmsMapOwnership, discoverExternalActors, emptyExternalReview, esti
 import { withRepoSlot } from '../util/repo-gate'
 import type { BlueprintComparison, BlueprintDocument, BlueprintRequest, BlueprintSide } from '../blueprintTypes'
 
-const EXTRACTOR_VERSION = '16-actor-manifest-uassetapi-3228c1e8'
-const READER_VERSION = 16
+const EXTRACTOR_VERSION = '17-bound-event-signatures-v1-uassetapi-3228c1e8'
+const READER_VERSION = 17
 const MAX_BYTES = 256 * 1024 * 1024
 const MAX_CACHE_BYTES = 256 * 1024 * 1024
 const sha = (b: string | Buffer) => crypto.createHash('sha256').update(b).digest('hex')
@@ -34,7 +34,7 @@ export class BlueprintRevisionService {
   private identities = new Map<string, Promise<BlueprintSide>>()
   private active = 0
   private waiting: Array<{ wake(): void; reject(error: Error): void }> = []
-  private processes = new Set<ChildProcess>()
+  private readers = [new BlueprintReaderWorker(), new BlueprintReaderWorker()]
   private stopping = false
   private pruneAt = 0
   private readonly helperDirectory: string
@@ -52,7 +52,10 @@ export class BlueprintRevisionService {
     if (!req || typeof repoPath !== 'string') throw new Error('Invalid Blueprint request.')
     if (req.externalActors !== undefined && typeof req.externalActors !== 'boolean') throw new Error('Invalid external actor review scope.')
     if (req.nativeGeometry !== undefined && typeof req.nativeGeometry !== 'boolean') throw new Error('Invalid native geometry review scope.')
+    if (req.nativeGeometrySide !== undefined && !['left', 'right'].includes(req.nativeGeometrySide)) throw new Error('Invalid native geometry revision.')
     if (req.nativeScene !== undefined && typeof req.nativeScene !== 'boolean') throw new Error('Invalid native scene review scope.')
+    if (req.nativeSceneSide !== undefined && !['left', 'right'].includes(req.nativeSceneSide)) throw new Error('Invalid native scene revision.')
+    if (req.sceneRenderOnly !== undefined && typeof req.sceneRenderOnly !== 'boolean') throw new Error('Invalid scene render dependency scope.')
     if (req.sceneBakeMaterials !== undefined && typeof req.sceneBakeMaterials !== 'boolean') throw new Error('Invalid scene material profile.')
     if (req.sceneLod !== undefined && (!Number.isInteger(req.sceneLod) || req.sceneLod < 0 || req.sceneLod > 7)) throw new Error('Render LOD must be an integer from 0 to 7.')
     validatePath(req.filePath); validatePath(req.oldPath ?? req.filePath)
@@ -77,12 +80,12 @@ export class BlueprintRevisionService {
           stamp = await mutableActorStamp(repo, maps, manifest.packages.flatMap(p => [p.leftPath, p.rightPath]), refs)
         })
       } catch (error) { discoveryError = error instanceof Error ? error.message : String(error) }
-      const left = await this.side(repo, maps[0], refs[0], signal, refreshKeys, MAX_BYTES, req.nativeGeometry)
+      const left = await this.side(repo, maps[0], refs[0], signal, refreshKeys, MAX_BYTES, req.nativeGeometry && req.nativeGeometrySide !== 'right')
       if (signal?.aborted) throw new Error('Blueprint review cancelled.')
-      const right = await this.side(repo, maps[1], refs[1], signal, refreshKeys, MAX_BYTES, req.nativeGeometry)
+      const right = await this.side(repo, maps[1], refs[1], signal, refreshKeys, MAX_BYTES, req.nativeGeometry && req.nativeGeometrySide !== 'left')
       if (signal?.aborted) throw new Error('Blueprint review cancelled.')
-      if (req.nativeScene) for (const side of [left, right]) {
-        if (side.status === 'ready') side.scene = await this.scene(repo, side, signal, refreshKeys, req.sceneBakeMaterials, req.sceneLod)
+      if (req.nativeScene) for (const side of req.nativeSceneSide ? [req.nativeSceneSide === 'left' ? left : right] : [left, right]) {
+        if (side.status === 'ready') side.scene = await this.scene(repo, side, signal, refreshKeys, req.sceneBakeMaterials, req.sceneLod, req.sceneRenderOnly)
         if (signal?.aborted) throw new Error('Scene review cancelled.')
       }
       const owningMaps: BlueprintComparison['owningMaps'] = {}
@@ -297,19 +300,10 @@ export class BlueprintRevisionService {
         await new Promise<void>((wake, reject) => this.waiting.push({ wake, reject }))
       } else this.active++
       try {
-        const exe = path.join(this.helperDirectory, process.platform === 'win32' ? 'BlueprintExtractor.exe' : 'BlueprintExtractor')
-        const dll = path.join(this.helperDirectory, 'BlueprintExtractor.dll')
-        const bundled = await fs.access(exe).then(() => true, () => false)
-        if (!bundled && !await fs.access(dll).then(() => true, () => false)) throw new Error('Blueprint reader is not installed. Build the Blueprint tools and restart the app.')
-        const text = await new Promise<string>((resolve, reject) => {
-          if (this.stopping) { reject(new Error('Blueprint reader is shutting down.')); return }
-          const child = execFile(bundled ? exe : 'dotnet', [...(bundled ? [file] : [dll, file]), ...(packagesOnly ? ['--packages'] : [])], { timeout: 25_000, maxBuffer: 32 * 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
-          this.processes.delete(child)
-          if (error) reject(new Error(stderr.trim() || 'Blueprint extraction failed or exceeded the 25 second limit.'))
-          else resolve(stdout)
-          })
-          this.processes.add(child)
-        })
+        if (this.stopping) throw new Error('Blueprint reader is shutting down.')
+        const reader = this.readers.find(reader => !reader.busy)
+        if (!reader) throw new Error('Blueprint reader is busy.')
+        const text = await reader.read(this.helperDirectory, file, packagesOnly)
         const document = JSON.parse(text) as BlueprintDocument
         if (document.readerVersion !== READER_VERSION) throw new Error('The installed Blueprint reader is outdated. Update or rebuild the Blueprint tools, then restart the app.')
         if (document.schemaVersion !== 1 || !Array.isArray(document.graphs)) throw new Error('Unexpected Blueprint reader response.')
@@ -327,7 +321,7 @@ export class BlueprintRevisionService {
     return promise
   }
 
-  private async scene(repo: string, root: BlueprintSide, signal?: AbortSignal, refreshKeys?: Set<string>, bakeMaterials = false, lod = 0) {
+  private async scene(repo: string, root: BlueprintSide, signal?: AbortSignal, refreshKeys?: Set<string>, bakeMaterials = false, lod = 0, renderOnly = false) {
     root = { ...root, path: root.path.replace(/\\/g,'/') }
     const directory = await fs.mkdtemp(path.join(this.cacheDirectory, 'scene-read-'))
     const ref = root.resolvedRef ?? root.ref
@@ -388,7 +382,7 @@ export class BlueprintRevisionService {
         const association = config.EngineAssociation
         return typeof association === 'string' && /^5\.\d+(?:\.\d+)?$/.test(association) ? association : undefined
       })
-      const snapshot = await captureSceneSnapshot({ root, directory, signal,
+      const snapshot = await captureSceneSnapshot({ root, directory, signal, renderOnly: renderOnly && root.document?.assetClass === '/Script/Engine.World',
         stamp: async files => {
           if (ref === 'INDEX') return '' // OIDs and paths are already frozen as one index manifest.
           if (ref !== 'WORKING') return ''
@@ -423,7 +417,7 @@ export class BlueprintRevisionService {
           })
           if (!version) return { status: 'unavailable' as const, ref, path: requested, reason: 'Dependency is absent in the selected revision.' }
           destination = destination.replace(/\.(uasset|umap)$/i, path.extname(file))
-          const captured = await this.loadSide(repo,file,version.source,ref,version.companion,version.companionIdentity,refreshKeys,Math.min(MAX_BYTES,remaining),signal,false,destination,file !== root.path)
+          const captured = await this.loadSide(repo,file,version.source,ref,version.companion,version.companionIdentity,refreshKeys,Math.min(MAX_BYTES,remaining),signal,false,destination,file !== root.path && !/\.umap$/i.test(file))
           if (captured.status !== 'ready') return captured
           let bytes = captured.sourceBytes ?? 0
           const hashes = [captured.documentKey!]
@@ -469,7 +463,7 @@ export class BlueprintRevisionService {
     nativeMeshService.stop()
     nativeSceneService.stop()
     this.stopping = true
-    for (const child of this.processes) child.kill()
+    for (const reader of this.readers) reader.stop()
     for (const waiter of this.waiting.splice(0)) waiter.reject(new Error('Blueprint reader is shutting down.'))
     this.cache.clear(); this.identities.clear()
   }

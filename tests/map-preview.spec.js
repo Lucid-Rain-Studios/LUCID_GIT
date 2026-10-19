@@ -6,6 +6,7 @@ const root = path.resolve(__dirname, '..')
 const { mapInventory } = component('src/lib/mapInventory.ts',{'./assetReferences':component('src/lib/assetReferences.ts').exports}).exports
 const { mapPositions, mapVisiblePositions } = component('src/lib/mapReview.ts').exports
 const { mapAttachmentPositions } = component('src/lib/mapTransforms.ts', {
+  '../../electron/util/saved-vector': component('electron/util/saved-vector.ts').exports,
   './mapReview': component('src/lib/mapReview.ts').exports,
   './meshReview': component('src/lib/meshReview.ts').exports,
   './assetReferences': component('src/lib/assetReferences.ts').exports,
@@ -100,7 +101,7 @@ for(const actorScope of [false,true])test(`map dots ${actorScope?'with actor roo
   try {
     await page.setViewportSize({ width: 1200, height: 820 })
     await page.goto(`http://127.0.0.1:${server.address().port}`)
-    await page.getByRole('button', { name: 'Preview', exact: true }).click()
+    await page.getByRole('button', { name: 'Preview', exact: true }).click(); await page.getByText('Map options and position coverage', {exact:true}).click()
     if(actorScope){
       await expect(page.locator('.uar-map-dot')).toHaveCount(3)
       await expect(page.getByRole('button',{name:'Actor roots',exact:true})).toHaveAttribute('aria-pressed','true')
@@ -120,7 +121,7 @@ for(const actorScope of [false,true])test(`map dots ${actorScope?'with actor roo
       const lateBox=await page.locator('.uar-map-dot').boundingBox(),lateField=await page.getByRole('region',{name:'Serialized component-relative positions'}).boundingBox()
       expect(lateBox.x+6).toBeCloseTo(lateField.x+lateField.width/2,0)
       await page.getByRole('button',{name:'Base',exact:true}).click()
-      await page.getByRole('button',{name:'Contents',exact:true}).click();await page.getByRole('button',{name:'Preview',exact:true}).click()
+      await page.getByRole('button',{name:'Contents',exact:true}).click();await page.getByRole('button',{name:'Preview',exact:true}).click(); await page.getByText('Map options and position coverage', {exact:true}).click()
       await expect(page.getByLabel('Filter map positions')).toHaveValue('Late export')
       await expect(page.locator('.uar-map-dot')).toHaveCount(1)
       await page.screenshot({path:testInfo.outputPath('map-search-late-export.png')})
@@ -157,7 +158,7 @@ for(const actorScope of [false,true])test(`map dots ${actorScope?'with actor roo
     await expect(page.locator('.uar-map .uar-map-tools small').first()).toHaveText('150%')
     await page.getByRole('button', { name: 'Base', exact: true }).click()
     await expect(page.locator('.uar-map .uar-map-tools small').first()).toHaveText('150%')
-    await page.getByRole('button', { name: 'Contents', exact: true }).click(); await page.getByRole('button', { name: 'Preview', exact: true }).click()
+    await page.getByRole('button', { name: 'Contents', exact: true }).click(); await page.getByRole('button', { name: 'Preview', exact: true }).click(); await page.getByText('Map options and position coverage', {exact:true}).click()
     await expect(page.locator('.uar-map .uar-map-tools small').first()).toHaveText('150%')
     await page.getByRole('button', { name: 'Focus selected', exact: true }).click()
     await field.scrollIntoViewIfNeeded()
@@ -182,7 +183,7 @@ for(const actorScope of [false,true])test(`map dots ${actorScope?'with actor roo
     await field.focus();await page.keyboard.press('+')
     await page.getByRole('button',{name:'Selected',exact:true}).click()
     await expect(page.locator('.uar-map .uar-map-tools small').first()).toHaveText('150%')
-    await page.getByRole('button',{name:'Contents',exact:true}).click();await page.getByRole('button',{name:'Preview',exact:true}).click()
+    await page.getByRole('button',{name:'Contents',exact:true}).click();await page.getByRole('button',{name:'Preview',exact:true}).click(); await page.getByText('Map options and position coverage', {exact:true}).click()
     await expect(page.getByRole('button',{name:'Front (XZ)',exact:true})).toHaveAttribute('aria-pressed','true')
     await expect(page.locator('.uar-map .uar-map-tools small').first()).toHaveText('150%')
     await page.getByRole('button',{name:'Side (YZ)',exact:true}).click()
@@ -194,7 +195,7 @@ for(const actorScope of [false,true])test(`map dots ${actorScope?'with actor roo
       await expect(page.locator('.uar-map-dot')).toHaveCount(3)
       await field.focus();await page.keyboard.press('+')
       await page.getByRole('button',{name:'Base',exact:true}).click()
-      await page.getByRole('button',{name:'Contents',exact:true}).click();await page.getByRole('button',{name:'Preview',exact:true}).click()
+      await page.getByRole('button',{name:'Contents',exact:true}).click();await page.getByRole('button',{name:'Preview',exact:true}).click(); await page.getByText('Map options and position coverage', {exact:true}).click()
       await expect(page.getByRole('button',{name:'Actor roots',exact:true})).toHaveAttribute('aria-pressed','true')
       await expect(page.locator('.uar-map-dot')).toHaveCount(3)
       await expect(page.locator('.uar-map .uar-map-tools small').first()).toHaveText('150%')
@@ -205,7 +206,7 @@ for(const actorScope of [false,true])test(`map dots ${actorScope?'with actor roo
       await expect(page.getByRole('region',{name:'Serialized attachment-composed positions'})).toBeVisible()
       await expect(page.getByText('Explicit saved chains only;', {exact:false})).toContainText('unresolved')
       await page.getByRole('button',{name:'Selected',exact:true}).click()
-      await page.getByRole('button',{name:'Contents',exact:true}).click(); await page.getByRole('button',{name:'Preview',exact:true}).click()
+      await page.getByRole('button',{name:'Contents',exact:true}).click(); await page.getByRole('button',{name:'Preview',exact:true}).click(); await page.getByText('Map options and position coverage', {exact:true}).click()
       await expect(page.getByRole('button',{name:'Saved attachments',exact:true})).toHaveAttribute('aria-pressed','true')
       await expect(page.locator('.uar-map-dot')).toHaveCount(1)
       await expect(page.getByRole('button',{name:'Compare saved positions',exact:true})).toHaveCount(0)

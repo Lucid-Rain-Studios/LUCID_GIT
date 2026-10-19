@@ -3,15 +3,14 @@ import { createReadStream } from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { ueHeadlessService } from './UEHeadlessService'
+import { NativeMeshWorker } from './NativeMeshWorker'
 import type { BlueprintDocument, NativeMeshGeometry } from '../blueprintTypes'
 
 const PROVIDER = 'unreal-source-mesh-v1' as const
 const MAX_INPUT_BYTES = 64 * 1024 * 1024
 // Only generated script/configuration and captured package bytes enter this project.
 // No repository project, plugins, Python startup scripts or mutable dependencies are loaded.
-export const MESH_SCRIPT = String.raw`
-import unreal, json, os
-base = os.path.dirname(__file__)
+export const MESH_SCRIPT = 'import unreal, json, os\ndef extract(base):\n' + String.raw`
 with open(os.path.join(base, 'request.json'), encoding='utf-8') as stream:
     request = json.load(stream)
 mesh = unreal.load_asset(request['asset'])
@@ -52,7 +51,7 @@ if count > 8:
     result['diagnostics'].append('Only the first eight source LODs were inspected.')
 with open(os.path.join(base, 'geometry.json'), 'w', encoding='utf-8') as stream:
     json.dump(result, stream, allow_nan=False, separators=(',', ':'))
-`
+`.split('\n').map(line => '    ' + line).join('\n')
 
 /** Validate the process boundary before geometry can reach the renderer. */
 export function validateNativeGeometry(value: unknown): NativeMeshGeometry {
@@ -74,6 +73,7 @@ export class NativeMeshService {
   private active = false
   private waiting: Array<() => void> = []
   private shutdown = new AbortController()
+  private worker = new NativeMeshWorker()
 
   async extract(blobPath: string, repositoryFile: string, document: BlueprintDocument, signal?: AbortSignal): Promise<NativeMeshGeometry> {
     try { return await this.extractMesh(blobPath, repositoryFile, document, signal) }
@@ -136,23 +136,21 @@ export class NativeMeshService {
       const captured = crypto.createHash('sha256').update(String(bytes.length) + ':').update(bytes)
       if (extra) captured.update(String(extra.length) + ':').update(extra)
       if (captured.digest('hex') !== contentKey) throw new Error('Captured mesh bytes changed while waiting for native export.')
-      directory = await fs.mkdtemp(path.join(path.dirname(blobPath), 'native-'))
-      const target = path.join(directory, 'Content', match[1] + '.uasset')
-      await fs.mkdir(path.dirname(target), { recursive: true })
-      await fs.writeFile(target, bytes)
-      if (extra) await fs.writeFile(target.replace(/\.uasset$/i, '.uexp'), extra)
-      const project = path.join(directory, 'Preview.uproject')
-      await fs.writeFile(project, JSON.stringify({ FileVersion: 3, Plugins: [{ Name: 'PythonScriptPlugin', Enabled: true }, { Name: 'GeometryScripting', Enabled: true }] }))
-      await fs.writeFile(path.join(directory, 'request.json'), JSON.stringify({ asset: '/Game/' + match[1] + '.' + roots[0].name, class: document.assetClass }))
-      await fs.writeFile(path.join(directory, 'extract.py'), MESH_SCRIPT)
-      const run = await ueHeadlessService.runCommandlet({ editorBin: editor, projectPath: project, commandlet: 'pythonscript', params: [`-script=${path.join(directory, 'extract.py')}`, '-nosound', '-stdout', '-FullStdOutLogOutput'], timeoutMs: 120000, signal: cancellation })
-      if (!run.success) {
-        const detail = run.output.split('\n').filter(line => /LogPython: Error: (?:RuntimeError|AttributeError|TypeError)/.test(line)).at(-1)?.split('LogPython: Error: ')[1]?.trim().slice(0, 500)
-        throw new Error([run.error ?? 'Native source export failed.', detail].filter(Boolean).join(' '))
-      }
+      let target = ''
+      // Unique package paths prevent Unreal from returning a previously loaded revision.
+      const engineKey = `${editor}:${binary.size}:${binary.mtimeMs}`
+      await this.worker.run(editor, engineKey, MESH_SCRIPT, cancellation, async (root, id) => {
+        directory = path.join(root, 'Content', id)
+        target = path.join(directory, match[1] + '.uasset')
+        await fs.mkdir(path.dirname(target), { recursive: true })
+        await fs.writeFile(target, bytes)
+        if (extra) await fs.writeFile(target.replace(/\.uasset$/i, '.uexp'), extra)
+        await fs.writeFile(path.join(directory, 'request.json'), JSON.stringify({ asset: '/Game/' + id + '/' + match[1] + '.' + roots[0].name, class: document.assetClass }))
+        return directory
+      }, bytes.length + (extra?.length ?? 0))
       const output = path.join(directory, 'geometry.json')
       if ((await fs.stat(output)).size > 4 * 1024 * 1024) throw new Error('Native geometry exceeds the 4 MB response limit.')
-      // Verify copies after the engine exits; no repository source is ever opened by Unreal.
+      // Verify copies after the job; no repository source is ever opened by Unreal.
       if (!(await fs.readFile(target)).equals(bytes) || extra && !(await fs.readFile(target.replace(/\.uasset$/i, '.uexp'))).equals(extra)) throw new Error('The isolated engine changed captured package bytes; export discarded.')
       const result = validateNativeGeometry(JSON.parse(await fs.readFile(output, 'utf8')))
       if (!result.engineVersion.startsWith(version + '.')) throw new Error('Installed engine version does not match this saved package.')
@@ -167,6 +165,6 @@ export class NativeMeshService {
     }
   }
 
-  stop() { this.shutdown.abort(); this.cache.clear() }
+  stop() { this.shutdown.abort(); this.cache.clear(); void this.worker.stop() }
 }
 export const nativeMeshService = new NativeMeshService()

@@ -54,7 +54,7 @@ test('real map membership and typed mesh/material references survive the reader 
   test.skip(!process.env.UNREAL_REVIEW_MAP, 'Set UNREAL_REVIEW_MAP to the local Overview fixture')
   const file = process.env.UNREAL_REVIEW_MAP, before = fs.readFileSync(file)
   const document = JSON.parse(execFileSync('dotnet',['tools/BlueprintExtractor/bin/Release/net10.0/BlueprintExtractor.dll',file],{ cwd:root,encoding:'utf8',maxBuffer:32*1024*1024 }))
-  expect(document.readerVersion).toBe(16)
+  expect(document.readerVersion).toBe(17)
   const inventory = mapInventory(document.assetReview.objects)
   expect(inventory.actors).toHaveLength(51)
   expect(inventory.roots).toHaveLength(50)

@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import type { BlueprintSide, NativeSceneReview } from '../blueprintTypes'
+import { savedSceneAttachments, type SavedSceneAttachment } from '../util/saved-attachments'
 
 export function gamePackageFile(packageName: string, root: string) {
   const content = /^(.*(?:^|\/)Content)\//.exec(root)?.[1]
@@ -14,15 +15,19 @@ export function gamePackageFile(packageName: string, root: string) {
 /** Exact-revision closure; dependencies are discovered from package tables, not names in text. */
 export async function captureSceneSnapshot(args: {
   root: BlueprintSide; directory: string; signal?: AbortSignal
+  renderOnly?: boolean
   capture(file: string, destination: string, remaining: number): Promise<BlueprintSide>
   external(map: string): Promise<string[]>
   stamp(files: string[]): Promise<string>
 }) {
   const packages: NativeSceneReview['packages'] = [], diagnostics: string[] = []
+  if (args.renderOnly) diagnostics.push('Geometry export captures render assets and placed actor classes only. Gameplay, UI and other nonvisual dependencies are excluded; this is not a complete world capture.')
   const documents = new Map<string, string>()
   const actorNames = new Set<string>()
   const actorCandidates: Array<{ path: string; classPath: string; package: string }> = []
   let actorManifestComplete = true
+  const components: SavedSceneAttachment[] = []
+  let componentsComplete = true
   const initial = await args.stamp([])
   let remaining = 512 * 1024 * 1024
   const queue = [args.root.path], seen = new Set<string>(), scheduled = new Set(queue), stamps = new Map<string, string>()
@@ -45,6 +50,9 @@ export async function captureSceneSnapshot(args: {
     if (file === args.root.path && captured.documentKey !== args.root.documentKey) throw new Error('Root asset changed before dependency capture. Retry.')
     if (!captured.document?.assetReview?.packages || captured.document.assetReview.packageReferencesComplete !== true) throw new Error('Update the package reader: dependency tables are unavailable or incomplete.')
     documents.set(file, captured.document.engineVersion)
+    const attachments = savedSceneAttachments(captured,10000-components.length)
+    components.push(...attachments.components)
+    componentsComplete &&= attachments.complete
     for (const name of captured.document.assetReview.actorNames ?? []) actorNames.add(name)
     const candidates = captured.document.assetReview.actorCandidates
     if (!Array.isArray(candidates) || captured.document.assetReview.actorCandidatesComplete !== true) actorManifestComplete = false
@@ -59,7 +67,9 @@ export async function captureSceneSnapshot(args: {
     const bytes = captured.sourceBytes ?? 0
     remaining -= bytes
     packages.push({ path: captured.path, hash: captured.snapshotHash ?? captured.documentKey!, bytes })
-    for (const name of captured.document.assetReview.packages) {
+    const dependencies = args.renderOnly ? captured.document.assetReview.renderPackages : captured.document.assetReview.packages
+    if (!Array.isArray(dependencies) || dependencies.length > 4096 || dependencies.some(name => typeof name !== 'string')) throw new Error('Update the package reader: render dependency manifest is unavailable.')
+    for (const name of dependencies) {
       if (name.startsWith('/Engine/') || name.startsWith('/Script/')) continue
       const candidate = gamePackageFile(name, args.root.path)
       if (!candidate) { diagnostics.push(`Unsupported dependency mount: ${name}`); continue }
@@ -71,9 +81,9 @@ export async function captureSceneSnapshot(args: {
   if (await args.stamp([]) !== initial) throw new Error('Index changed during scene capture. Retry.')
   for (const [file, stamp] of stamps) if (await args.stamp([file]) !== stamp) throw new Error('Working dependency changed during scene capture. Retry.')
   if (!documents.has(args.root.path)) throw new Error('Root package is unavailable for scene capture.')
-  const identity = crypto.createHash('sha256').update(JSON.stringify(packages)).digest('hex')
+  const identity = crypto.createHash('sha256').update(JSON.stringify([args.renderOnly === true, packages])).digest('hex')
   const versions = [...documents.values()].filter(v => /^5\.\d+\./.test(v)).sort((a,b) => Number(b.split('.')[1]) - Number(a.split('.')[1]))
-  return { packages, diagnostics: [...new Set(diagnostics)].slice(0, 100), complete: diagnostics.length === 0, identity, documents, minimumEngineVersion: versions[0], actorNames: [...actorNames], actorCandidates, actorManifestComplete }
+  return { packages, diagnostics: [...new Set(diagnostics)].slice(0, 100), complete: diagnostics.length === 0, identity, documents, minimumEngineVersion: versions[0], actorNames: [...actorNames], actorCandidates, actorManifestComplete, components, componentsComplete, renderOnly: args.renderOnly === true }
 }
 
 export async function verifySceneInputs(directory: string) {

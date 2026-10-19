@@ -58,3 +58,26 @@
 .uar-preview-spinner { animation: uar-preview-spin 1s linear infinite; flex-shrink: 0; }
 @keyframes uar-preview-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .uar-preview-spinner { animation: none; } }
+
+/* Give the preview the workspace; reveal inspection and technical controls on demand. */
+.uar-preview-workspace{grid-template-columns:minmax(0,1fr)}
+.uar-preview-workspace.uar-with-inspector{grid-template-columns:minmax(0,1fr) minmax(240px,300px)}
+.uar-preview-toolbar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:12px}
+.uar-preview-toolbar .uar-preview-options{border:0;padding:0}
+.uar-preview-toolbar .uar-preview-options[open]{flex-basis:100%}
+.uar-map-navigation{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.uar-map .uar-filter{margin:4px 0}
+.uar-preview-workspace .uar-content{padding-top:6px}
+.uar-preview-options,.uar-map-options,.uar-map-help{color:var(--lg-text-secondary);font-size:11px}
+.uar-preview-options[open],.uar-map-options[open]{padding-bottom:12px}
+.uar-preview-options label{display:flex;align-items:center;gap:6px;margin-top:12px}
+.uar .uar-map-tools button[aria-pressed=true]{color:var(--lg-accent);border-color:var(--lg-accent)}
+.uar-scene-loading{display:flex;align-items:center;gap:10px;padding:18px 12px;margin:12px 0;background:var(--lg-bg-secondary);border-radius:6px}
+.uar-scene-loading small{margin-top:5px;line-height:1.5}
+.uar-preview-workspace .uar-map-field{height:clamp(300px,52vh,650px);margin-top:12px}
+.uar summary:focus-visible{outline:2px solid var(--lg-accent);outline-offset:2px}
+@container(max-width:700px){.uar-preview-workspace.uar-with-inspector{grid-template-columns:minmax(0,1fr)}.uar-preview-workspace .uar-inspector{border-left:0;border-top:1px solid var(--lg-border);max-height:300px}}
+
+.uar-map-export{flex:1 1 240px;color:var(--lg-text-secondary);font-size:11px}
+.uar-map-export[open]{flex-basis:100%}
+.uar-map-export label{display:flex;align-items:center;gap:6px;margin:12px 0 4px}

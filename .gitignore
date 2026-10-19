@@ -25,6 +25,7 @@ test-results/
 /threenative-asset-mcp/
 /tools/BlueprintExtractor/bin/
 /tools/BlueprintExtractor/obj/
+/tools/UnrealPreviewBridge/bin/
 /.blueprint-build/
 /public/blueprint/
 

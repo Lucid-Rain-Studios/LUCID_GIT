@@ -43,6 +43,7 @@ async function reviewServer() {
     window.calls=[];window.closedReview=0;window.logCount=0;
     const file=path=>({path,status:'M',additions:0,deletions:0});
     window.lucidGit={
+      branchList:async()=>[],
       fetch:async()=>{},
       mergePreview:async()=>['Content/animations/ABP_Hazmat.uasset','Content/mesh/SK_Hazmat.uasset'].map(path=>({path,type:'ue-asset',conflictType:'binary'})),
       branchDiff:async()=>({aheadCommits:[{hash:'a'.repeat(40),message:'Better Hand Motions',author:'jacoblauriecontact-debug'}],files:['Content/DataAssets/DA_Box.uasset','Content/animations/ABP_Hazmat.uasset','Content/mesh/SK_Hazmat.uasset','first.txt','second.txt'].map(file),totalAdditions:0,totalDeletions:0}),

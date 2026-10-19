@@ -1,0 +1,43 @@
+const { test, expect } = require('@playwright/test')
+const fs = require('node:fs'), path = require('node:path'), http = require('node:http')
+const { tmpDir, cleanup } = require('./helpers')
+const root = path.resolve(__dirname, '..')
+test.afterAll(cleanup)
+test('map render reports pending, unavailable and failed requests, retries, and keeps the layout compact', async ({ page }, testInfo) => {
+  const dir = tmpDir('lg-map-render-feedback-')
+  const objects = Array.from({length:14},(_,i)=>({id:'',name:'Actor '+(i+1),path:'Map.Actor'+i,outer:'Map.Level',classPath:'/Script/Engine.SceneComponent',properties:{RelativeLocation:{X:(i%5)*200,Y:Math.floor(i/5)*200,Z:0}},decoded:true,opaqueBytes:0,opaqueHash:'',diagnostics:[]}))
+  const document = {schemaVersion:1,readerVersion:16,assetClass:'/Script/Engine.World',graphs:[],diagnostics:[],status:'unsupported',assetReview:{family:'map',objects,coverage:['Saved package only'],cooked:false}}
+  const result = {left:{status:'absent',ref:'ABSENT'},right:{status:'ready',ref:'WORKING',document}}
+  await require('esbuild').build({stdin:{contents:`import React,{useState} from 'react';import {createRoot} from 'react-dom/client';import {UnrealAssetReview} from './src/components/diff/UnrealAssetReview';import './src/index.css';function App(){const[file,setFile]=useState('Map.umap');window.chooseMap=setFile;return <UnrealAssetReview single repoPath="test" request={{filePath:file,leftRef:'ABSENT',rightRef:'WORKING'}}/>}createRoot(document.getElementById('root')).render(<App/>);`,resolveDir:root,loader:'tsx'},alias:{'@':path.join(root,'src')},outfile:path.join(dir,'app.js'),bundle:true,format:'esm'})
+  const server = http.createServer((req,res) => {
+    if(req.url === '/') {res.setHeader('Content-Type','text/html');return res.end(`<html><link rel="stylesheet" href="/app.css"><style>html,body,#root{margin:0;width:100%;height:100%;display:flex}</style><div id="root"></div><script>window.calls=[];window.lucidGit={logRendererEvent:async()=>{},blueprintCancel:async()=>{},blueprintCompare:async(_,r)=>{window.calls.push(r);const result=${JSON.stringify(result)};if(r.nativeScene){await new Promise((resolve,reject)=>{window.finish=resolve;window.fail=reject});result.right.scene={status:'unavailable',reason:'Matching Unreal Engine 5.8 is not installed.',packages:[],diagnostics:[],complete:false}}return result}}</script><script type="module" src="/app.js"></script></html>`)}
+    res.setHeader('Content-Type',req.url.endsWith('.css')?'text/css':'text/javascript');res.end(fs.readFileSync(path.join(dir,req.url.slice(1))))
+  })
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
+  const errors=[];page.on('pageerror',e=>errors.push(e.message))
+  try {
+    await page.setViewportSize({width:1200,height:820});await page.goto(`http://127.0.0.1:${server.address().port}`)
+    await expect(page.getByRole('button',{name:'Saved positions',exact:true})).toHaveAttribute('aria-pressed','true')
+    await expect(page.getByRole('checkbox',{name:'Bake complex materials with GPU'})).toBeHidden()
+    await expect(page.locator('.uar-inspector')).toHaveCount(0)
+    const field=await page.locator('.uar-map-field').boundingBox();expect(field.width).toBeGreaterThan(1100);expect(field.y).toBeLessThan(500)
+    await page.screenshot({path:testInfo.outputPath('minimal-map-preview.png')});await expect(page.getByRole('button',{name:'Export 3D geometry (slow)',exact:true})).toBeHidden();await page.getByText('3D geometry export (slow)',{exact:true}).click();expect(await page.evaluate(()=>window.calls.some(r=>r.nativeScene))).toBe(false);const baseline=await page.evaluate(()=>window.calls.length);await page.getByRole('checkbox',{name:'Bake complex materials with GPU'}).check();await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));expect(await page.evaluate(()=>window.calls.length)).toBe(baseline)
+    await page.getByRole('button',{name:/^(Export 3D geometry|Retry 3D export) \(slow\)$/}).click()
+    await expect(page.locator('.uar-scene-loading')).toBeVisible()
+    await expect(page.getByRole('button',{name:'Exporting geometry…',exact:true})).toBeDisabled()
+    await expect(page.getByText('Scene unavailable in this revision.',{exact:false})).toHaveCount(0)
+    await expect.poll(()=>page.evaluate(()=>window.calls.filter(r=>r.nativeScene).length)).toBe(1);expect(await page.evaluate(()=>({renderOnly:window.calls.at(-1).sceneRenderOnly,bake:window.calls.at(-1).sceneBakeMaterials}))).toEqual({renderOnly:true,bake:true})
+    await page.getByRole('button',{name:'Saved positions',exact:true}).click();await expect(page.locator('.uar-map-field')).toBeVisible()
+    await page.evaluate(()=>window.finish());await page.getByRole('button',{name:/^(Export 3D geometry|Retry 3D export) \(slow\)$/}).click()
+    await expect.poll(()=>page.evaluate(()=>window.calls.filter(r=>r.nativeScene).length)).toBe(2)
+    await page.evaluate(()=>window.finish());await expect(page.getByRole('alert')).toContainText('Matching Unreal Engine 5.8 is not installed.')
+    await page.getByRole('button',{name:/^(Export 3D geometry|Retry 3D export) \(slow\)$/}).click();await expect.poll(()=>page.evaluate(()=>window.calls.filter(r=>r.nativeScene).length)).toBe(3)
+    await page.evaluate(()=>window.fail(new Error('Scene export failed')));await expect(page.getByRole('alert').first()).toContainText('Scene export failed')
+    await page.getByRole('button',{name:/^(Export 3D geometry|Retry 3D export) \(slow\)$/}).click();await expect.poll(()=>page.evaluate(()=>window.calls.filter(r=>r.nativeScene).length)).toBe(4)
+    await page.evaluate(()=>window.finish());await page.getByRole('button',{name:'Saved positions',exact:true}).click()
+    await page.setViewportSize({width:480,height:720});await expect(page.locator('.uar-map-field')).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(480)
+    await page.getByRole('checkbox',{name:'Bake complex materials with GPU'}).uncheck();await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));expect(await page.evaluate(()=>window.calls.filter(r=>r.nativeScene).length)).toBe(4)
+    await page.evaluate(()=>window.chooseMap('Other.umap'));await expect(page.locator('.uar-heading strong')).toHaveText('Other.umap');await expect(page.getByRole('button',{name:'Saved positions',exact:true})).toHaveAttribute('aria-pressed','true');await expect.poll(()=>page.evaluate(()=>window.calls.at(-1).filePath)).toBe('Other.umap');await page.evaluate(()=>window.chooseMap('Map.umap'));await expect.poll(()=>page.evaluate(()=>window.calls.at(-1).filePath)).toBe('Map.umap');expect(await page.evaluate(()=>window.calls.filter(r=>r.nativeScene).length)).toBe(4)
+    expect(errors).toEqual([])
+  } finally {await page.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve))}
+})

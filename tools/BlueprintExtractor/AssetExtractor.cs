@@ -12,6 +12,25 @@ static class AssetExtractor {
         .Where(value => value.StartsWith('/')).Distinct();
     internal static JArray Packages(UAsset asset) => new(PackageNames(asset).Order().Take(4096));
     internal static bool PackagesComplete(UAsset asset) => PackageNames(asset).Take(4097).Count() <= 4096;
+    // Import types and export ownership are available without decoding graph bodies.
+    // Render captures need meshes/materials/textures, placed actor classes and their
+    // parent classes, not the gameplay/UI references in every Blueprint graph.
+    internal static JArray RenderPackages(UAsset asset) {
+        var names = new HashSet<string>();
+        void Add(string objectPath) {
+            if (!objectPath.StartsWith('/')) return;
+            var end = objectPath.IndexOf('.');
+            names.Add(end < 0 ? objectPath : objectPath[..end]);
+        }
+        var types = new HashSet<string> { "World", "StaticMesh", "SkeletalMesh", "Skeleton", "AnimSequence", "Material", "MaterialInstance", "MaterialInstanceConstant", "MaterialFunction", "MaterialFunctionInstance", "MaterialFunctionMaterialLayer", "MaterialFunctionMaterialLayerBlend", "Texture2D", "TextureCube", "Texture2DArray", "TextureVolume" };
+        for (var i = 0; i < asset.Imports.Count; i++)
+            if (types.Contains(asset.Imports[i].ClassName.ToString())) Add(GraphExtractor.ObjectPath(asset, -i - 1));
+        foreach (var export in asset.Exports) {
+            if (GraphExtractor.ObjectPath(asset, export.OuterIndex.Index).EndsWith(".PersistentLevel")) Add(GraphExtractor.ObjectPath(asset, export.ClassIndex.Index));
+            if (export.SuperIndex != null && export.SuperIndex.Index != 0) Add(GraphExtractor.ObjectPath(asset, export.SuperIndex.Index));
+        }
+        return new JArray(names.Order().Take(4096));
+    }
     internal static JArray ActorNames(UAsset asset) => new(asset.Exports.Where(export => GraphExtractor.ObjectPath(asset, export.OuterIndex.Index).EndsWith(".PersistentLevel")).Select(export => export.ObjectName.ToString()).Distinct().Take(10000));
     internal static JArray ActorCandidates(UAsset asset) => new(asset.Exports.Select((export,index) => (export,index)).Where(value => GraphExtractor.ObjectPath(asset,value.export.OuterIndex.Index).EndsWith(".PersistentLevel")).Take(10000).Select(value => new JObject { ["path"] = GraphExtractor.ObjectPath(asset,value.index + 1), ["classPath"] = GraphExtractor.ObjectPath(asset,value.export.ClassIndex.Index) }));
     internal static bool ActorCandidatesComplete(UAsset asset) => asset.Exports.Count(export => GraphExtractor.ObjectPath(asset,export.OuterIndex.Index).EndsWith(".PersistentLevel")) <= 10000;
@@ -167,7 +186,7 @@ static class AssetExtractor {
         };
         return new JObject {
             ["family"] = family, ["objects"] = objects,
-            ["packages"] = Packages(asset), ["packageReferencesComplete"] = PackagesComplete(asset),
+            ["packages"] = Packages(asset), ["packageReferencesComplete"] = PackagesComplete(asset), ["renderPackages"] = RenderPackages(asset),
             ["actorNames"] = ActorNames(asset),
             ["actorCandidates"] = ActorCandidates(asset),
             ["actorCandidatesComplete"] = ActorCandidatesComplete(asset),

@@ -32,6 +32,7 @@ test('UE 5.8 localized text keeps pin fields aligned and rejects truncated notes
   expect(output).toContain('5 localized-text alignment checks passed.')
   expect(output).toContain('8 native cast/pin retention checks passed.')
   expect(output).toContain('3 native pin-type property normalization checks passed.')
+  expect(output).toContain('8 component-bound event signature checks passed.')
   expect(output).toContain('3 tagged export static-index/empty/ambiguity checks passed.')
   expect(output).toContain('5 compiled tagged-text overlay checks passed.')
   expect(output).toContain('4 tagged-recovery boundary/profile checks passed.')
@@ -41,12 +42,12 @@ test('UE 5.8 localized text keeps pin fields aligned and rejects truncated notes
 
 test('old cached graphs are re-extracted and an outdated helper is rejected', async () => {
   const cache = tmpDir('lg-blueprint-version-cache-'), key = 'old-document'
-  fs.writeFileSync(path.join(cache, key + '.json'), JSON.stringify({ schemaVersion: 1, readerVersion: 7, status: 'complete', graphs: [], diagnostics: [] }))
+  fs.writeFileSync(path.join(cache, key + '.json'), JSON.stringify({ schemaVersion: 1, readerVersion: 16, status: 'partial', graphs: [], diagnostics: ['Unparsed native node data (4 bytes).'] }))
   const reader = new BlueprintRevisionService(helper, cache)
   const document = await reader.extract(key, fixture)
-  expect(document.readerVersion).toBe(16)
+  expect(document.readerVersion).toBe(17)
   expect(document.graphs.length).toBeGreaterThan(0)
-  expect(JSON.parse(fs.readFileSync(path.join(cache,key + '.json'),'utf8')).readerVersion).toBe(16)
+  expect(JSON.parse(fs.readFileSync(path.join(cache,key + '.json'),'utf8')).readerVersion).toBe(17)
   const stale = { ...document, graphs: [] }
   reader.cache.set(key, stale)
   fs.writeFileSync(path.join(cache,key + '.json'),JSON.stringify(stale))
@@ -55,10 +56,7 @@ test('old cached graphs are re-extracted and an outdated helper is rejected', as
   const { component } = require('./renderer-harness')
   const { BlueprintRevisionService: OldReader } = component('electron/services/BlueprintRevisionService.ts', {
     electron: { app: { getPath: () => cache } },
-    'node:child_process': { execFile: (_, __, ___, callback) => {
-      setImmediate(() => callback(null, JSON.stringify({ schemaVersion: 1, readerVersion: 7, graphs: [] }), ''))
-      return { kill() {} }
-    } },
+    './BlueprintReaderWorker': { BlueprintReaderWorker: class { busy=false; async read() { return JSON.stringify({schemaVersion:1,readerVersion:7,graphs:[]}) } stop() {} } },
   }, { process, Buffer, __dirname: path.join(root, 'electron/services') }).exports
   const outdated = new OldReader(helper, tmpDir('lg-blueprint-old-helper-'))
   await expect(outdated.extract('old-helper', fixture)).rejects.toThrow('installed Blueprint reader is outdated')
@@ -350,10 +348,16 @@ test('extraction queue is bounded, shared reads deduplicate, and shutdown releas
     electron: { app: { getPath: () => cache } },
     './NativeMeshService': { nativeMeshService: { stop: () => nativeStops.push(true) } },
     './NativeSceneService': { nativeSceneService: { stop() {} } },
-    'node:child_process': { execFile: (_, __, options, callback) => {
-      const call = { options, callback, killed: false }
-      calls.push(call)
-      return { kill() { call.killed = true; setImmediate(() => callback(new Error('killed'), '', '')) } }
+    './BlueprintReaderWorker': { BlueprintReaderWorker: class {
+      busy=false
+      read() {
+        this.busy=true
+        return new Promise((resolve,reject)=>{
+          this.current={killed:false,callback:(error,text)=>{this.busy=false;error?reject(error):resolve(text)}}
+          calls.push(this.current)
+        })
+      }
+      stop() { if(this.busy){this.current.killed=true;this.current.callback(new Error('killed'))} }
     } },
   }, { process, Buffer, __dirname: path.join(root,'electron/services') }).exports
   const reader = new Reader(helper, cache)
@@ -366,8 +370,7 @@ test('extraction queue is bounded, shared reads deduplicate, and shutdown releas
   await expect.poll(() => calls.length).toBe(2)
   await expect.poll(() => reader.waiting.length).toBe(8)
   await expect.poll(() => outcomes.filter(r => r.error?.message.includes('busy')).length).toBe(1)
-  expect(calls.every(call => call.options.timeout === 25000 && call.options.maxBuffer === 32 * 1024 * 1024)).toBe(true)
-  calls[0].callback(null, JSON.stringify({schemaVersion:1,readerVersion:16,status:'complete',graphs:[],diagnostics:[]}), '')
+  calls[0].callback(null, JSON.stringify({schemaVersion:1,readerVersion:17,status:'complete',graphs:[],diagnostics:[]}), '')
   expect((await jobs[0]).value.status).toBe('complete')
   expect((await shared).status).toBe('complete')
   await expect.poll(() => calls.length).toBe(3)
@@ -377,7 +380,7 @@ test('extraction queue is bounded, shared reads deduplicate, and shutdown releas
   expect(results.slice(1,10).every(r => r.error)).toBe(true)
   expect(calls.slice(1).every(call => call.killed)).toBe(true)
   expect(reader.waiting).toHaveLength(0)
-  expect(reader.processes.size).toBe(0)
+  expect(reader.readers.every(reader=>!reader.busy)).toBe(true)
   expect(reader.inFlight.size).toBe(0)
   expect(reader.active).toBe(0)
 })

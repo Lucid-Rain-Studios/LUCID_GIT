@@ -2,17 +2,7 @@ import type { UnrealAssetObject } from '../../electron/blueprintTypes'
 import { savedObjectIndex } from './assetReferences'
 import { rotate, type Vertex } from './meshReview'
 import { mapAxes, type MapPlane } from './mapReview'
-
-function vector(value: unknown, name: string, keys: string[]): Vertex | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return
-  const root = value as Record<string, unknown>, data = root[name] ?? root
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return
-  const numbers = keys.map(key => {
-    const entry = (data as Record<string, unknown>)[key]
-    return typeof entry === 'number' || typeof entry === 'string' && entry.trim() !== '' ? Number(entry) : NaN
-  })
-  return numbers.every(Number.isFinite) ? numbers as Vertex : undefined
-}
+import { savedVector as vector } from '../../electron/util/saved-vector'
 
 /** Strict saved attachment chains only. Missing defaults, sockets and cross-package
  * references are unresolved. Positive uniform scale avoids FTransform shear ambiguity. */

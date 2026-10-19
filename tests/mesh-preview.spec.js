@@ -202,7 +202,7 @@ test('real static mesh fixture retains convex arrays and accurate collision coun
   test.skip(!fixture, 'Set UNREAL_REVIEW_MESH to a local saved convex cube fixture')
   const before = require('node:crypto').createHash('sha256').update(fs.readFileSync(fixture)).digest('hex')
   const doc = JSON.parse(execFileSync('dotnet', ['tools/BlueprintExtractor/bin/Release/net10.0/BlueprintExtractor.dll',fixture], { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }))
-  expect(doc.readerVersion).toBe(16)
+  expect(doc.readerVersion).toBe(17)
   expect(doc.assetReview.family).toBe('mesh')
   const decoded = collisionHulls(doc.assetReview.objects)
   expect(decoded).toMatchObject({ vertices: 8, triangles: 12, omitted: 0 })

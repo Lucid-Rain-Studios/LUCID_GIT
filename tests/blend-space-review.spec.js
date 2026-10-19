@@ -29,7 +29,7 @@ test('sample budget and shared observed bounds preserve omitted defaults',()=>{
 for(const [variable,dimensions,count] of [['UNREAL_REVIEW_BLENDSPACE',2,27],['UNREAL_REVIEW_BLENDSPACE1D',1,3]])test(`real ${dimensions}D BlendSpace exposes saved samples and static axis fields without changing bytes`,()=>{
  const file=process.env[variable];test.skip(!file,'Set real BlendSpace fixture')
  const bytes=fs.readFileSync(file),doc=JSON.parse(execFileSync('dotnet',['tools/BlueprintExtractor/bin/Release/net10.0/BlueprintExtractor.dll',file],{cwd:root,encoding:'utf8',maxBuffer:32*1024*1024})),model=blendSpaceModel(doc.assetReview.objects)
- expect(doc.readerVersion).toBe(16);expect(model.object.decoded).toBe(true);expect(model.object.diagnostics).toEqual([])
+ expect(doc.readerVersion).toBe(17);expect(model.object.decoded).toBe(true);expect(model.object.diagnostics).toEqual([])
  expect(model.dimensions).toBe(dimensions);expect(model.entries).toHaveLength(count);expect(model.entries.every(e=>e.positioned)).toBe(true)
  expect(model.axes[dimensions-1].min).toBeUndefined()
  expect(model.object.references.some(r=>r.propertyPath==='SampleData[0].Animation'&&r.className==='AnimSequence')).toBe(true)

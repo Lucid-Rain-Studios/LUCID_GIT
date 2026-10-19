@@ -65,6 +65,7 @@ export interface UnrealAssetObject {
   diagnostics: string[]
 }
 export interface UnrealAssetDocument {
+  renderPackages?: string[]
   packages?: string[]
   actorNames?: string[]
   actorCandidates?: Array<{ path: string; classPath: string }>
@@ -90,10 +91,13 @@ export interface BlueprintSide {
   document?: BlueprintDocument
 }
 export interface BlueprintRequest {
+  sceneRenderOnly?: boolean
   nativeScene?: boolean
+  nativeSceneSide?: 'left' | 'right'
   sceneBakeMaterials?: boolean
   sceneLod?: number
   nativeGeometry?: boolean
+  nativeGeometrySide?: 'left' | 'right'
   externalActors?: boolean
   knownDocuments?: string[]
   force?: boolean
@@ -104,6 +108,7 @@ export interface BlueprintRequest {
   requestId: string
 }
 export interface NativeSceneReview {
+  playback?: Array<{actor:string;clip:string;position:number;rate:number;looping:boolean;playing:boolean}>
   actorInventory?: { expected: number; matched: number; missing: string[]; diagnostics: string[] }
   actorInventoryComplete?: boolean
   renderLod?: { requested: number; count: number }
@@ -115,7 +120,8 @@ export interface NativeSceneReview {
   diagnostics: string[]
   complete: boolean
   stats?: { nodes: number; meshes: number; materials: number; textures: number; skins: number; animations: number; vertices: number; triangles: number }
-  actors?: Array<{ name: string; path: string; location: [number, number, number]; saved?: boolean }>
+  instances?: Array<{ world: string; source: string; identity: string; owner: string }>
+  actors?: Array<{ name: string; path: string; location: [number, number, number]; rotation?: [number, number, number, number]; scale?: [number, number, number]; saved?: boolean; guid?: string; instancePath?: string; instanceLabel?: string; sourcePath?: string; inspectPath?: string; renderName?: string }>
   bags?: Array<{ object: string; property: string; text: string }>
 }
 export interface NativeMeshGeometry {

@@ -98,6 +98,34 @@ try { Normalize(shiftedType); throw new Exception("Unknown type suffix was silen
 catch (TargetInvocationException ex) when (ex.InnerException is InvalidDataException) { }
 Console.WriteLine("3 native pin-type property normalization checks passed.");
 
+// Component-bound events inherit the editable event signature, even when empty.
+// Parse its structure; never accept arbitrary four-byte tails as padding.
+void BoundEvent(string mode) {
+    var (asset, type) = TypeProperty("bool", false);
+    var cls = mode == "unrelated" ? "K2Node_VariableGet" : "K2Node_ComponentBoundEvent";
+    asset.Imports.Add(new UAssetAPI.Import { ObjectName = FName.DefineDummy(asset, cls) });
+    using var stream = new MemoryStream();
+    using (var writer = new AssetBinaryWriter(stream, Encoding.UTF8, true, asset)) {
+        writer.Write(0); // No graph pins in this controlled signature fixture.
+        if (mode != "missing") writer.Write(mode == "negative" ? -1 : mode == "oversized" ? 100001 : mode is "entry" or "truncated" ? 1 : 0);
+        if (mode is "entry" or "truncated") {
+            writer.Write(new FName(asset, "Argument"));
+            writer.Write(Convert.FromBase64String(type.Value<string>("Value")!));
+            writer.Write((byte)1); writer.Write(new FString("true"));
+        }
+        if (mode == "suffix") writer.Write((byte)99);
+    }
+    if (mode == "truncated") stream.SetLength(stream.Length - 2);
+    var node = new UAssetAPI.ExportTypes.NormalExport { ClassIndex = new FPackageIndex(-1), Extras = stream.ToArray() };
+    var succeeds = mode is "empty" or "entry";
+    try {
+        pinsMethod.Invoke(null, [asset, node, 1, new Newtonsoft.Json.Linq.JArray(), new Newtonsoft.Json.Linq.JObject()]);
+        if (!succeeds) throw new Exception($"Malformed bound event {mode} was accepted.");
+    } catch (TargetInvocationException ex) when (!succeeds && ex.InnerException is InvalidDataException or EndOfStreamException or ArgumentOutOfRangeException) { }
+}
+foreach (var mode in new[] { "empty", "entry", "missing", "negative", "oversized", "truncated", "suffix", "unrelated" }) BoundEvent(mode);
+Console.WriteLine("8 component-bound event signature checks passed.");
+
 
 
 var inventoryAsset = new UAsset(EngineVersion.VER_UE5_4);

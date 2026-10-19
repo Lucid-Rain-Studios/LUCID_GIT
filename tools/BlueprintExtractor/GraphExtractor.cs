@@ -10,7 +10,7 @@ using UAssetAPI.UnrealTypes;
 // source is embedded or required at runtime. Unsupported versions/tails are explicit.
 static class GraphExtractor
 {
-    const int ReaderVersion = 16;
+    const int ReaderVersion = 17;
     static string Name(UAsset a, int index) => index switch {
         > 0 when index <= a.Exports.Count => a.Exports[index - 1].ObjectName.ToString(),
         < 0 when -index <= a.Imports.Count => a.Imports[-index - 1].ObjectName.ToString(),
@@ -141,7 +141,9 @@ static class GraphExtractor
         }
         // Editable entry/result/event nodes append user-defined signature metadata.
         var cls = Name(a, e.ClassIndex.Index);
-        if (new[] { "K2Node_Event", "K2Node_FunctionEntry", "K2Node_FunctionResult", "K2Node_CustomEvent", "K2Node_Tunnel", "K2Node_MacroInstance" }.Contains(cls)) {
+        // Component-bound events inherit the editable signature from K2Node_Event,
+        // including its count when the saved signature has no entries.
+        if (new[] { "K2Node_Event", "K2Node_ComponentBoundEvent", "K2Node_FunctionEntry", "K2Node_FunctionResult", "K2Node_CustomEvent", "K2Node_Tunnel", "K2Node_MacroInstance" }.Contains(cls)) {
             var declared = Count(r);
             for (var i = 0; i < declared; i++) { r.ReadFName(); PinType(r); r.ReadByte(); r.ReadFString(); }
         }

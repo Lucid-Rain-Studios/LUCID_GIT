@@ -1,0 +1,1 @@
+{"FileVersion":3,"Version":1,"VersionName":"1.0","FriendlyName":"Lucid read-only asset preview bridge","CanContainContent":false,"Modules":[{"Name":"UnrealPreviewBridge","Type":"Editor","LoadingPhase":"Default"}]}

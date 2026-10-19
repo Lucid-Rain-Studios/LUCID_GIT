@@ -12,6 +12,12 @@ files:
   - "package.json"
 
 extraResources:
+  - from: tools/UnrealPreviewBridge/bin
+    to: unreal-preview-bridge
+    filter:
+      - "**/*.uplugin"
+      - "**/*.modules"
+      - "**/*.dll"
   - from: .blueprint-build/publish
     to: blueprint-extractor
     filter:
