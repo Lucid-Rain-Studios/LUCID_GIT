@@ -4,7 +4,8 @@ const fs = require('fs'), os = require('os'), path = require('path'), esbuild = 
 test('Clear persists empty history, retains new entries and survives reload', async () => {
   const { logService } = require('../dist-electron/services/LogService')
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lucid-log-clear-'))
-  logService.init(dir)
+  logService.init(dir, '1.4.0-diagnostic')
+  expect(logService.getFormattedText()).toContain('Lucid Git 1.4.0-diagnostic')
   logService.error('test', 'old authentication failed')
   const clearing = logService.clear()
   logService.info('test', 'new entry')

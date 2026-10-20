@@ -4,7 +4,7 @@ import { useLockStore } from '@/stores/lockStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useOperationStore } from '@/stores/operationStore'
 import { useStatusToastStore } from '@/stores/statusToastStore'
-import { FileDetailsSidePanel } from '@/components/shared/FileDetailsSidePanel'
+import { FileDetailsSidePanel, isPreviewAsset } from '@/components/shared/FileDetailsSidePanel'
 import { FilePathText } from '@/components/ui/FilePathText'
 import { BlueprintFileAction } from '@/components/shared/BlueprintFileAction'
 
@@ -114,8 +114,9 @@ function LockBadge() {
 
 interface MenuState { x: number; y: number; filePath: string }
 
-function ContextMenu({ menu, repoPath, locks, currentUserName, onClose, onNavigate }: {
+function ContextMenu({ menu, repoPath, locks, currentUserName, onClose, onNavigate, onBlame }: {
   menu: MenuState
+  onBlame: (filePath: string) => void
   repoPath: string
   locks: Lock[]
   currentUserName: string | null
@@ -173,6 +174,10 @@ function ContextMenu({ menu, repoPath, locks, currentUserName, onClose, onNaviga
       label: 'View History',
       icon: <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5" stroke="currentColor" strokeWidth="1.1"/><path d="M6.5 4V6.5l2 1.5" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round"/></svg>,
       action: () => act(() => onNavigate('history')),
+    },
+    {
+      label: 'Blame',
+      action: () => act(() => onBlame(menu.filePath)),
     },
     null,
     isLockedByOther
@@ -315,6 +320,7 @@ export function ContentBrowserPanel({ repoPath, onNavigate }: ContentBrowserPane
   const [search,   setSearch]   = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
+  const [detailMode, setDetailMode] = useState<'preview' | 'blame'>('preview')
   const [blame, setBlame] = useState<BlameEntry[]>([])
   const [blameLoading, setBlameLoading] = useState(false)
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null)
@@ -326,13 +332,14 @@ export function ContentBrowserPanel({ repoPath, onNavigate }: ContentBrowserPane
   useEffect(() => {
     setFiles(null)
     setSelectedFile(null)
+    setDetailMode('preview')
     setBlame([])
     ipc.gitLsFiles(repoPath).then(setFiles).catch(() => setFiles([]))
     ipc.getRemoteUrl(repoPath).then(setRemoteUrl).catch(() => setRemoteUrl(null))
   }, [repoPath])
 
   useEffect(() => {
-    if (!selectedFile) {
+    if (!selectedFile || isPreviewAsset(selectedFile)) {
       setBlame([])
       setBlameLoading(false)
       return
@@ -476,7 +483,8 @@ export function ContentBrowserPanel({ repoPath, onNavigate }: ContentBrowserPane
           currentUserName={currentUserName}
           onNavigate={onNavigate}
           selectedFile={selectedFile}
-          onSelectFile={setSelectedFile}
+          onSelectFile={filePath => { setSelectedFile(filePath); setDetailMode('preview') }}
+          onBlame={filePath => { setSelectedFile(filePath); setDetailMode('blame') }}
         />
       )}
       </div>
@@ -494,7 +502,7 @@ export function ContentBrowserPanel({ repoPath, onNavigate }: ContentBrowserPane
           blueprintRequest={selectedFile && /\.(uasset|umap)$/i.test(selectedFile) ? { filePath: selectedFile, leftRef: 'ABSENT', rightRef: 'WORKING' } : undefined}
           blame={blame}
           blameLoading={blameLoading}
-          mode={selectedFile && /\.(uasset|umap)$/i.test(selectedFile) ? 'preview' : 'details'}
+          mode={detailMode === 'blame' ? 'blame' : selectedFile && /\.(uasset|umap)$/i.test(selectedFile) ? 'preview' : 'details'}
           emptyMessage="Select a file for details"
           remoteUrl={remoteUrl}
         />
@@ -507,7 +515,7 @@ export function ContentBrowserPanel({ repoPath, onNavigate }: ContentBrowserPane
 
 type RowWithToggle = FlatRow & { onToggle?: () => void }
 
-function VirtualListInner({ rows, repoPath, locks, currentUserName, onNavigate, selectedFile, onSelectFile }: {
+function VirtualListInner({ rows, repoPath, locks, currentUserName, onNavigate, selectedFile, onSelectFile, onBlame }: {
   rows: RowWithToggle[]
   repoPath: string
   locks: Lock[]
@@ -515,6 +523,7 @@ function VirtualListInner({ rows, repoPath, locks, currentUserName, onNavigate, 
   onNavigate: (tab: string) => void
   selectedFile: string | null
   onSelectFile: (filePath: string) => void
+  onBlame: (filePath: string) => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [scrollTop,   setScrollTop]   = useState(0)
@@ -590,7 +599,7 @@ function VirtualListInner({ rows, repoPath, locks, currentUserName, onNavigate, 
         <ContextMenu
           menu={menu} repoPath={repoPath}
           locks={locks} currentUserName={currentUserName}
-          onClose={() => setMenu(null)} onNavigate={onNavigate}
+          onClose={() => setMenu(null)} onNavigate={onNavigate} onBlame={onBlame}
         />
       )}
 

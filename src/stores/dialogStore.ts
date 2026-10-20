@@ -6,6 +6,7 @@ export interface ConfirmOpts {
   detail?: string
   confirmLabel?: string
   cancelLabel?: string
+  secondaryAction?: { label: string; onClick: () => void }
   danger?: boolean
 }
 

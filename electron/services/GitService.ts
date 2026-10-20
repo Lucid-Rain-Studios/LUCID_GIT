@@ -1,5 +1,6 @@
 import { BINARY_EXTENSIONS } from '../util/binary-formats'
 import Database from 'better-sqlite3'
+import type { PushLockCheck, PushLockOverride } from '../pushTypes'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -7,6 +8,7 @@ import { performance } from 'node:perf_hooks'
 import { exec, execSafe, execWithProgress, execWithStdin, gitAuthArgs, withGitTimeout, gitOpActivity, waitForGitOpsToDrain, ProgressCallback } from '../util/dugite-exec'
 import { nulPaths, parseNameStatus, parseNumstat } from '../util/git-paths'
 import { withRepoSlot } from '../util/repo-gate'
+import { assertSafeMergeCommit, clearMergeGuardAfterAbort, guardedMergeCommit, guardedMergeOperation, isMergeWriteFailure, mergeBlockingReason } from '../util/merge-safety'
 import { authService } from './AuthService'
 import { logService } from './LogService'
 import { parseGitLog, GIT_LOG_FORMAT } from '../util/git-log-parse'
@@ -613,7 +615,7 @@ class GitService {
   async commit(repoPath: string, message: string, noVerify = false): Promise<void> {
     const args = ['commit', '-m', message]
     if (noVerify) args.push('--no-verify')
-    await exec(args, repoPath)
+    await guardedMergeCommit(repoPath, () => exec(args, repoPath))
   }
 
   /** Amend the last commit, keeping its parent. Pass noVerify=true to skip hooks. */
@@ -682,7 +684,8 @@ class GitService {
   }
 
   /** Push current branch to its upstream. Streams progress and returns the pre-push metadata. */
-  async push(repoPath: string, onProgress?: ProgressCallback, force = false): Promise<{ branch: string; filesAhead: string[] }> {
+  async push(repoPath: string, onProgress?: ProgressCallback, force = false, lockOverride?: PushLockOverride): Promise<{ branch: string; filesAhead: string[] }> {
+    if (lockOverride && force) throw new Error('Lock overrides cannot be combined with force push.')
     if (!force) {
       onProgress?.({ id: 'push-fetch', label: 'Fetching before push', status: 'running', progress: 4 })
       await this.fetch(repoPath, onProgress)
@@ -719,6 +722,25 @@ class GitService {
       ? [...gitAuthArgs(token, remoteUrl), 'push', '--progress', '--set-upstream', 'origin', branch]
       : [...gitAuthArgs(token, remoteUrl), 'push', '--progress']
     if (force) pushArgs.push('--force-with-lease')
+
+    if (lockOverride) {
+      // Revalidate inside the push write gate, after fetch, and bind consent to
+      // the exact branch, commit and destination the user reviewed.
+      const check = await this.pushLockCheck(repoPath)
+      if (check.overrideReason) throw new Error(check.overrideReason)
+      if (['branch', 'head', 'remoteUrl', 'targetBranch'].some(key =>
+        check[key as keyof PushLockOverride] !== lockOverride[key as keyof PushLockOverride])) {
+        throw new Error('The branch, commit or push destination changed. Retry checks and confirm again.')
+      }
+      const env = await exec(['lfs', 'env'], repoPath)
+      const endpoints = [...env.stdout.matchAll(/^Endpoint(?: \([^\r\n]+\))?=(\S+)/gm)].map(match => match[1])
+      if (!endpoints.length) throw new Error('Could not determine the LFS endpoint. Lock verification remains enabled.')
+      // URL-specific configuration takes precedence over lfs.locksverify.
+      // -c is inherited by the LFS hook; no config file or lock is modified.
+      const config = ['-c', 'lfs.locksverify=false', ...[...new Set(endpoints)].flatMap(url => ['-c', `lfs.${url}.locksverify=false`])]
+      pushArgs.splice(0, pushArgs.length, ...config, ...gitAuthArgs(token, remoteUrl), 'push', '--progress', '--set-upstream',
+        'origin', `refs/heads/${branch}:refs/heads/${check.targetBranch}`)
+    }
 
     onProgress?.({ id: 'push-connect', label: 'Connecting to remote', status: 'running', progress: 12 })
     // Push is idempotent, so replaying a partially-completed push is safe.
@@ -864,15 +886,50 @@ class GitService {
     )
   }
 
-  /** Files changed in commits that are ahead of upstream (what push would publish). */
+  /** Changed paths in outgoing commits, including first publication and reverted changes. */
   async aheadFilePaths(repoPath: string): Promise<string[]> {
+    const branch = await this.currentBranch(repoPath)
     const upstreamRes = await execSafe(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], repoPath)
-    if (upstreamRes.exitCode !== 0) return []
-    const upstream = upstreamRes.stdout.trim()
-    if (!upstream) return []
-    const diffRes = await execSafe(['diff', '--name-only', '-z', `${upstream}..HEAD`], repoPath)
-    if (diffRes.exitCode !== 0) return []
-    return nulPaths(diffRes.stdout)
+    const published = await this.hasPublishedBranch(repoPath, branch)
+    const range = published && upstreamRes.exitCode === 0 && upstreamRes.stdout.trim()
+      ? [`${upstreamRes.stdout.trim()}..HEAD`]
+      : ['HEAD', '--not', '--remotes=origin']
+    const commits = await exec(['rev-list', '--max-count=10001', ...range], repoPath)
+    const hashes = commits.stdout.trim().split(/\s+/).filter(Boolean)
+    if (hashes.length > 10000) throw new Error('Too many outgoing commits to check locks. Fetch the destination and retry checks.')
+    if (!hashes.length) return []
+    // Combined merge diffs omit files merely inherited from a parent. Those
+    // versions already exist in the destination's fetched history.
+    const files = await execWithStdin(['diff-tree', '--stdin', '--root', '--no-commit-id', '--name-only', '--no-renames', '-r', '--cc', '-z'], repoPath, hashes.join('\n') + '\n')
+    return [...new Set(nulPaths(files.stdout))]
+  }
+
+  async pushLockCheck(repoPath: string): Promise<PushLockCheck> {
+    const branch = await this.currentBranch(repoPath)
+    const [head, remoteUrl, defaultInfo, upstreamRemote, upstreamMerge, published, files, pushUrls, upstream] = await Promise.all([
+      exec(['rev-parse', '--verify', 'HEAD'], repoPath), this.getRemoteUrl(repoPath),
+      (async () => {
+        const symbolic = await execSafe(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], repoPath)
+        if (symbolic.exitCode === 0 && symbolic.stdout.trim().startsWith('origin/')) return symbolic.stdout.trim().slice(7)
+        return (await this.probeRemoteHead(repoPath))?.name ?? null
+      })(),
+      execSafe(['config', '--get', `branch.${branch}.remote`], repoPath),
+      execSafe(['config', '--get', `branch.${branch}.merge`], repoPath),
+      this.hasPublishedBranch(repoPath, branch), this.aheadFilePaths(repoPath),
+      exec(['remote', 'get-url', '--push', '--all', 'origin'], repoPath),
+      execSafe(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], repoPath),
+    ])
+    const followsUpstream = published && upstream.exitCode === 0 && !!upstream.stdout.trim()
+    const targetBranch = followsUpstream && upstreamMerge.exitCode === 0
+      ? upstreamMerge.stdout.trim().replace(/^refs\/heads\//, '') : branch
+    if (!remoteUrl) throw new Error('Could not determine the origin URL. Retry checks.')
+    let overrideReason: string | null = null
+    if (!branch || branch === 'HEAD' || branch === 'unknown') overrideReason = 'Switch to a feature branch before pushing.'
+    else if (!defaultInfo) overrideReason = 'Could not determine the default branch. Retry checks before overriding locks.'
+    else if (branch === defaultInfo || targetBranch === defaultInfo) overrideReason = 'Lock verification stays enabled for pushes to the default branch.'
+    else if (followsUpstream && upstreamRemote.stdout.trim() !== 'origin') overrideReason = 'Lock overrides are available only for feature branches pushed to origin.'
+    else if (pushUrls.stdout.trim() !== remoteUrl) overrideReason = 'Lock overrides require one origin push URL matching the reviewed remote.'
+    return { branch, head: head.stdout.trim(), remoteUrl, targetBranch, files, overrideReason }
   }
 
   /**
@@ -900,21 +957,23 @@ class GitService {
 
   /** Pull current branch. Streams progress. */
   async pull(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
-    onProgress?.({ id: 'pull-auth', label: 'Preparing credentials', status: 'running', progress: 6 })
-    const token = await authService.getCurrentToken()
-    const reconcile = await this.pullReconcileArgs(repoPath)
-    try {
-      const remoteUrl = await this.getRemoteUrl(repoPath)
-      onProgress?.({ id: 'pull-connect', label: 'Connecting to remote', status: 'running', progress: 12 })
-      await this.withRemote(repoPath, () => this.withStalePackRetry(repoPath,
-        () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'pull', ...reconcile, '--progress'], repoPath, onProgress),
-        onProgress,
-      ))
-    } catch (error) {
-      if (!await this.recoverForRetry(repoPath, error)) throw error
-      const remoteUrl = await this.getRemoteUrl(repoPath)
-      await this.withRemote(repoPath, () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'pull', ...reconcile, '--progress'], repoPath, onProgress))
-    }
+    return guardedMergeOperation(repoPath, 'pull', async () => {
+      onProgress?.({ id: 'pull-auth', label: 'Preparing credentials', status: 'running', progress: 6 })
+      const token = await authService.getCurrentToken()
+      const reconcile = await this.pullReconcileArgs(repoPath)
+      try {
+        const remoteUrl = await this.getRemoteUrl(repoPath)
+        onProgress?.({ id: 'pull-connect', label: 'Connecting to remote', status: 'running', progress: 12 })
+        await this.withRemote(repoPath, () => this.withStalePackRetry(repoPath,
+          () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'pull', ...reconcile, '--progress'], repoPath, onProgress),
+          onProgress,
+        ))
+      } catch (error) {
+        if (!await this.recoverForRetry(repoPath, error)) throw error
+        const remoteUrl = await this.getRemoteUrl(repoPath)
+        await this.withRemote(repoPath, () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'pull', ...reconcile, '--progress'], repoPath, onProgress))
+      }
+    })
   }
 
 
@@ -1353,46 +1412,47 @@ class GitService {
 
   /** Fetch origin then merge origin/main into HEAD. Streams progress. */
   async updateFromMain(repoPath: string, onProgress?: ProgressCallback): Promise<void> {
-    const token = await authService.getCurrentToken()
-    const remoteUrl = await this.getRemoteUrl(repoPath)
+    return guardedMergeOperation(repoPath, 'update-from-main', async () => {
+      const token = await authService.getCurrentToken()
+      const remoteUrl = await this.getRemoteUrl(repoPath)
 
-    // Synthetic stage events — guarantee the bar shows progression even when
-    // git itself goes silent (already up-to-date fetch, pure ref-bump merge).
-    onProgress?.({ id: 'stage', label: 'Fetching origin', status: 'running' })
-    await this.withRemote(repoPath, () => this.withStalePackRetry(repoPath,
-      () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', 'origin', '--prune', '--progress'], repoPath, onProgress),
-      onProgress,
-    ))
+      // Synthetic stage events — guarantee the bar shows progression even when
+      // git itself goes silent (already up-to-date fetch, pure ref-bump merge).
+      onProgress?.({ id: 'stage', label: 'Fetching origin', status: 'running' })
+      await this.withRemote(repoPath, () => this.withStalePackRetry(repoPath,
+        () => execWithProgress([...gitAuthArgs(token, remoteUrl), 'fetch', 'origin', '--prune', '--progress'], repoPath, onProgress),
+        onProgress,
+      ))
 
-    const defaultBranch = await this.remoteDefaultBranch(repoPath)
-    const check = await execSafe(['rev-parse', '--verify', defaultBranch.ref], repoPath)
-    if (check.exitCode !== 0) {
-      throw new Error(`Could not find ${defaultBranch.ref}`)
-    }
+      const defaultBranch = await this.remoteDefaultBranch(repoPath)
+      const check = await execSafe(['rev-parse', '--verify', defaultBranch.ref], repoPath)
+      if (check.exitCode !== 0) {
+        throw new Error(`Could not find ${defaultBranch.ref}`)
+      }
 
-    // Only block when local edits overlap the incoming files — git would
-    // refuse those anyway. Edits to unrelated files merge in cleanly, so the
-    // user can keep working without first stashing or committing.
-    const overlap = await this.mergeOverlapFiles(repoPath, defaultBranch.ref)
-    if (overlap.length > 0) {
-      const shown = overlap.slice(0, 10).join('\n')
-      const more = overlap.length > 10 ? `\n…and ${overlap.length - 10} more` : ''
-      throw new Error(
-        `Your local changes would be overwritten by the update from ${defaultBranch.name}. ` +
-        `Commit or stash ${overlap.length} file${overlap.length === 1 ? '' : 's'} that also changed upstream:\n${shown}${more}`
-      )
-    }
+      // Only block when local edits overlap the incoming files — git would
+      // refuse those anyway. Edits to unrelated files merge in cleanly, so the
+      // user can keep working without first stashing or committing.
+      const overlap = await this.mergeOverlapFiles(repoPath, defaultBranch.ref)
+      if (overlap.length > 0) {
+        const shown = overlap.slice(0, 10).join('\n')
+        const more = overlap.length > 10 ? `\n…and ${overlap.length - 10} more` : ''
+        throw new Error(
+          `Your local changes would be overwritten by the update from ${defaultBranch.name}. ` +
+          `Commit or stash ${overlap.length} file${overlap.length === 1 ? '' : 's'} that also changed upstream:\n${shown}${more}`
+        )
+      }
 
-    // Pre-count files that will change in the merge, so the synthetic stage
-    // event already shows "0/N" before git's own "Updating files" lines kick in.
-    const diffRes = await execSafe(['diff', '--name-only', '-z', 'HEAD', defaultBranch.ref], repoPath)
-    const diffCount = diffRes.exitCode === 0 ? nulPaths(diffRes.stdout).length : undefined
-    onProgress?.({
-      id: 'stage',
-      label: `Merging ${defaultBranch.ref}`,
-      status: 'running',
-      current: diffCount !== undefined ? 0 : undefined,
-      total:   diffCount,
+      // Pre-count files that will change in the merge, so the synthetic stage
+      // event already shows "0/N" before git's own "Updating files" lines kick in.
+      const diffRes = await execSafe(['diff', '--name-only', '-z', 'HEAD', defaultBranch.ref], repoPath)
+      const diffCount = diffRes.exitCode === 0 ? nulPaths(diffRes.stdout).length : undefined
+      onProgress?.({
+        id: 'stage',
+        label: `Merging ${defaultBranch.ref}`,
+        status: 'running',
+        current: diffCount !== undefined ? 0 : undefined,
+        total:   diffCount,
     })
     // --progress on merge surfaces "Updating files: N% (X/Y)" during the
     // checkout phase — the main thing the user wants to watch on a big update.
@@ -1403,6 +1463,7 @@ class GitService {
       if (!await this.recoverForRetry(repoPath, error)) throw error
       await execWithProgress(mergeArgs, repoPath, onProgress)
     }
+    })
   }
 
   /**
@@ -1443,6 +1504,17 @@ class GitService {
    * caller rethrows the original failure untouched.
    */
   private async recoverForRetry(repoPath: string, error: unknown): Promise<boolean> {
+    // A failed merge write can leave MERGE_HEAD but the OLD index. Neither
+    // removing its lock nor retrying a different Git command repairs that tree.
+    if (isMergeWriteFailure(error) && await this.hasRef(repoPath, 'MERGE_HEAD')) {
+      // Commit retries are separately guarded before and after lock recovery.
+      // Only merge/pull callers have a running operation journal.
+      const reason = await mergeBlockingReason(repoPath)
+      if (reason) {
+        logService.error('git.merge-safety', `Refused automatic retry after a failed merge write in ${repoPath}: ${String(error)}. ${reason}`)
+        return false
+      }
+    }
     // Real conflicts are the caller's to resolve, and a second run of the same
     // command would report "you have not concluded your merge" instead, hiding
     // what actually needs attention.
@@ -1538,7 +1610,7 @@ class GitService {
     const orphanedDuringAppWork = ops.ranDuring(info.mtimeMs)
     if (!orphanedDuringAppWork && (Date.now() - current.mtimeMs) / 1000 < STALE_INDEX_LOCK_S) return false
     await fs.promises.rm(info.path, { force: true })
-    logService.warn('git.index-lock-recovery', `Automatically removed index lock using ${orphanedDuringAppWork ? 'app activity' : 'five-second age'} heuristic: ${info.path}`)
+    logService.warn('git.index-lock-recovery', `Automatically removed index lock using ${orphanedDuringAppWork ? 'app activity' : 'five-second age'} heuristic: ${info.path}; ageMs=${Math.max(0, Date.now() - info.mtimeMs)}; bytes=${current.size}; activeAppOperations=${gitOpActivity(repoPath).inFlight}; mergeInProgress=${await this.hasRef(repoPath, 'MERGE_HEAD')}. Lock removal does not validate or rebuild the index; merge completion is checked separately.`)
     return true
   }
 
@@ -2166,23 +2238,47 @@ ${lastError}` : '')
   }
 
   async stashSave(repoPath: string, message?: string, paths?: string[]): Promise<void> {
+    // A failed stash can already have created its checkpoint. Never repeat that
+    // operation blindly, including when Git reports only "could not write index".
+    const stashRef = async () => {
+      const result = await execSafe(['rev-parse', '--verify', '--quiet', 'refs/stash'], repoPath)
+      if (result.exitCode !== 0 && result.exitCode !== 1) throw new Error(result.stderr || 'Unable to inspect the stash checkpoint.')
+      return result.stdout.trim()
+    }
+    const previous = await stashRef()
+    const save = async (run: () => Promise<unknown>) => {
+      try { await run() }
+      catch (error) {
+        const explicitLock = this.isStaleIndexLockError(error)
+        const indexWrite = /\bcould not write index\b/i.test(String(error))
+        if (!explicitLock && !indexWrite) throw error
+        if (await stashRef() !== previous) {
+          throw new Error(`Stash was saved, but cleanup failed. Review the latest stash before retrying. ${String(error)}`)
+        }
+        // The generic error also covers disk/permissions/index damage. Only
+        // use lock recovery when there is actually a lock to recover.
+        if (!explicitLock && !await this.getIndexLockInfo(repoPath)) throw error
+        if (!await this.clearStaleIndexLock(repoPath)) throw error
+        if (await stashRef() !== previous) throw new Error('The stash changed during lock recovery. Review the latest stash before retrying.')
+        await run() // One bounded retry; a second failure is returned unchanged.
+      }
+    }
     const args = ['stash', 'push', '--include-untracked']
     if (message?.trim()) args.push('-m', message.trim())
     if (paths?.length) {
       args.push('--pathspec-from-file=-', '--pathspec-file-nul')
       const input = paths.map(p => ':(literal)' + p).join('\0') + '\0'
-      const previous = await execSafe(['rev-parse', '--verify', 'refs/stash'], repoPath)
       const selected = new Set(paths)
       const untracked = (await this.status(repoPath)).filter(file => selected.has(file.path) && file.indexStatus === '?').map(file => file.path)
       try {
-        await execWithStdin(args, repoPath, input)
+        await save(() => execWithStdin(args, repoPath, input))
       } catch (error) {
         // Bundled Windows Git accepts stdin but expands paths again during its
         // cleanup. It has already saved ONE complete stash before that fails.
         // Finish only this known failure, after proving a new checkpoint exists.
         if (!/cannot spawn git: Filename too long/i.test(String(error))) throw error
         const saved = (await exec(['rev-parse', '--verify', 'refs/stash'], repoPath)).stdout.trim()
-        if (saved === previous.stdout.trim()) throw error
+        if (saved === previous) throw error
         const tracked = paths.filter(p => !untracked.includes(p))
         if (tracked.length) await execWithStdin(
           [...await this.authenticatedArgs(repoPath, []), 'restore', '--source=HEAD', '--staged', '--worktree', '--pathspec-from-file=-', '--pathspec-file-nul'],
@@ -2198,7 +2294,7 @@ ${lastError}` : '')
           await fs.promises.unlink(absolute)
         }
       }
-    } else await exec(args, repoPath)
+    } else await save(() => exec(args, repoPath))
   }
 
   async stashPop(repoPath: string, ref: string): Promise<void> {
@@ -2388,7 +2484,8 @@ ${lastError}` : '')
    *  default and the GitHub PR UI's "Create a merge commit" option. */
   async merge(repoPath: string, targetBranch: string): Promise<void> {
     const targetRef = await this.resolveBranchRef(repoPath, targetBranch)
-    await this.runWithLfsRecovery(repoPath, await this.authenticatedArgs(repoPath, ['merge', '--no-ff', targetRef]))
+    await guardedMergeOperation(repoPath, `merge ${targetRef}`, async () =>
+      this.runWithLfsRecovery(repoPath, await this.authenticatedArgs(repoPath, ['merge', '--no-ff', targetRef])))
   }
 
 
@@ -2399,6 +2496,7 @@ ${lastError}` : '')
   }
 
   async resolveMergeConflictText(repoPath: string, filePath: string, choice: 'ours' | 'theirs'): Promise<void> {
+    logService.info('git.merge-safety', `Merge resolution requested: ${JSON.stringify({ repo: repoPath, filePath, choice })}`)
     const stage = choice === 'ours' ? '2' : '3'
     const stageRes = await execSafe(['ls-files', '-u', '--', filePath], repoPath)
 
@@ -2481,11 +2579,17 @@ ${lastError}` : '')
     // Recovery-wrapped: this is the write that finalizes a conflict resolution,
     // so it lands right after the checkout/add pair most likely to have left an
     // orphaned index.lock behind.
-    await this.runWithLfsRecovery(repoPath, ['commit', '--no-edit']).catch(async (error) => {
+    await guardedMergeCommit(repoPath, () => this.runWithLfsRecovery(repoPath, ['commit', '--no-edit'], {
+      retryArgs: async () => {
+        await assertSafeMergeCommit(repoPath)
+        return ['commit', '--no-edit']
+      },
+    }).catch(async (error) => {
       if (!/empty commit message|no commit message/i.test(String(error))) throw error
+      await assertSafeMergeCommit(repoPath)
       const branchLabel = targetBranch.replace(/^origin\//, '')
       await exec(['commit', '-m', `Merge branch '${branchLabel}'`], repoPath)
-    })
+    }))
   }
 
   /** True when `ref` resolves in this repository. */
@@ -2508,6 +2612,7 @@ ${lastError}` : '')
     if (res.exitCode !== 0) {
       throw new Error(res.stderr || res.stdout || 'No merge is currently in progress.')
     }
+    await clearMergeGuardAfterAbort(repoPath)
   }
 
   /**
@@ -2525,6 +2630,7 @@ ${lastError}` : '')
     mergeHead: string | null
     mergedBranch: string
     unresolvedFiles: string[]
+    blockingReason?: string
   } | null> {
     const gitDirRes = await execSafe(['rev-parse', '--git-dir'], repoPath)
     if (gitDirRes.exitCode !== 0) return null
@@ -2554,7 +2660,7 @@ ${lastError}` : '')
     const branchRes = await execSafe(['for-each-ref', '--points-at', mergeHead, '--format=%(refname:short)', 'refs/heads/', 'refs/remotes/'], repoPath)
     const mergedBranch = branchRes.stdout.trim().split('\n').filter(Boolean)[0] ?? mergeHead.slice(0, 7)
 
-    return { kind: 'merge', mergeHead, mergedBranch, unresolvedFiles }
+    return { kind: 'merge', mergeHead, mergedBranch, unresolvedFiles, blockingReason: await mergeBlockingReason(repoPath) }
   }
 
   /**

@@ -25,6 +25,7 @@ import { useStatusToastStore } from '@/stores/statusToastStore'
 import { useDialogStore } from '@/stores/dialogStore'
 import { setTopBarSyncHandlers, updateTopBarSyncSnapshot, hasBranchIntegrated, markBranchIntegrated } from '@/lib/topBarSyncBridge'
 import { ActionBtn } from '@/components/ui/ActionBtn'
+import { RepositoryRefreshWarning } from './RepositoryRefreshWarning'
 
 interface TopBarProps {
   onOpen:           () => void
@@ -34,6 +35,7 @@ interface TopBarProps {
   onMergeConflict?: (branch: string) => void
   /** Called when a push is rejected by GitHub LFS strict locking. */
   onPushBlockedByLocks?: (errorMessage: string) => void
+  onOpenIndexRecovery?: () => void
 }
 
 const CONFIRM_BRANCH_KEY = 'lucid-git:confirm-branch-switch'
@@ -47,7 +49,7 @@ function parseGitHubSlug(url: string): string | null {
   return null
 }
 
-export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflict, onPushBlockedByLocks }: TopBarProps) {
+export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflict, onPushBlockedByLocks, onOpenIndexRecovery }: TopBarProps) {
   const { repoPath, currentBranch, refreshStatus, recentRepos, openRepo, removeRecentRepo, clearRepo, branches, checkout, fileStatus, syncTick, bumpSyncTick } = useRepoStore()
   const { accounts, currentAccountId, permissionErrors, fetchRepoPermission, viewAsRole, setViewAsRole } = useAuthStore()
   const opRun   = useOperationStore(s => s.run)
@@ -241,7 +243,9 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
     if (!repoPath) return false
     const existingMerge = await ipc.mergeInProgress(repoPath).catch(() => null)
     if (!existingMerge) return false
-    showStatusToast(`Finish the in-progress merge before ${verb}.`)
+    showStatusToast(existingMerge.blockingReason
+      ? 'The unfinished merge requires recovery before you can continue.'
+      : `Finish the in-progress merge before ${verb}.`)
     onMergeConflict?.(existingMerge.mergedBranch)
     return true
   }
@@ -286,14 +290,20 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
       // mid-merge (MERGE_HEAD with unresolved files), additionally open the
       // merge dialog so the user can pick ours/theirs per file.
       let inProgressBranch: string | null = null
+      let mergeNeedsRecovery = false
       try {
         const inProgress = await ipc.mergeInProgress(repoPath)
-        if (inProgress) inProgressBranch = inProgress.mergedBranch
+        if (inProgress) {
+          inProgressBranch = inProgress.mergedBranch
+          mergeNeedsRecovery = !!inProgress.blockingReason
+        }
       } catch {
         // ignore — error panel still shows below
       }
       if (inProgressBranch) {
-        showStatusToast(`Update from ${defaultBranch} hit conflicts.`)
+        showStatusToast(mergeNeedsRecovery
+          ? `Update from ${defaultBranch} failed; merge recovery is required.`
+          : `Update from ${defaultBranch} hit conflicts.`)
       } else {
         showStatusToast(`Update from ${defaultBranch} failed.`)
       }
@@ -751,6 +761,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
           {/* Git flow: Fetch|Pull → Update from main → Push → Create PR */}
           {repoPath && (
             <>
+              <RepositoryRefreshWarning key={repoPath} />
               <FetchPullSplitBtn
                 fetchLabel={fetchButtonLabel(busyState)}
                 pullLabel={pullButtonLabel(busyState)}
@@ -814,7 +825,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
           {repoPath && <div style={{ width: 1, height: 18, background: 'var(--lg-border)', flexShrink: 0, marginLeft: 2, marginRight: 2 }} />}
 
           {/* Clear lock cache */}
-          {repoPath && <ClearLockCacheButton repoPath={repoPath} />}
+          {repoPath && <ClearLockCacheButton repoPath={repoPath} onOpenIndexRecovery={onOpenIndexRecovery} />}
 
           {/* Notification bell */}
           <NotificationBell />

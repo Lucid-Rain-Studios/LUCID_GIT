@@ -94,7 +94,7 @@ export class NativeMeshService {
     const match = /(?:^|\/)Content\/(.+)\.uasset$/i.exec(file)
     if (!match || !match[1].split('/').every(part => /^[A-Za-z0-9_ -]+$/.test(part))) return unavailable('Native preview requires a package under a Content directory.')
     const editor = await ueHeadlessService.findEditorBinary(version)
-    if (!editor) return unavailable(`Install Unreal Engine ${version} to preview this saved source mesh.`)
+    if (!editor) return unavailable(`Lucid Git could not locate Unreal Engine ${version} (UnrealEditor-Cmd.exe) required to preview this saved source mesh. If it is already installed, its installation path may not have been detected.`)
     const binary = await fs.stat(editor)
     const companion = blobPath.replace(/\.uasset$/i, '.uexp')
     const extraStat = await fs.stat(companion).catch(() => null)

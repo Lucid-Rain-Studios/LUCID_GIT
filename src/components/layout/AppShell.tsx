@@ -153,6 +153,7 @@ export function AppShell() {
   const [showCloneDialog,  setShowCloneDialog]  = useState(false)
   const [showLoginDialog,  setShowLoginDialog]  = useState(false)
   const [leftTab, setLeftTab] = useState<TabId>('dashboard')
+  const [indexRecoveryRequest, setIndexRecoveryRequest] = useState(0)
   // Held in a store rather than local state: conflicts are raised from panels
   // nested well below this one — a stash apply conflicts as readily as a merge
   // — and they all need to reach the same resolver.
@@ -508,6 +509,7 @@ export function AppShell() {
         onSynced={handleRefresh}
         onMergeConflict={branch => setMergeTarget(branch)}
         onPushBlockedByLocks={msg => setPushBlockedError(msg)}
+        onOpenIndexRecovery={() => { setIndexRecoveryRequest(n => n + 1); setLeftTab('tools') }}
       />
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
@@ -527,7 +529,6 @@ export function AppShell() {
         )}
 
         <main style={{ display: 'flex', flex: 1, overflow: 'hidden', flexDirection: 'column', position: 'relative' }}>
-          {repoPath && error && <div role="alert" className="p-2 text-xs text-lg-warning">Repository data may be incomplete or stale: {error} <button onClick={() => refreshStatus()}>Retry refresh</button></div>}
           {/* Settings is always accessible — even without a repo */}
           {leftTab === 'settings' ? (
             <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
@@ -658,7 +659,7 @@ export function AppShell() {
           ) : leftTab === 'tools' ? (
             /* ── Tools — full width ── */
             <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
-              <ToolsPanel repoPath={repoPath} onRefresh={handleRefresh} onCherryPickConflict={() => setCherryPickConflict(true)} />
+              <ToolsPanel repoPath={repoPath} onRefresh={handleRefresh} onCherryPickConflict={() => setCherryPickConflict(true)} indexRecoveryRequest={indexRecoveryRequest} />
             </PanelErrorBoundary>
           ) : leftTab === 'content' ? (
             /* ── Content Browser — full width ── */

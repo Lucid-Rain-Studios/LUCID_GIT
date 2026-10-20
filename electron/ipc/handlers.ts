@@ -401,11 +401,13 @@ export function registerHandlers(): void {
     return gitService.commit(repoPath, message, noVerify)
   })
 
-  handle(CHANNELS.GIT_PUSH, async (event, repoPath: string, force?: boolean) => {
+  handle(CHANNELS.GIT_PUSH_LOCK_CHECK, (_event, repoPath: string) => gitService.pushLockCheck(repoPath))
+
+  handle(CHANNELS.GIT_PUSH, async (event, repoPath: string, force?: boolean, lockOverride?: import('../pushTypes').PushLockOverride) => {
     if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, { id: 'push-prepare', label: 'Preparing push', status: 'running', progress: 3 })
     const { branch, filesAhead } = await gitService.push(repoPath, (step) => {
       if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
-    }, force === true)
+    }, force === true, lockOverride)
     const reportUnlockFailure = (detail: string) => {
       if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, { id: 'push-unlock', label: 'Push succeeded; locks retained', status: 'error', detail })
       try {
@@ -414,7 +416,7 @@ export function registerHandlers(): void {
       } catch (error) { logService.error('push.unlock-notice', String(error)) }
     }
 
-    if (filesAhead.length > 0) {
+    if (!lockOverride && filesAhead.length > 0) {
       try {
         const defaultBranch = await gitService.defaultBranch(repoPath)
         if (branch.trim() === defaultBranch) {
@@ -699,6 +701,7 @@ export function registerHandlers(): void {
     return withRepoSlot(repoPath, 'read', async () => {
       const state = await gitService.mergeInProgress(repoPath)
       if (!state) return null
+      if (state.blockingReason) return { ...state, conflicts: [] }
       const conflicts = await gitService.listInProgressConflicts(repoPath)
       return { ...state, conflicts }
     })

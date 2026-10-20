@@ -1,6 +1,6 @@
 const { test, expect } = require('@playwright/test')
 const fs = require('fs'), path = require('path')
-const { DIST, git, cleanup } = require('./helpers')
+const { DIST, git, tmpDir, cleanup } = require('./helpers')
 const { component } = require('./renderer-harness')
 const gate = require(path.join(DIST, 'util/repo-gate'))
 const runner = require(path.join(DIST, 'util/dugite-exec'))
@@ -153,6 +153,8 @@ test('concurrent fetches share one process and queue behind a running pull', asy
   const service = new gitService.constructor()
   const realProgress = runner.execWithProgress
   const started = []
+  const repo = tmpDir('lg-remote-queue-')
+  git(repo, 'init', '-q')
   let finishPull
   service.getRemoteUrl = async () => 'https://example.invalid/repo.git'
   service.pullReconcileArgs = async () => ['--no-rebase']
@@ -162,15 +164,15 @@ test('concurrent fetches share one process and queue behind a running pull', asy
     if (sub === 'pull') await new Promise(resolve => { finishPull = resolve })
   }
   try {
-    const pulling = service.pull('C:/remote-queue')
-    await flush(); await flush()
-    const fetches = [service.fetch('C:/remote-queue'), service.fetch('C:/remote-queue'), service.fetch('C:/REMOTE-QUEUE')]
+    const pulling = service.pull(repo)
+    await expect.poll(() => !!finishPull).toBe(true)
+    const fetches = [service.fetch(repo), service.fetch(repo), service.fetch(repo.toUpperCase())]
     await flush(); await flush()
     expect(started).toEqual(['pull'])
     finishPull()
     await Promise.all([pulling, ...fetches])
     expect(started).toEqual(['pull', 'fetch'])
-    await service.fetch('C:/remote-queue')
+    await service.fetch(repo)
     expect(started).toEqual(['pull', 'fetch', 'fetch'])
   } finally { runner.execWithProgress = realProgress }
 })

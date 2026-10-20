@@ -10,6 +10,7 @@ import { UnrealAssetReview } from '@/components/diff/UnrealAssetReview'
 import { isUnrealPackage } from '@/lib/unrealAssetReview'
 import type { BlueprintRequest } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
+import { AssetBlame } from '@/components/blame/AssetBlame'
 
 export function BlueprintAssetPanel({ request, files, single = false, revisionLabels, onBlueprintUnsupported, ...props }: { single?: boolean; files?: BlueprintFileChoice[]; revisionLabels?: { left: string; right: string }; onBlueprintUnsupported?(reason: string): void; request: Omit<BlueprintRequest, 'requestId'>; repoPath: string; filePath: string; hash: string; remoteUrl: string | null }) {
   const [details, setDetails] = useState(false)
@@ -82,10 +83,10 @@ function groupBlame(entries: BlameEntry[]): BlameBlock[] {
   return blocks
 }
 
-export function BlameSection({ entries, loading }: { entries: BlameEntry[]; loading: boolean }) {
+export function BlameSection({ entries, loading, expanded = false }: { entries: BlameEntry[]; loading: boolean; expanded?: boolean }) {
   const blocks = groupBlame(entries)
   return (
-    <div style={{ flexShrink: 0, borderTop: '1px solid #1e2436', background: '#0d0f15', maxHeight: 220, overflowY: 'auto' }}>
+    <div style={{ flexShrink: 0, borderTop: '1px solid #1e2436', background: '#0d0f15', maxHeight: expanded ? undefined : 220, overflowY: 'auto', ...(expanded ? { flex: 1, minHeight: 0 } : {}) }}>
       <div style={{
         display: 'flex', alignItems: 'center', height: 30, paddingLeft: 12, paddingRight: 10,
         borderBottom: '1px solid #1e2436', position: 'sticky', top: 0, background: '#0d0f15', zIndex: 1,
@@ -359,10 +360,17 @@ export function FileDetailsSidePanel({
   diffLoading?: boolean
   blame: BlameEntry[]
   blameLoading: boolean
-  mode?: 'preview' | 'details'
+  mode?: 'preview' | 'details' | 'blame'
   emptyMessage?: string
 }) {
   if (!filePath) return <EmptyState message={emptyMessage} />
+
+  if (mode === 'blame') {
+    return <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ padding: 12, borderBottom: '1px solid var(--lg-border)' }}><strong>Blame</strong><FilePathText path={filePath} style={{ display: 'block', marginTop: 5 }} /></div>
+      {isPreviewAsset(filePath) ? <AssetBlame key={`${repoPath}|${filePath}|${hash}`} repoPath={repoPath} filePath={filePath} revision={hash} active /> : <BlameSection entries={blame} loading={blameLoading} expanded />}
+    </div>
+  }
 
   if (mode === 'details') {
     return (

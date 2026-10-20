@@ -22,6 +22,7 @@ export const CHANNELS = {
   GIT_UNSTAGE:       'git:unstage',
   GIT_COMMIT:        'git:commit',
   GIT_PUSH:          'git:push',
+  GIT_PUSH_LOCK_CHECK: 'git:push-lock-check',
   GIT_PULL:          'git:pull',
   GIT_FETCH:         'git:fetch',
   GIT_LOG:           'git:log',

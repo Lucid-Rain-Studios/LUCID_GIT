@@ -9,6 +9,7 @@ import { IndexRecoveryTool } from './IndexRecoveryTool'
 interface ToolsPanelProps {
   repoPath: string
   onRefresh: () => void
+  indexRecoveryRequest?: number
   /** Called when a cherry-pick fails with a conflict — host opens the conflict dialog. */
   onCherryPickConflict?: () => void
 }
@@ -23,8 +24,9 @@ const TOOLS: { id: ToolId; label: string; icon: string; desc: string }[] = [
   { id: 'help',       label: 'Index Recovery',   icon: '⚕', desc: 'Diagnose, repair and undo index repairs' },
 ]
 
-export function ToolsPanel({ repoPath, onRefresh, onCherryPickConflict }: ToolsPanelProps) {
+export function ToolsPanel({ repoPath, onRefresh, onCherryPickConflict, indexRecoveryRequest = 0 }: ToolsPanelProps) {
   const [activeTool, setActiveTool] = useState<ToolId>('restore')
+  useEffect(() => { if (indexRecoveryRequest > 0) setActiveTool('help') }, [indexRecoveryRequest])
   const opRun = useOperationStore(s => s.run)
   const bumpSyncTick = useRepoStore(s => s.bumpSyncTick)
 

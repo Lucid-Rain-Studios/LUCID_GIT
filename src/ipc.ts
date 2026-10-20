@@ -2,6 +2,7 @@
 import type { IndexDiagnosis, IndexRepairResult, IndexRecoveryBlockers, IndexLockRecoveryResult, RecoveryGitTask } from '../electron/indexRecoveryTypes'
 import type { BlueprintRequest, BlueprintComparison } from '../electron/blueprintTypes'
 import { createBlueprintClient } from './lib/blueprintClient'
+import type { PushLockCheck, PushLockOverride } from '../electron/pushTypes'
 export type { BlueprintRequest, BlueprintComparison, BlueprintDocument, BlueprintGraph, BlueprintNode, BlueprintPin, BlueprintSide } from '../electron/blueprintTypes'
 export type { IndexDiagnosis, IndexRepairResult, IndexRecoveryBlockers, IndexLockRecoveryResult, RecoveryGitTask } from '../electron/indexRecoveryTypes'
 // This file is the single source of truth for the renderer-side IPC contract.
@@ -725,7 +726,8 @@ export interface LucidGitAPI {
   stage: (repoPath: string, paths: string[]) => Promise<void>
   unstage: (repoPath: string, paths: string[]) => Promise<void>
   commit: (repoPath: string, message: string, noVerify?: boolean) => Promise<void>
-  push: (repoPath: string, force?: boolean) => Promise<void>
+  push: (repoPath: string, force?: boolean, lockOverride?: PushLockOverride) => Promise<void>
+  pushLockCheck: (repoPath: string) => Promise<PushLockCheck>
   pull: (repoPath: string) => Promise<void>
   fetch: (repoPath: string, background?: boolean) => Promise<void>
   log: (repoPath: string, args?: { limit?: number; all?: boolean; filePath?: string; refs?: string[] }) => Promise<CommitEntry[]>
@@ -778,6 +780,7 @@ export interface LucidGitAPI {
     mergeHead: string | null
     mergedBranch: string
     unresolvedFiles: string[]
+    blockingReason?: string
     conflicts: ConflictPreviewFile[]
   } | null>
 

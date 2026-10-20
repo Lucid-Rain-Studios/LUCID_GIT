@@ -9,7 +9,7 @@ import { useDialogStore } from '@/stores/dialogStore'
 // confirm dialog explaining what it does, then the operation overlay/loading bar
 // while it runs. The backend broadcasts the refreshed locks (EVT_LOCK_CHANGED),
 // so the rest of the UI updates without any extra round-trip here.
-export function ClearLockCacheButton({ repoPath }: { repoPath: string }) {
+export function ClearLockCacheButton({ repoPath, onOpenIndexRecovery }: { repoPath: string; onOpenIndexRecovery?: () => void }) {
   const showToast = useStatusToastStore(s => s.show)
   const opRun     = useOperationStore(s => s.run)
   const dialog    = useDialogStore()
@@ -22,6 +22,7 @@ export function ClearLockCacheButton({ repoPath }: { repoPath: string }) {
       message: 'Clear Git LFS lockcache.db and refresh locks from the server?',
       detail: 'This only removes local LFS lock cache database files. It does not unlock files or change commits.',
       confirmLabel: 'Clear & Refresh',
+      secondaryAction: onOpenIndexRecovery ? { label: 'Index Recovery', onClick: onOpenIndexRecovery } : undefined,
       danger: true,
     })
     if (!ok) return

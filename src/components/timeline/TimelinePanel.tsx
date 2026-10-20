@@ -1689,6 +1689,12 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   // ── Center column — commit files ───────────────────────────────────────────
   const [commitFiles,   setCommitFiles]   = useState<CommitFileChange[]>([])
   const [commitFilesLoading, setCommitFilesLoading] = useState(false)
+  const [commitFileSearch, setCommitFileSearch] = useState('')
+  const commitFileQuery = commitFileSearch.trim().replace(/\\/g, '/').toLowerCase()
+  const visibleCommitFiles = React.useMemo(() => commitFiles.filter(file =>
+    [file.path, file.oldPath].some(path => path?.replace(/\\/g, '/').toLowerCase().includes(commitFileQuery))
+  ), [commitFiles, commitFileQuery])
+  useEffect(() => setCommitFileSearch(''), [repoPath])
 
   // ── Right column ───────────────────────────────────────────────────────────
   const [diff,        setDiff]        = useState<DiffContent | null>(null)
@@ -1923,6 +1929,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   }
 
   const selectCommit = async (commit: CommitEntry) => {
+    setCommitFileSearch('')
     setLeftSel({ kind: 'commit', commit })
     setCenterFile(null); setDiff(null); setBlame([])
     setCommitFiles([]); setCommitFilesLoading(true)
@@ -2316,19 +2323,24 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
                 Files changed
                 {!commitFilesLoading && commitFiles.length > 0 && (
                   <span style={{ marginLeft: 8, fontFamily: 'var(--lg-font-mono)', fontSize: 10, background: '#1a1f2e', color: '#3a4260', borderRadius: 8, padding: '1px 5px' }}>
-                    {commitFiles.length}
+                    {commitFileQuery ? `${visibleCommitFiles.length} / ${commitFiles.length}` : commitFiles.length}
                   </span>
                 )}
               </span>
+            </div>
+            <div style={{ padding: '8px 12px', flexShrink: 0, borderBottom: '1px solid #1e2436' }}>
+              <input type="search" aria-label="Search changed files" placeholder="Search files by name or path…" value={commitFileSearch} onChange={event => setCommitFileSearch(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') setCommitFileSearch('') }} style={{ width: '100%', boxSizing: 'border-box', padding: '7px 9px', borderRadius: 4, border: '1px solid var(--lg-border)', background: 'var(--lg-bg-secondary)', color: 'var(--lg-text-primary)', font: '12px var(--lg-font-ui)' }} />
             </div>
             <div style={{ flex: 1, overflowY: 'auto' }}>
               {commitFilesLoading ? (
                 <p style={{ fontFamily: 'var(--lg-font-mono)', fontSize: 11, color: '#2a3040', padding: '12px 14px' }}>Loading…</p>
               ) : commitFiles.length === 0 ? (
                 <p style={{ fontFamily: 'var(--lg-font-mono)', fontSize: 11, color: '#2a3040', padding: '12px 14px' }}>No file changes</p>
-              ) : commitFiles.map((f, i) => (
+              ) : visibleCommitFiles.length === 0 ? (
+                <p role="status" style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 12, color: 'var(--lg-text-secondary)', padding: '12px 14px' }}>No files match your search.</p>
+              ) : visibleCommitFiles.map(f => (
                 <CommitFileRow
-                  key={i}
+                  key={f.path}
                   f={f}
                   selected={centerFile?.kind === 'commit' && centerFile.file.path === f.path}
                   repoPath={repoPath}

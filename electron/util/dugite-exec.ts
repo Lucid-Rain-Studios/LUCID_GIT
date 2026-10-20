@@ -502,10 +502,12 @@ async function execWithProgressInner(
       } else if (code === null) {
         reject(new Error(`git ${detectGitSubcommand(args)} was interrupted before completing.`))
       } else {
-        const errText = (stderr || stdout).slice(0, 1000)
+        // LFS writes the blocking paths to stdout and its final error to stderr.
+        const output = /cannot update locked files/i.test(stderr) ? `${stderr}\n${stdout}` : stderr || stdout
+        const errText = output.slice(0, 1000)
         const subCmd  = detectGitSubcommand(args)
         logService.error(`git.${subCmd}`, `git ${subCmd} failed (exit ${code}):\n${errText}`)
-        reject(new Error(`git ${subCmd} failed (exit ${code}):\n${stderr || stdout}`))
+        reject(new Error(`git ${subCmd} failed (exit ${code}):\n${output}`))
       }
     })
   })

@@ -188,6 +188,7 @@ test('Update from main fetches once and retries only the contended merge', async
   git(origin, '-c', 'core.hooksPath=', 'commit', '-qm', 'update main')
   const calls = []
   const service = component('electron/services/GitService.ts', {
+    '../util/merge-safety': require(path.join(DIST, 'util/merge-safety')),
     './AuthService': { authService: { getCurrentToken: async () => null } },
     '../util/dugite-exec': { ...runner, execWithProgress: async (args, ...rest) => {
       const merge = args.includes('merge')
@@ -219,6 +220,7 @@ test('a transient index lock disappears before the one merge retry; HEAD and wor
   fs.writeFileSync(lock, 'live external writer')
   let calls = 0
   const service = component('electron/services/GitService.ts', {
+    '../util/merge-safety': require(path.join(DIST, 'util/merge-safety')),
     '../util/dugite-exec': { ...runner, exec: async (...args) => {
       calls++
       try { return await runner.exec(...args) }
@@ -236,6 +238,7 @@ test('persistent lock is preserved, waiting is bounded and stat permission failu
   fs.writeFileSync(lock, 'external writer')
   let probes = 0
   const service = component('electron/services/GitService.ts', {
+    '../util/merge-safety': require(path.join(DIST, 'util/merge-safety')),
     '../util/dugite-exec': { ...runner, execSafe: async (...args) => { probes++; return runner.execSafe(...args) } },
   }, { Buffer }).exports.gitService
   const start = Date.now()
@@ -267,6 +270,7 @@ test('stale lock recovery retries a real merge once without manual removal', asy
   fs.utimesSync(lock, new Date(0), new Date(0))
   let calls = 0
   const service = component('electron/services/GitService.ts', {
+    '../util/merge-safety': require(path.join(DIST, 'util/merge-safety')),
     './LogService': { logService: { warn() {} } },
     '../util/dugite-exec': { ...runner, exec: async (...args) => { calls++; return runner.exec(...args) } },
   }, { Buffer }).exports.gitService
@@ -282,6 +286,7 @@ test('automatic stale recovery leaves locks intact while Lucid Git tasks remain 
   fs.writeFileSync(lock, 'active writer')
   fs.utimesSync(lock, new Date(0), new Date(0))
   const service = component('electron/services/GitService.ts', {
+    '../util/merge-safety': require(path.join(DIST, 'util/merge-safety')),
     '../util/dugite-exec': { ...runner,
       gitOpActivity: () => ({ inFlight: 1, ranDuring: () => true }),
       waitForGitOpsToDrain: async () => false,
@@ -298,6 +303,7 @@ test('automatic recovery clears a fresh app-activity orphan without changing sta
   const index = fs.readFileSync(path.join(repo, '.git/index'))
   fs.writeFileSync(lock, '')
   const service = component('electron/services/GitService.ts', {
+    '../util/merge-safety': require(path.join(DIST, 'util/merge-safety')),
     './LogService': { logService: { warn() {} } },
     '../util/dugite-exec': { ...runner, gitOpActivity: () => ({ inFlight: 0, ranDuring: () => true }) },
   }, { Buffer }).exports.gitService

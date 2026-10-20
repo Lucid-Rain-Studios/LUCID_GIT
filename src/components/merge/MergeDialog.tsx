@@ -101,6 +101,7 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
   // there is no merge to conclude and none to abort. The two buttons that
   // assume otherwise have to say something different.
   const [isRealMerge, setIsRealMerge] = useState(true)
+  const [blockingReason, setBlockingReason] = useState<string | null>(null)
   const opRun = useOperationStore(s => s.run)
   const displayMergeBranch = recoveredMergeBranch ?? targetBranch
   // Auto-resolved files don't need a choice — git already wrote one to the
@@ -128,6 +129,7 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
           setIsRealMerge(inProgress.kind === 'merge')
           setRecoveredMergeBranch(inProgress.mergedBranch)
           setConflicts(inProgress.conflicts)
+          setBlockingReason(inProgress.blockingReason ?? null)
           setInConflictResolution(true)
           setLoading(false)
           return
@@ -172,7 +174,17 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
       onClose()
     } catch (e) {
       const msg = String(e)
-      if (msg.toLowerCase().includes('conflict')) {
+      if (msg.includes('Merge completion blocked:')) {
+        const pending = await ipc.mergeInProgress(repoPath).catch(() => null)
+        if (pending?.kind === 'merge') {
+          setBlockingReason(pending.blockingReason ?? msg)
+          setRecoveredMergeBranch(pending.mergedBranch)
+          setIsRealMerge(true)
+          setConflicts([])
+          setInConflictResolution(true)
+          setError(null)
+        } else setError(msg)
+      } else if (msg.toLowerCase().includes('conflict')) {
         const status = await ipc.status(repoPath).catch(() => [])
         const conflictMap = new Map(conflicts.map(c => [c.path, c]))
         for (const file of status.filter(isUnmerged)) {
@@ -211,7 +223,8 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
       onMerged()
       onClose()
     } catch (e) {
-      setError(String(e))
+      if (String(e).includes('Merge completion blocked:')) setBlockingReason(String(e))
+      else setError(String(e))
       setMerging(false)
     }
   }
@@ -261,6 +274,11 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto min-h-0">
+          {blockingReason && (
+            <div role="alert" className="px-4 py-4 text-xs font-mono text-lg-error whitespace-pre-wrap">
+              {blockingReason}
+            </div>
+          )}
           {loading && (
             <div className="flex items-center justify-center py-12">
               <span className="text-xs font-mono text-lg-text-secondary animate-pulse">
@@ -275,7 +293,7 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
             </div>
           )}
 
-          {!loading && !error && conflicts.length === 0 && (
+          {!loading && !error && !blockingReason && conflicts.length === 0 && (
             <div className="flex flex-col items-center justify-center py-10 gap-2">
               <div className="text-lg-success text-2xl">✓</div>
               <div className="text-xs font-mono text-lg-text-primary font-semibold">
@@ -457,9 +475,9 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
               {inConflictResolution ? (
                 <button
                   onClick={finalizeMerge}
-                  disabled={merging || (!allChoicesMade && !canFinalizeWithoutChoices)}
+                  disabled={merging || !!blockingReason || (!allChoicesMade && !canFinalizeWithoutChoices)}
                   className="px-3 h-7 rounded text-[11px] font-mono bg-lg-success/20 border border-lg-success/60 text-lg-success hover:bg-lg-success/30 transition-colors disabled:opacity-40"
-                  title={!allChoicesMade && !canFinalizeWithoutChoices ? 'Pick a side for every conflicted file first' : undefined}
+                  title={blockingReason ?? (!allChoicesMade && !canFinalizeWithoutChoices ? 'Pick a side for every conflicted file first' : undefined)}
                 >
                   {isRealMerge
                     ? (merging ? 'Completing merge…' : 'Complete merge')

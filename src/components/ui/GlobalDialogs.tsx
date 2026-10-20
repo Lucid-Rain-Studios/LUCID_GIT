@@ -117,6 +117,7 @@ function ConfirmModal({ opts, onConfirm, onCancel }: {
         <DialogMessage message={opts.message} detail={opts.detail} />
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '14px 18px 16px' }}>
           <CancelBtn label={opts.cancelLabel} onClick={onCancel} />
+          {opts.secondaryAction && <ConfirmBtn label={opts.secondaryAction.label} onClick={() => { onCancel(); opts.secondaryAction?.onClick() }} />}
           <ConfirmBtn label={opts.confirmLabel ?? 'Confirm'} danger={opts.danger} onClick={onConfirm} autoFocus={!opts.danger} />
         </div>
       </Panel>

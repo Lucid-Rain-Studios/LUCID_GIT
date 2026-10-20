@@ -81,3 +81,5 @@
 .uar-map-export{flex:1 1 240px;color:var(--lg-text-secondary);font-size:11px}
 .uar-map-export[open]{flex-basis:100%}
 .uar-map-export label{display:flex;align-items:center;gap:6px;margin:12px 0 4px}
+
+.uar-asset-blame{flex:1;min-height:0;overflow:auto;padding:12px 16px;color:var(--lg-text-secondary);font-size:12px}.uar-asset-blame[hidden]{display:none}.uar-asset-blame code{font-family:var(--lg-font-mono);overflow-wrap:anywhere}.uar-asset-blame ol{list-style:none;padding:0;margin:12px 0}.uar-asset-blame li{padding:12px 0;border-top:1px solid var(--lg-border)}.uar-asset-blame li>div{display:flex;flex-wrap:wrap;gap:10px;align-items:center}.uar-asset-blame strong{color:var(--lg-text-primary);overflow-wrap:anywhere}.uar-asset-blame time{display:block;font-size:11px;margin-top:5px}.uar-asset-blame p{overflow-wrap:anywhere;white-space:pre-wrap}

@@ -10,6 +10,7 @@ import { settingsService } from './services/SettingsService'
 import { shutdownGitProcesses, describeLiveGitProcesses } from './util/dugite-exec'
 import { shutdownRepoGate } from './util/repo-gate'
 import { showRecovery } from './services/RecoveryService'
+import { attachTextContextMenu } from './util/text-context-menu'
 
 const isDev = !app.isPackaged
 const openDevToolsOnStart = process.env.LUCID_OPEN_DEVTOOLS === '1'
@@ -197,6 +198,7 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' }
   })
 
+  attachTextContextMenu(win)
   attachWindowDiagnostics(win)
 
   if (isDev) {
@@ -340,7 +342,7 @@ app.commandLine.appendSwitch('disable-features', 'AutofillServerCommunication')
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null)
-  logService.init(app.getPath('userData'))
+  logService.init(app.getPath('userData'), app.getVersion())
   // Registered before the monitor starts, so the very first stall is reported
   // with the git processes and IPC calls that were outstanding during it.
   logService.registerActivityProbe('git processes running', describeLiveGitProcesses)

@@ -57,8 +57,9 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GIT_UNSTAGE, repoPath, paths),
   commit: (repoPath: string, message: string, noVerify?: boolean) =>
     ipcRenderer.invoke(CHANNELS.GIT_COMMIT, repoPath, message, noVerify),
-  push: (repoPath: string, force?: boolean) =>
-    ipcRenderer.invoke(CHANNELS.GIT_PUSH, repoPath, force),
+  push: (repoPath: string, force?: boolean, lockOverride?: import('./pushTypes').PushLockOverride) =>
+    ipcRenderer.invoke(CHANNELS.GIT_PUSH, repoPath, force, lockOverride),
+  pushLockCheck: (repoPath: string) => ipcRenderer.invoke(CHANNELS.GIT_PUSH_LOCK_CHECK, repoPath),
   pull: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_PULL, repoPath),
   fetch: (repoPath: string, background?: boolean) =>

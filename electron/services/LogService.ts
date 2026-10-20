@@ -57,7 +57,7 @@ class LogService {
 
   // ── Lifecycle ────────────────────────────────────────────────────────────────
 
-  init(userDataPath: string): void {
+  init(userDataPath: string, appVersion = 'unknown'): void {
     this.storePath = path.join(userDataPath, 'lucid-git-logs.json')
     this.load()
     this.current = {
@@ -66,7 +66,7 @@ class LogService {
       platform:  process.platform,
       entries:   [],
     }
-    this.add('INFO', 'app', `Session started — Lucid Git  |  pid ${process.pid}  |  node ${process.versions.node}`)
+    this.add('INFO', 'app', `Session started — Lucid Git ${appVersion}  |  pid ${process.pid}  |  node ${process.versions.node}`)
   }
 
   endSession(): void {
