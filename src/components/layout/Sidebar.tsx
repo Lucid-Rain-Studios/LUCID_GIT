@@ -6,6 +6,8 @@ import { ipc, FeatureVisibility, TerminalProfile } from '@/ipc'
 import { AppTooltip } from '@/components/ui/AppTooltip'
 import { AppCheckbox } from '@/components/ui/AppCheckbox'
 import { SETTINGS_CHANGED_EVENT } from '@/components/settings/GeneralSettings'
+import { usePerformanceStore } from '@/stores/performanceStore'
+import { pollWhileVisible } from '@/lib/visiblePolling'
 
 export type TabId =
   | 'dashboard' | 'timeline' | 'branches'
@@ -128,6 +130,8 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
   const totalChanges = fileStatus.length
   const [syncCounts, setSyncCounts] = useState<{ ahead: number; behind: number }>({ ahead: 0, behind: 0 })
   const [openPrCount, setOpenPrCount] = useState(0)
+  const syncPollMs = usePerformanceStore(s => s.settings.syncPollSeconds) * 1000
+  const panelPollMs = usePerformanceStore(s => s.settings.panelPollSeconds) * 1000
 
   useEffect(() => {
     let cancelled = false
@@ -144,12 +148,12 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
       }
     }
     loadSync()
-    const id = window.setInterval(loadSync, 15000)
+    const stop = pollWhileVisible(loadSync, syncPollMs)
     return () => {
       cancelled = true
-      window.clearInterval(id)
+      stop()
     }
-  }, [repoPath, currentBranch, syncTick])
+  }, [repoPath, currentBranch, syncTick, syncPollMs])
 
   useEffect(() => {
     let cancelled = false
@@ -174,12 +178,12 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
     }
 
     loadOpenPrCount()
-    const id = window.setInterval(loadOpenPrCount, 30000)
+    const stop = pollWhileVisible(loadOpenPrCount, panelPollMs)
     return () => {
       cancelled = true
-      window.clearInterval(id)
+      stop()
     }
-  }, [repoPath, isAdmin, prTick])
+  }, [repoPath, isAdmin, prTick, panelPollMs])
 
   // ── Optional-feature visibility (Unreal / LFS): auto-detect + manual override ──
   const [featureVis, setFeatureVis]   = useState<{ unreal: FeatureVisibility; lfs: FeatureVisibility }>({ unreal: 'auto', lfs: 'auto' })

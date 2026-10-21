@@ -15,7 +15,7 @@ export function useAutoFetch(repoPath: string | null): void {
     void load()
     window.addEventListener('lucid-git:settings-changed', load)
     const timer = setInterval(async () => {
-      if (minutes <= 0 || running.current || useOperationStore.getState().isRunning) return
+      if (minutes <= 0 || document.hidden || running.current || useOperationStore.getState().isRunning) return
       const base = Math.max(getLastFetch(repoPath) ?? 0, attempts.current.get(repoPath) ?? 0)
       if (Date.now() - base < minutes * 60_000) return
       attempts.current.set(repoPath, Date.now())

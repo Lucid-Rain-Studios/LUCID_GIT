@@ -2,6 +2,8 @@
 // Mirror of the domain types in src/ipc.ts — kept separate because
 // the main and renderer processes are compiled independently.
 
+import type { PerformanceSettings } from './util/performance'
+
 export type RepoPermission = 'admin' | 'write' | 'read'
 
 export interface PermissionCacheEntry {
@@ -354,6 +356,8 @@ export interface AppSettings {
   defaultBranchName?: string
   desktopNotificationEvents?: DesktopNotificationEvents
   featureVisibility?: FeatureVisibilitySettings
+  /** Background work and preview limits; see util/performance. */
+  performance?: PerformanceSettings
   /** Terminal id from TerminalService, or 'auto' to use the first installed one. */
   preferredTerminal?: string
 }

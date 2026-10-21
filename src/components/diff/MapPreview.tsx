@@ -2,6 +2,7 @@ import { mapAxes, mapPositions, mapVisiblePositions, type MapPlane } from '../..
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { UnrealAssetObject } from '../../../electron/blueprintTypes'
 import type { AssetObjectChange } from '../../lib/unrealAssetReview'
+import { usePerformanceStore } from '@/stores/performanceStore'
 
 type Camera = { zoom: number; x: number; y: number }
 const fit: Camera = { zoom: 1, x: 0, y: 0 }
@@ -15,6 +16,7 @@ export function MapPreview({ query, onQuery, changedOnly, onChangedOnly, canComp
   attachment?: { points: ReturnType<typeof mapPositions>; allPoints: ReturnType<typeof mapPositions>; unresolved: Map<string, number> }
   onAttachment?(enabled: boolean): void
 }) {
+  const mapDots = usePerformanceStore(s => s.settings.mapDots)
   const [horizontal, vertical] = mapAxes[plane]
   const field = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 400, height: 360 })
@@ -65,7 +67,7 @@ export function MapPreview({ query, onQuery, changedOnly, onChangedOnly, canComp
     return () => element.removeEventListener('wheel', wheel)
   })
   const changedPaths = useMemo(() => new Set(changed.keys()), [changed])
-  const results = useMemo(() => mapVisiblePositions(decoded, { query, names, changedOnly, changedPaths, selected }), [decoded, query, names, changedOnly, changedPaths, selected])
+  const results = useMemo(() => mapVisiblePositions(decoded, { query, names, changedOnly, changedPaths, selected, limit: mapDots }), [decoded, query, names, changedOnly, changedPaths, selected, mapDots])
   const visible = results.visible
   const visiblePaths = new Set(visible.map(point => point.object.path))
   const visibleMovements = movements.filter(item => visiblePaths.has(item[side === 'left' ? 'before' : 'after'].object.path)).slice(0, 1000)

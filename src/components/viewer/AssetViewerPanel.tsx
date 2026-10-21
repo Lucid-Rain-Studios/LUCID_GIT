@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react'
 import { ipc, CommitEntry } from '@/ipc'
 import { useAssetViewerStore } from '@/stores/assetViewerStore'
 import { BlueprintAssetDialog } from './BlueprintAssetDialog'
+import { usePerformanceStore } from '@/stores/performanceStore'
+import { HISTORY_THUMBNAIL_VERSIONS } from '../../../electron/util/performance'
 
 function toImgSrc(absPath: string | null): string | null {
   if (!absPath) return null
@@ -39,6 +41,10 @@ export function AssetViewerPanel() {
   const filename   = filePath?.replace(/\\/g, '/').split('/').pop() ?? ''
   const isUEAsset  = /\.(uasset|umap|udk|upk)$/i.test(filePath ?? '')
   const isImgAsset = /\.(png|jpg|jpeg|tga|bmp|tiff|tif|dds|exr|hdr)$/i.test(filePath ?? '')
+  // Thumbnails follow the Performance preset: none, the selected file, or its recent versions too.
+  const thumbnailMode = usePerformanceStore(s => s.settings.thumbnails)
+  const wantsThumbnail = (isUEAsset || isImgAsset) && thumbnailMode !== 'off'
+  const wantsHistory = (isUEAsset || isImgAsset) && thumbnailMode === 'history'
 
   // Load thumbnail when file/ref changes
   useEffect(() => {
@@ -46,7 +52,7 @@ export function AssetViewerPanel() {
     setThumbLoading(false)
     setThumbnail(null)
     if (!repoPath || !filePath || !isOpen || view === 'blueprint') return
-    if (!isUEAsset && !isImgAsset) return
+    if (!wantsThumbnail) return
     setThumbLoading(true)
     setThumbnail(null)
     ipc.assetRenderThumbnail(repoPath, filePath, selectedRef)
@@ -54,7 +60,7 @@ export function AssetViewerPanel() {
       .catch(() => {})
       .finally(() => { if (!cancelled) setThumbLoading(false) })
     return () => { cancelled = true }
-  }, [repoPath, filePath, selectedRef, isOpen, isUEAsset, isImgAsset, view])
+  }, [repoPath, filePath, selectedRef, isOpen, isUEAsset, isImgAsset, view, wantsThumbnail])
 
   // Load version history when file changes
   useEffect(() => {
@@ -65,10 +71,10 @@ export function AssetViewerPanel() {
     ipc.gitFileLog(repoPath, filePath, 20)
       .then(commits => {
         if (cancelled) return
-        const cards: VersionCard[] = commits.map(c => ({ commit: c, thumb: null, loading: isUEAsset || isImgAsset }))
+        const cards: VersionCard[] = commits.map((c, i) => ({ commit: c, thumb: null, loading: wantsHistory && i < HISTORY_THUMBNAIL_VERSIONS }))
         setVersions(cards)
-        if (!isUEAsset && !isImgAsset) return
-        commits.forEach((c, i) => {
+        if (!wantsHistory) return
+        commits.slice(0, HISTORY_THUMBNAIL_VERSIONS).forEach((c, i) => {
           ipc.assetRenderThumbnail(repoPath, filePath, c.hash)
             .then(p => { if (!cancelled) setVersions(prev => prev.map((v, idx) => idx === i ? { ...v, thumb: p, loading: false } : v)) })
             .catch(() => { if (!cancelled) setVersions(prev => prev.map((v, idx) => idx === i ? { ...v, loading: false } : v)) })
@@ -77,7 +83,7 @@ export function AssetViewerPanel() {
       .catch(() => { if (!cancelled) setVersions([]) })
       .finally(() => { if (!cancelled) setVerLoading(false) })
     return () => { cancelled = true }
-  }, [repoPath, filePath, isOpen, isUEAsset, isImgAsset, view])
+  }, [repoPath, filePath, isOpen, isUEAsset, isImgAsset, view, wantsHistory])
 
   // Reset state when panel closes or file changes
   useEffect(() => {

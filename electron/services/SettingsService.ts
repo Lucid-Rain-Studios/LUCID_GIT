@@ -3,6 +3,7 @@ import * as path from 'path'
 import { app } from 'electron'
 import { logService } from './LogService'
 import type { AppSettings, DesktopNotificationEvents, FeatureVisibilitySettings } from '../types'
+import { DEFAULT_PERFORMANCE, PERFORMANCE_PRESETS, normalizePerformance, validPerformanceField } from '../util/performance'
 
 export type { AppSettings } from '../types'
 
@@ -23,9 +24,13 @@ export const DESKTOP_NOTIFICATION_DEFAULTS: DesktopNotificationEvents = {
   lockOnDirtyFile:   false,
 }
 
+// Intervals the app shipped with, before the Performance presets existed.
+const LEGACY_AUTO_FETCH_MINUTES = 5
+const LEGACY_UPDATE_CHECK_MINUTES = 30
+
 const DEFAULTS: AppSettings = {
-  autoFetchIntervalMinutes: 5,
-  updateCheckIntervalMinutes: 30,
+  autoFetchIntervalMinutes: PERFORMANCE_PRESETS.medium.autoFetchIntervalMinutes,
+  updateCheckIntervalMinutes: PERFORMANCE_PRESETS.medium.updateCheckIntervalMinutes,
   defaultCloneDepth: 50,
   largeFileWarnMB: 100,
   scheduledCleanup: {
@@ -44,6 +49,7 @@ const DEFAULTS: AppSettings = {
   defaultBranchName: 'main',
   desktopNotificationEvents: { ...DESKTOP_NOTIFICATION_DEFAULTS },
   featureVisibility: { ...FEATURE_VISIBILITY_DEFAULTS },
+  performance: { ...DEFAULT_PERFORMANCE },
   preferredTerminal: 'auto',
 }
 
@@ -53,6 +59,7 @@ type SettingsListener = (settings: AppSettings) => void
 function validNestedField(key: string, field: string, setting: unknown): boolean {
   const expected = DEFAULTS[key as keyof AppSettings]
   if (!isRecord(expected) || !(field in expected)) return false
+  if (key === 'performance') return validPerformanceField(field, setting)
   return key === 'featureVisibility'
     ? ['auto', 'show', 'hide'].includes(String(setting))
     : typeof setting === typeof (expected as Record<string, unknown>)[field]
@@ -114,9 +121,17 @@ class SettingsService {
       reportedDrops.add(signature)
       logService.warn('settings', `Ignored ${dropped.length} unknown or invalid stored setting(s) in ${path.basename(this.filePath())}: ${dropped.join(', ')}. All other settings were kept; the file itself was not modified.`)
     }
-    return { ...DEFAULTS, ...stored,
+    // A settings file from before Performance existed gets the Medium preset.
+    // Only intervals still at the old shipped defaults move with it; a value the
+    // user chose themselves is kept and shows as Custom.
+    const migrated: Partial<AppSettings> = raw.performance === undefined ? {
+      ...(stored.autoFetchIntervalMinutes === LEGACY_AUTO_FETCH_MINUTES ? { autoFetchIntervalMinutes: DEFAULTS.autoFetchIntervalMinutes } : {}),
+      ...(stored.updateCheckIntervalMinutes === LEGACY_UPDATE_CHECK_MINUTES ? { updateCheckIntervalMinutes: DEFAULTS.updateCheckIntervalMinutes } : {}),
+    } : {}
+    return { ...DEFAULTS, ...stored, ...migrated,
       desktopNotificationEvents: { ...DESKTOP_NOTIFICATION_DEFAULTS, ...stored.desktopNotificationEvents },
       featureVisibility: { ...FEATURE_VISIBILITY_DEFAULTS, ...stored.featureVisibility },
+      performance: normalizePerformance(stored.performance),
     }
   }
 
@@ -147,6 +162,7 @@ class SettingsService {
         ...current.featureVisibility,
         ...(patch.featureVisibility ?? {}),
       },
+      performance: normalizePerformance({ ...current.performance, ...(patch.performance ?? {}) }),
     }
     await writeJsonAsync(this.filePath(), normalized)
     for (const listener of this.listeners) listener(normalized)

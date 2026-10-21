@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useRepoStore } from '@/stores/repoStore'
 import { FileStatus, CommitEntry, ipc } from '@/ipc'
 import { FilePathText } from '@/components/ui/FilePathText'
+import { usePerformanceStore } from '@/stores/performanceStore'
 
 interface BinaryDiffProps {
   file: FileStatus
@@ -373,6 +374,7 @@ export function BinaryDiff({ file, repoPath }: BinaryDiffProps) {
   const [histLoading, setHistLoading] = useState(true)
   const [thumbnail, setThumbnail]     = useState<string | null>(null)
 
+  const thumbnailMode = usePerformanceStore(s => s.settings.thumbnails)
   const isUEAsset = /\.(uasset|umap|upk|udk)$/i.test(file.path)
   const thumbRef  = file.staged ? 'INDEX' : 'WORKING'
 
@@ -389,13 +391,13 @@ export function BinaryDiff({ file, repoPath }: BinaryDiffProps) {
 
   useEffect(() => {
     let cancelled = false
-    if (!isUEAsset) { setThumbnail(null); return }
+    if (!isUEAsset || thumbnailMode === 'off') { setThumbnail(null); return }
     setThumbnail(null)
     ipc.assetRenderThumbnail(repoPath, file.path, thumbRef)
       .then(p => { if (!cancelled) setThumbnail(p) })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [repoPath, file.path, thumbRef, isUEAsset, revision])
+  }, [repoPath, file.path, thumbRef, isUEAsset, revision, thumbnailMode])
 
   const asset    = classifyAsset(file.path)
   const ext      = file.path.split('.').pop()?.toLowerCase() ?? ''

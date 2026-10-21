@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { GeneralSettings } from './GeneralSettings'
 import { AppearanceSettings } from './AppearanceSettings'
 import { NotificationSettings } from './NotificationSettings'
+import { PerformanceSettings } from './PerformanceSettings'
 import { WebhookPanel } from './WebhookPanel'
 import { FirebasePresenceSettings } from './FirebasePresenceSettings'
 import { TeamConfigPanel } from './TeamConfigPanel'
@@ -12,11 +13,12 @@ interface SettingsPageProps {
   repoPath: string | null
 }
 
-type SettingsTab = 'general' | 'appearance' | 'notifications' | 'discord' | 'team' | 'presence'
+type SettingsTab = 'general' | 'appearance' | 'performance' | 'notifications' | 'discord' | 'team' | 'presence'
 
 const ALL_TABS: { id: SettingsTab; label: string; requiresRepo?: boolean; adminOnly?: boolean }[] = [
   { id: 'general',       label: 'General' },
   { id: 'appearance',    label: 'Appearance' },
+  { id: 'performance',   label: 'Performance' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'discord',       label: 'Discord',     requiresRepo: true, adminOnly: true },
   { id: 'presence', label: 'Team presence', requiresRepo: true, adminOnly: true },
@@ -67,6 +69,7 @@ export function SettingsPage({ repoPath, initialSection }: SettingsPageProps) {
       <div style={{ flex: 1, overflowY: 'auto', pointerEvents: showAdminBanner ? 'none' : undefined, opacity: showAdminBanner ? 0.5 : 1 }}>
         {activeTab === 'appearance'    && <AppearanceSettings />}
         {activeTab === 'general'       && <GeneralSettings />}
+        {activeTab === 'performance'   && <PerformanceSettings />}
         {activeTab === 'notifications' && <NotificationSettings />}
         {activeTab === 'discord'       && repoPath && <WebhookPanel repoPath={repoPath} />}
         {activeTab === 'presence' && repoPath && isAdmin && <FirebasePresenceSettings repoPath={repoPath} />}

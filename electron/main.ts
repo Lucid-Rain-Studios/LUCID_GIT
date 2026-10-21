@@ -7,6 +7,9 @@ import { watcherService } from './services/WatcherService'
 import { logService } from './services/LogService'
 import { desktopNotificationService } from './services/DesktopNotificationService'
 import { settingsService } from './services/SettingsService'
+import { performanceService } from './services/PerformanceService'
+import { lockService } from './services/LockService'
+import { forecastService } from './services/ForecastService'
 import { shutdownGitProcesses, describeLiveGitProcesses } from './util/dugite-exec'
 import { shutdownRepoGate } from './util/repo-gate'
 import { logSessionEnvironment } from './util/diagnostics'
@@ -362,6 +365,10 @@ app.whenReady().then(() => {
   registerWindowHandlers()
   mergeWindows.register()
   settingsService.onChange((next) => applyUpdateCheckInterval(next.updateCheckIntervalMinutes))
+  performanceService.setActivityProbe(() => BrowserWindow.getAllWindows().some(win => !win.isDestroyed() && win.isVisible() && !win.isMinimized()))
+  performanceService.apply(settingsService.getAll())
+  settingsService.onChange(next => performanceService.apply(next))
+  performanceService.onChange(() => { lockService.reschedulePolling(); forecastService.reschedule() })
   createWindow()
 
   app.on('activate', () => {

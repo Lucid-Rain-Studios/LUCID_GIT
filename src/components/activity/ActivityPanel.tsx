@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { ipc, AppNotification } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
+import { usePerformanceStore } from '@/stores/performanceStore'
+import { pollWhileVisible } from '@/lib/visiblePolling'
 
 interface ActivityPanelProps {
   repoPath: string
@@ -192,6 +194,7 @@ function EventRow({ event }: { event: ActivityEvent }) {
 // ── Main panel ─────────────────────────────────────────────────────────────────
 
 export function ActivityPanel({ repoPath }: ActivityPanelProps) {
+  const panelPollMs = usePerformanceStore(s => s.settings.panelPollSeconds) * 1000
   const { syncTick } = useRepoStore()
   const [events, setEvents]   = useState<ActivityEvent[]>([])
   const [loading, setLoading] = useState(false)
@@ -239,9 +242,8 @@ export function ActivityPanel({ repoPath }: ActivityPanelProps) {
 
   useEffect(() => {
     loadData()
-    const interval = setInterval(loadData, 30_000)
-    return () => clearInterval(interval)
-  }, [loadData, syncTick])
+    return pollWhileVisible(loadData, panelPollMs)
+  }, [loadData, syncTick, panelPollMs])
 
   const visible = useMemo(
     () => events.filter(e => matchesFilter(e.kind, filter)),

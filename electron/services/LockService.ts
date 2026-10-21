@@ -11,6 +11,7 @@ import { desktopNotificationService } from './DesktopNotificationService'
 import { webhookService } from './WebhookService'
 import { heatmapService } from './HeatmapService'
 import { gitService } from './GitService'
+import { performanceService } from './PerformanceService'
 
 // Window after a self-unlock during which a poll-detected lock removal is
 // attributed to that unlock rather than to an external force-unlock. Generous
@@ -369,7 +370,7 @@ class LockService {
 
   private pollTokens = new Map<string, object>()
 
-  startPolling(repoPath: string, intervalMs = 30_000): void {
+  startPolling(repoPath: string, intervalMs = performanceService.get().lockPollSeconds * 1000): void {
     if (this.pollTimers.has(repoPath)) return
     for (const previous of this.pollTimers.keys()) this.stopPolling(previous)
     const token = {}
@@ -379,8 +380,24 @@ class LockService {
     this.listLocks(repoPath).then(locks => {
       if (this.pollTokens.get(repoPath) === token) this.prevLocks.set(repoPath, locks)
     }).catch(() => {})
-    const id = setInterval(() => { void this.poll(repoPath).catch(() => {}) }, intervalMs)
+    const id = setInterval(() => this.tick(repoPath), intervalMs)
     this.pollTimers.set(repoPath, id)
+  }
+
+  // Polling only refreshes the lock display, so a hidden or minimized window
+  // skips the tick instead of running git-lfs against nobody.
+  private tick(repoPath: string): void {
+    if (!performanceService.isActive()) return
+    void this.poll(repoPath).catch(() => {})
+  }
+
+  /** Apply a changed Performance interval to repositories that are already polling. */
+  reschedulePolling(): void {
+    const intervalMs = performanceService.get().lockPollSeconds * 1000
+    for (const [repoPath, id] of this.pollTimers) {
+      clearInterval(id)
+      this.pollTimers.set(repoPath, setInterval(() => this.tick(repoPath), intervalMs))
+    }
   }
 
   stopPolling(repoPath: string): void {

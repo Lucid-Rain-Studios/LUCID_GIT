@@ -37,6 +37,11 @@ function component(file, mocks = {}, globals = {}) {
     require: name => name === 'react' ? React : mocks[name] || (
       name === 'react-dom' ? { createPortal: node => node } :
       name === './stateTreeReview' ? component('src/lib/stateTreeReview.ts', {}, globals).exports :
+      // Performance settings: real defaults (Medium), so components and services behave as shipped.
+      name === './PerformanceService' ? component('electron/services/PerformanceService.ts', {}, globals).exports :
+      name === '../util/performance' || name.endsWith('electron/util/performance') ? component('electron/util/performance.ts', {}, globals).exports :
+      name === '@/stores/performanceStore' ? { usePerformanceStore: store({ settings: component('electron/util/performance.ts', {}, globals).exports.DEFAULT_PERFORMANCE }) } :
+      name === '@/lib/visiblePolling' ? { pollWhileVisible: () => () => {} } :
       ['../util/network', '../util/git-paths', '../util/json-store', '../util/external-actors', '@/lib/staging'].includes(name)
         ? component(name === '@/lib/staging' ? 'src/lib/staging.ts' : 'electron/util/' + name.split('/').pop() + '.ts', {}, globals).exports
         : name.startsWith('node:') || ['fs', 'path', 'crypto'].includes(name) ? require(name)

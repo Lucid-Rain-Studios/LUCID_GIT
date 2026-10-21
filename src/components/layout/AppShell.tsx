@@ -48,6 +48,7 @@ import { AssetViewerPanel } from '@/components/viewer/AssetViewerPanel'
 import { PanelErrorBoundary } from '@/components/ui/PanelErrorBoundary'
 import { BugLogsPanel } from '@/components/logs/BugLogsPanel'
 import { GlobalLoadingCursor } from '@/components/ui/GlobalLoadingCursor'
+import { usePerformanceStore } from '@/stores/performanceStore'
 
 type TabId = 'timeline' | 'branches' | 'lfs' | 'cleanup' | 'unreal' | 'hooks' | 'settings' | 'tools' | 'presence' | 'overview' | 'changelog' | 'map' | 'content' | 'heatmap' | 'forecast' | 'dashboard' | 'locks' | 'logs' | 'activity'
 
@@ -454,7 +455,7 @@ export function AppShell() {
     if (!repoPath) return
     // Closing Merge already schedules a full refresh. Native focus return must
     // not start another scan just before that completion event arrives.
-    const onFocus = () => { if (!mergeWindowOpen.current) silentRefresh() }
+    const onFocus = () => { if (!mergeWindowOpen.current && usePerformanceStore.getState().settings.refreshOnFocus) silentRefresh() }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [repoPath])

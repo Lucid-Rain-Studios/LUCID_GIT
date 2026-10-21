@@ -4,6 +4,8 @@ import type { BlueprintRequest, BlueprintComparison } from '../electron/blueprin
 import { createBlueprintClient } from './lib/blueprintClient'
 import { observeRepositoryDiagnostic } from './stores/repositoryIssueStore'
 import type { PushLockCheck, PushLockOverride } from '../electron/pushTypes'
+import type { PerformanceSettings } from '../electron/util/performance'
+export type { PerformanceSettings, PreviewMode, ThumbnailMode, AnimationMode } from '../electron/util/performance'
 export type { BlueprintRequest, BlueprintComparison, BlueprintDocument, BlueprintGraph, BlueprintNode, BlueprintPin, BlueprintSide } from '../electron/blueprintTypes'
 export type { IndexDiagnosis, IndexRepairResult, IndexRecoveryBlockers, IndexLockRecoveryResult, RecoveryGitTask } from '../electron/indexRecoveryTypes'
 // This file is the single source of truth for the renderer-side IPC contract.
@@ -454,6 +456,8 @@ export interface AppSettings {
   defaultBranchName?: string
   desktopNotificationEvents?: DesktopNotificationEvents
   featureVisibility?: FeatureVisibilitySettings
+  /** Background work and preview limits. */
+  performance?: PerformanceSettings
   /** Terminal id from listTerminals(), or 'auto' to use the first installed one. */
   preferredTerminal?: string
 }

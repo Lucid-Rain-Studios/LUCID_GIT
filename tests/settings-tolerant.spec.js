@@ -31,7 +31,7 @@ test('unknown and invalid entries are dropped while every valid setting is kept'
   const settings = settingsService.getAll()
   expect(settings).toMatchObject({
     fontSize: 16, uiDensity: 'compact',
-    theme: 'dark', autoFetchIntervalMinutes: 5, largeFileWarnMB: 100,       // defaults for the dropped ones
+    theme: 'dark', autoFetchIntervalMinutes: 10, largeFileWarnMB: 100,      // defaults for the dropped ones (Medium preset interval)
     desktopNotificationEvents: { appUpdate: false, fatalError: true, forceUnlock: true },
     featureVisibility: { lfs: 'hide', unreal: 'auto' },
     scheduledCleanup: { enabled: false, frequencyDays: 7 },

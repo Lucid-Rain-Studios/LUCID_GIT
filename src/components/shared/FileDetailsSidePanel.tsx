@@ -11,6 +11,7 @@ import { isUnrealPackage } from '@/lib/unrealAssetReview'
 import type { BlueprintRequest } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { AssetBlame } from '@/components/blame/AssetBlame'
+import { usePerformanceStore } from '@/stores/performanceStore'
 
 export function BlueprintAssetPanel({ request, files, single = false, revisionLabels, onBlueprintUnsupported, ...props }: { single?: boolean; files?: BlueprintFileChoice[]; revisionLabels?: { left: string; right: string }; onBlueprintUnsupported?(reason: string): void; request: Omit<BlueprintRequest, 'requestId'>; repoPath: string; filePath: string; hash: string; remoteUrl: string | null }) {
   const [details, setDetails] = useState(false)
@@ -293,17 +294,19 @@ function FileDetails({ repoPath, filePath, hash, remoteUrl = null }: { repoPath:
 function AssetPanel({ repoPath, filePath, hash, remoteUrl }: { repoPath: string; filePath: string; hash: string; remoteUrl: string | null }) {
   const [thumbSrc, setThumbSrc] = useState<string | null>(null)
   const [thumbLoading, setThumbLoading] = useState(true)
+  const thumbnailMode = usePerformanceStore(s => s.settings.thumbnails)
 
   useEffect(() => {
     let cancelled = false
     setThumbSrc(null)
+    if (thumbnailMode === 'off') { setThumbLoading(false); return }
     setThumbLoading(true)
     ipc.assetRenderThumbnail(repoPath, filePath, hash)
       .then(p => { if (!cancelled) setThumbSrc(p) })
       .catch(() => { if (!cancelled) setThumbSrc(null) })
       .finally(() => { if (!cancelled) setThumbLoading(false) })
     return () => { cancelled = true }
-  }, [repoPath, filePath, hash])
+  }, [repoPath, filePath, hash, thumbnailMode])
 
   const fileName = filePath.split(/[/\\]/).pop() ?? filePath
   return (

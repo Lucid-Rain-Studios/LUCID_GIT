@@ -6,6 +6,7 @@ import { execBinary, execSafe, gitAuthArgs } from '../util/dugite-exec'
 import { authService } from './AuthService'
 import { gitService } from './GitService'
 import { ueHeadlessService } from './UEHeadlessService'
+import { performanceService } from './PerformanceService'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -69,13 +70,13 @@ const CACHE_BASE   = path.join(os.homedir(), '.lucid-git', 'cache', 'asset-diffs
 // git operation the user is actually waiting on.
 //
 // The cap is small on purpose. These are previews — arriving a moment later
-// costs nothing, where starving a merge of CPU costs the whole window.
-const THUMBNAIL_CONCURRENCY = 3
+// costs nothing, where starving a merge of CPU costs the whole window. It comes
+// from the Performance settings (1–2 workers by preset).
 let activeThumbnails = 0
 const waitingThumbnails: (() => void)[] = []
 
 async function withThumbnailSlot<T>(fn: () => Promise<T>): Promise<T> {
-  if (activeThumbnails >= THUMBNAIL_CONCURRENCY) {
+  if (activeThumbnails >= performanceService.get().thumbnailWorkers) {
     await new Promise<void>(resolve => { waitingThumbnails.push(resolve) })
   }
   activeThumbnails++
@@ -507,6 +508,7 @@ class AssetDiffService {
 
   /** Single-ref thumbnail — used by file row, BinaryDiff, and history panel. */
   async renderThumbnail(repoPath: string, filePath: string, ref: string): Promise<string | null> {
+    if (performanceService.get().thumbnails === 'off') return null
     const identity = await this.identity(repoPath, filePath, ref).catch(() => null)
     if (!identity) return null
     const dir = path.join(CACHE_BASE, hash8(repoPath), `thumb-${hash8(filePath)}-${hash8(identity.key)}`)

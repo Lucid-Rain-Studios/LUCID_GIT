@@ -4,6 +4,7 @@ import { BrowserWindow } from 'electron'
 import { execSafe } from '../util/dugite-exec'
 import { CHANNELS } from '../ipc/channels'
 import { desktopNotificationService } from './DesktopNotificationService'
+import { performanceService } from './PerformanceService'
 
 export interface ForecastConflict {
   filePath: string
@@ -41,8 +42,8 @@ class ForecastService {
 
   isPaused(): boolean { return this.pauseCount > 0 }
 
-  start(repoPath: string, intervalMinutes = 5): ForecastStatus {
-    for (const previous of this.timers.keys()) this.stop(previous)
+  start(repoPath: string, intervalMinutes = performanceService.get().forecastMinutes): ForecastStatus {
+    for (const previous of new Set([...this.timers.keys(), ...this.status.keys()])) this.stop(previous)
 
     const st: ForecastStatus = {
       repoPath,
@@ -56,9 +57,29 @@ class ForecastService {
     // First poll immediately (async, don't block)
     this.poll(repoPath).catch(() => {})
 
-    const id = setInterval(() => this.poll(repoPath).catch(() => {}), intervalMinutes * 60_000)
-    this.timers.set(repoPath, id)
+    // An interval of 0 polls once now and then only when asked again.
+    if (intervalMinutes > 0) this.timers.set(repoPath, this.schedule(repoPath, intervalMinutes))
     return st
+  }
+
+  // A hidden or minimized window skips the tick; the display is the only consumer.
+  private schedule(repoPath: string, intervalMinutes: number): ReturnType<typeof setInterval> {
+    return setInterval(() => {
+      if (!performanceService.isActive()) return
+      this.poll(repoPath).catch(() => {})
+    }, intervalMinutes * 60_000)
+  }
+
+  /** Apply a changed Performance interval to forecasts that are already running. */
+  reschedule(): void {
+    const intervalMinutes = performanceService.get().forecastMinutes
+    for (const repoPath of this.status.keys()) {
+      const previous = this.timers.get(repoPath)
+      if (previous !== undefined) { clearInterval(previous); this.timers.delete(repoPath) }
+      const st = this.status.get(repoPath)
+      if (st) st.intervalMinutes = intervalMinutes
+      if (intervalMinutes > 0) this.timers.set(repoPath, this.schedule(repoPath, intervalMinutes))
+    }
   }
 
   stop(repoPath: string): void {

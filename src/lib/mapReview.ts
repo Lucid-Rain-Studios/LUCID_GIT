@@ -18,11 +18,13 @@ export function mapPositions(objects: UnrealAssetObject[], plane: MapPlane = 'XY
 /** Search the captured inventory before bounding DOM work. Selection never bypasses filters. */
 export function mapVisiblePositions(points: ReturnType<typeof mapPositions>, options: {
   query: string; names?: Map<string, string>; changedOnly: boolean; changedPaths: Set<string>; selected?: string
+  /** Most dots drawn; the Performance setting lowers it, 1000 stays the ceiling. */
+  limit?: number
 }) {
   const query = options.query.trim().toLowerCase()
   const matching = points.filter(({ object }) => (!options.changedOnly || options.changedPaths.has(object.path)) &&
     (!query || [options.names?.get(object.path), object.name, object.path, object.classPath, object.sourcePackage, object.outer].filter(Boolean).join(' ').toLowerCase().includes(query)))
-  const visible = matching.slice(0, 1000)
+  const visible = matching.slice(0, Math.max(1, Math.min(1000, options.limit ?? 1000)))
   const selected = matching.find(point => point.object.path === options.selected)
   if (selected && !visible.includes(selected)) visible[visible.length - 1] = selected
   return { visible, total: matching.length, omitted: matching.length - visible.length }

@@ -1616,7 +1616,7 @@ class GitService {
     if (!orphanedDuringAppWork && (Date.now() - current.mtimeMs) / 1000 < STALE_INDEX_LOCK_S) return false
     await fs.promises.rm(info.path, { force: true })
     logService.warn('git.index-lock-recovery', `Automatically removed index lock using ${orphanedDuringAppWork ? 'app activity' : 'five-second age'} heuristic: ${info.path}; ageMs=${Math.max(0, Date.now() - info.mtimeMs)}; bytes=${current.size}; activeAppOperations=${gitOpActivity(repoPath).inFlight}; mergeInProgress=${await this.hasRef(repoPath, 'MERGE_HEAD')}. Lock removal does not validate or rebuild the index; merge completion is checked separately.`)
-    logFailureContext('git.index-lock-recovery', repoPath, 'An index lock was removed automatically')
+    try { logFailureContext('git.index-lock-recovery', repoPath, 'An index lock was removed automatically') } catch { /* diagnostics must never break lock recovery */ }
     return true
   }
 
@@ -2624,7 +2624,7 @@ ${lastError}` : '')
     if (res.exitCode !== 0) {
       const detail = res.stderr || res.stdout || 'No merge is currently in progress.'
       logService.error('git.merge-safety', `Abort merge failed in ${repoPath}: ${detail.slice(0, 1500)}`)
-      logFailureContext('git.merge-safety', repoPath, 'Abort merge failed')
+      try { logFailureContext('git.merge-safety', repoPath, 'Abort merge failed') } catch { /* diagnostics must never change the outcome */ }
       if (isMergeWriteFailure(detail)) {
         throw new Error(
           `The merge could not be aborted because Git could not write the index. Close Unreal Editor, other Git clients and `

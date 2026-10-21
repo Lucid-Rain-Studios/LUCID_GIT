@@ -3,6 +3,7 @@ import path from 'node:path'
 import chokidar from 'chokidar'
 import { exec } from '../util/dugite-exec'
 import { logService } from './LogService'
+import { performanceService } from './PerformanceService'
 
 const TRANSIENT_WATCH_ERRORS = /^(EPERM|ENOENT|EBUSY|EACCES)\b/
 const IGNORED_SEGMENTS = /(?:^|\/)(?:node_modules|\.vs|Binaries|Intermediate|DerivedDataCache|Saved)(?:\/|$)/
@@ -50,7 +51,7 @@ class WatcherService {
       if (refreshIndex) void refreshTracked().then(refreshDirectories).catch(error => logService.warn('watcher.tracked', String(error)))
       const previous = this.timers.get(repoPath)
       if (previous) clearTimeout(previous)
-      this.timers.set(repoPath, setTimeout(() => { this.timers.delete(repoPath); if (current()) onChange() }, 500))
+      this.timers.set(repoPath, setTimeout(() => { this.timers.delete(repoPath); if (current()) onChange() }, performanceService.get().watcherDelayMs))
     }
     const disposers: Array<() => void> = []
     const onError = (error: Error) => { if (!TRANSIENT_WATCH_ERRORS.test(error.message)) logService.warn('watcher', error.message) }

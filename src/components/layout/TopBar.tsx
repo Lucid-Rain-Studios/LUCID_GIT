@@ -27,6 +27,8 @@ import { setTopBarSyncHandlers, updateTopBarSyncSnapshot, hasBranchIntegrated, m
 import { ActionBtn } from '@/components/ui/ActionBtn'
 import { RepositoryRefreshWarning } from './RepositoryRefreshWarning'
 import { RepositoryErrorIndicator } from './RepositoryErrorIndicator'
+import { usePerformanceStore } from '@/stores/performanceStore'
+import { pollWhileVisible } from '@/lib/visiblePolling'
 
 interface TopBarProps {
   onOpen:           () => void
@@ -51,6 +53,7 @@ function parseGitHubSlug(url: string): string | null {
 }
 
 export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflict, onPushBlockedByLocks, onOpenIndexRecovery }: TopBarProps) {
+  const panelPollMs = usePerformanceStore(s => s.settings.panelPollSeconds) * 1000
   const { repoPath, currentBranch, refreshStatus, recentRepos, openRepo, removeRecentRepo, clearRepo, branches, checkout, fileStatus, syncTick, bumpSyncTick } = useRepoStore()
   const { accounts, currentAccountId, permissionErrors, fetchRepoPermission, viewAsRole, setViewAsRole } = useAuthStore()
   const opRun   = useOperationStore(s => s.run)
@@ -150,9 +153,9 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
       } catch { /* forecast not started — ignore */ }
     }
     poll()
-    const id = setInterval(poll, 30_000)
-    return () => { cancelled = true; clearInterval(id) }
-  }, [repoPath, loadSync])
+    const stop = pollWhileVisible(poll, panelPollMs)
+    return () => { cancelled = true; stop() }
+  }, [repoPath, loadSync, panelPollMs])
 
   useEffect(() => {
     ipc.windowIsMaximized().then(setIsMaximized).catch(() => {})
@@ -854,6 +857,12 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
 
 // ── Avatar helpers ─────────────────────────────────────────────────────────────
 
+/** Pulsing glow, bounded to a few cycles, and off entirely under the Low performance preset. */
+function useGlowAnimation(active: boolean): string {
+  const mode = usePerformanceStore(s => s.settings.animations)
+  return active && mode !== 'off' ? 'glow-pulse 2.5s ease-in-out 3' : 'none'
+}
+
 function avatarColor(login: string): string {
   const palette = ['#4d9dff', '#a27ef0', '#2ec573', '#f5a832', '#e8622f', '#1abc9c', '#e91e63']
   let h = 0
@@ -1429,7 +1438,7 @@ function SyncBtn({
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled && !active ? 0.5 : 1,
         boxShadow: active && !disabled ? `0 0 12px ${countColor}25` : 'none',
-        animation: active && !disabled ? 'glow-pulse 2.5s ease-in-out 3' : 'none',
+        animation: useGlowAnimation(active && !disabled),
         transition: 'border-color 0.12s, background 0.12s',
       }}
     >
@@ -1830,7 +1839,7 @@ function FetchPullSplitBtn({
         border: `1px solid ${borderColor}`,
         borderRadius: 5, overflow: 'hidden', height: 28,
         boxShadow: hasBehind ? '0 0 10px rgba(245,168,50,0.15)' : 'none',
-        animation: hasBehind ? 'glow-pulse 2.5s ease-in-out 3' : 'none',
+        animation: useGlowAnimation(hasBehind),
       }}>
         {fetchButton}
 
