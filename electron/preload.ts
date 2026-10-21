@@ -157,6 +157,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GIT_MERGE_CONTINUE, repoPath, targetBranch),
   mergeAbort: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_MERGE_ABORT, repoPath),
+  mergeAbortRetryUpdate: (repoPath: string) =>
+    ipcRenderer.invoke(CHANNELS.GIT_MERGE_ABORT_RETRY_UPDATE, repoPath),
   mergeInProgress: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_MERGE_IN_PROGRESS, repoPath),
 

@@ -30,7 +30,34 @@ interface LiveGitProcess {
   repoKey: string
   readOnly: boolean
   stopping?: Promise<void>
+  /** Why Lucid Git asked for this process to be killed, when it did. */
+  cancelReason?: string
+  /** Shared with the recent-commands history so exit details land in both. */
+  record: RecentGitCommand
 }
+
+/** One git process Lucid Git ran, kept briefly to explain a later failure. */
+interface RecentGitCommand {
+  command: string
+  readOnly: boolean
+  startedAt: number
+  endedAt?: number
+  exitCode?: number | null
+  signal?: string | null
+  cancelReason?: string
+}
+
+/**
+ * A git command slower than this is logged when it exits. Commands that talk
+ * to the network or move LFS data are legitimately slow, so they get a longer
+ * allowance. Mutable only so tests do not have to sleep.
+ */
+export const gitLogThresholds = { slowMs: 10_000, slowNetworkMs: 60_000 }
+const NETWORK_SUBCOMMANDS = new Set(['fetch', 'pull', 'push', 'clone', 'lfs', 'ls-remote'])
+
+const RECENT_COMMANDS_PER_REPO = 40
+const RECENT_COMMANDS_TTL_MS = 10 * 60_000
+const recentGitCommands = new Map<string, RecentGitCommand[]>()
 
 const liveGitProcesses = new Map<number, LiveGitProcess>()
 let gitShuttingDown = false
@@ -43,26 +70,93 @@ let shutdownPromise: Promise<void> | null = null
  */
 const gitProcessScope = new AsyncLocalStorage<Set<number>[]>()
 
+function rememberGitCommand(repoKey: string, record: RecentGitCommand): void {
+  const cutoff = Date.now() - RECENT_COMMANDS_TTL_MS
+  const list = (recentGitCommands.get(repoKey) ?? []).filter(entry => (entry.endedAt ?? Date.now()) >= cutoff)
+  list.push(record)
+  recentGitCommands.set(repoKey, list.slice(-RECENT_COMMANDS_PER_REPO))
+}
+
+/**
+ * What Lucid Git itself was doing in a repository, for failure logs. Answers
+ * "was one of our own commands running, or killed, around the failure?" so an
+ * index-write failure can be told apart from an outside process interfering.
+ * Argument values are never included, so tokens cannot reach a log.
+ */
+export function gitActivitySnapshot(repoPath: string, limit = 15): {
+  running: Array<{ command: string; readOnly: boolean; ageMs: number }>
+  recent: Array<{ command: string; readOnly: boolean; startedAgoMs: number; durationMs: number | null; exitCode?: number | null; signal?: string | null; cancelled?: string }>
+} {
+  const key = opsKey(repoPath)
+  const now = Date.now()
+  const history = (recentGitCommands.get(key) ?? []).filter(entry => (entry.endedAt ?? now) >= now - RECENT_COMMANDS_TTL_MS)
+  return {
+    running: history.filter(entry => entry.endedAt === undefined)
+      .map(entry => ({ command: entry.command, readOnly: entry.readOnly, ageMs: now - entry.startedAt })),
+    recent: history.filter(entry => entry.endedAt !== undefined).slice(-limit).map(entry => ({
+      command: entry.command, readOnly: entry.readOnly, startedAgoMs: now - entry.startedAt,
+      durationMs: entry.endedAt === undefined ? null : entry.endedAt - entry.startedAt,
+      exitCode: entry.exitCode, signal: entry.signal, cancelled: entry.cancelReason,
+    })),
+  }
+}
+
+/**
+ * Arguments for a log line. `-c` pairs are dropped entirely (gitAuthArgs puts
+ * the GitHub token in one) and anything else that looks sensitive is redacted.
+ */
+function summarizeGitArgs(args: string[]): string {
+  const kept: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '-c') { i++; continue }
+    kept.push(SENSITIVE_GIT_ARG.test(args[i]) ? '[REDACTED]' : args[i])
+  }
+  const text = kept.join(' ')
+  return text.length > 100 ? text.slice(0, 100) + '…' : text
+}
+
+/** Pids of git processes Lucid Git started and that are still running. */
+export function ownGitPids(): Set<number> {
+  return new Set(liveGitProcesses.keys())
+}
+
+function reportSlowGit(repoPath: string, record: RecentGitCommand, args: string[]): void {
+  if (record.endedAt === undefined) return
+  const duration = record.endedAt - record.startedAt
+  const subcommand = detectGitSubcommand(args)
+  const limit = NETWORK_SUBCOMMANDS.has(subcommand) ? gitLogThresholds.slowNetworkMs : gitLogThresholds.slowMs
+  if (!(duration >= limit)) return
+  const outcome = record.cancelReason ? `cancelled (${record.cancelReason})` : record.signal ? `signal ${record.signal}` : `exit ${record.exitCode ?? '?'}`
+  logService.warn('git.slow', `git ${subcommand} took ${(duration / 1000).toFixed(1)}s (${record.readOnly ? 'read' : 'write'}, ${outcome}) in ${repoPath || '(no repository)'}: ${summarizeGitArgs(args)}`)
+}
+
 /** Record a freshly spawned git process, and forget it once it exits. */
 function registerGitProcess(child: ChildProcess, args: string[], repoPath = ''): void {
   const pid = child.pid
   if (pid === undefined) return
 
-  liveGitProcesses.set(pid, {
-    child, args, startedAt: Date.now(),
-    repoKey: repoPath ? path.resolve(repoPath).toLowerCase() : '',
-    readOnly: isReadOnlyCommand(args),
-  })
+  const repoKey = repoPath ? path.resolve(repoPath).toLowerCase() : ''
+  const startedAt = Date.now()
+  const readOnly = isReadOnlyCommand(args)
+  const record: RecentGitCommand = { command: `git ${detectGitSubcommand(args)}`, readOnly, startedAt }
+  if (repoKey) rememberGitCommand(repoKey, record)
+  liveGitProcesses.set(pid, { child, args, startedAt, repoKey, readOnly, record })
   // A nested asset deadline must still be cancellable by its IPC deadline.
   for (const scope of gitProcessScope.getStore() ?? []) scope.add(pid)
 
-  const forget = () => { liveGitProcesses.delete(pid) }
+  child.once('exit', (code, signal) => {
+    record.endedAt ??= Date.now()
+    record.exitCode = code
+    record.signal = signal
+    try { reportSlowGit(repoPath, record, args) } catch { /* logging must never disturb a git command */ }
+  })
+  const forget = () => { record.endedAt ??= Date.now(); liveGitProcesses.delete(pid) }
   child.once('close', forget)
   child.once('exit', forget)
   child.once('error', forget)
   // dugite may finish locating its executable after shutdown has started.
   // Keep that late child tracked and terminate it as part of the same drain.
-  if (gitShuttingDown) void stopGitProcess(pid, liveGitProcesses.get(pid)!).catch(() => {})
+  if (gitShuttingDown) void stopGitProcess(pid, liveGitProcesses.get(pid)!, 'app shutting down').catch(() => {})
 }
 
 /**
@@ -87,7 +181,9 @@ function killProcessTree(pid: number, child: ChildProcess): Promise<void> {
 }
 
 /** Keep a task visible until it exits; repeated cancellation shares one kill. */
-function stopGitProcess(pid: number, entry: LiveGitProcess): Promise<void> {
+function stopGitProcess(pid: number, entry: LiveGitProcess, reason = 'cancelled'): Promise<void> {
+  entry.cancelReason ??= reason
+  entry.record.cancelReason ??= reason
   if (entry.stopping) return entry.stopping
   const stopping = (async () => {
     await killProcessTree(pid, entry.child)
@@ -126,7 +222,7 @@ export async function stopRepoGitTasks(repoPath: string, reviewed: Array<{ pid: 
   })
   // Keep entries registered until actual exit. A failed taskkill must not make
   // a running writer disappear from recovery's safety checks.
-  await Promise.all(targets.map(({ pid, entry }) => stopGitProcess(pid, entry)))
+  await Promise.all(targets.map(({ pid, entry }) => stopGitProcess(pid, entry, 'stopped from Index Recovery')))
   if (targets.length) logService.warn('git.recovery-stop', `Stopped ${targets.length} reviewed Lucid Git task(s) for ${repoPath}. Index locks were left intact.`)
   return targets.length
 }
@@ -182,7 +278,7 @@ export function preemptRepoReads(repoPath: string): number {
     .map(([pid]) => pid)
   if (doomed.length === 0) return 0
 
-  const killed = killGitProcesses(doomed)
+  const killed = killGitProcesses(doomed, 'preempted so a waiting write could start')
   if (killed > 0) {
     logService.warn(
       'git.gate',
@@ -193,12 +289,12 @@ export function preemptRepoReads(repoPath: string): number {
 }
 
 /** Kill the given git processes. Returns how many were still alive. */
-export function killGitProcesses(pids: Iterable<number>): number {
+export function killGitProcesses(pids: Iterable<number>, reason = 'cancelled'): number {
   let killed = 0
   for (const pid of pids) {
     const entry = liveGitProcesses.get(pid)
     if (!entry) continue
-    void stopGitProcess(pid, entry).catch(error => {
+    void stopGitProcess(pid, entry, reason).catch(error => {
       logService.warn('git.cancel', error instanceof Error ? error.message : String(error))
     })
     killed++
@@ -219,7 +315,7 @@ export function killAllGitProcesses(): number {
   const detail = [...liveGitProcesses.values()]
     .map(p => `  git ${detectGitSubcommand(p.args)} (${Math.round((Date.now() - p.startedAt) / 1000)}s)`)
     .join('\n')
-  const killed = killGitProcesses(pids)
+  const killed = killGitProcesses(pids, 'app shutdown')
   logService.warn('git.shutdown', `Requested termination of ${killed} git process(es):\n${detail}`)
   return killed
 }
@@ -233,7 +329,7 @@ export function shutdownGitProcesses(): Promise<void> {
     let stopped = 0
     while (liveGitProcesses.size > 0 || [...repoGitOps.values()].some(entry => entry.inFlight > 0)) {
       const tasks = [...liveGitProcesses.entries()]
-      const results = await Promise.allSettled(tasks.map(([pid, entry]) => stopGitProcess(pid, entry)))
+      const results = await Promise.allSettled(tasks.map(([pid, entry]) => stopGitProcess(pid, entry, 'app shutdown')))
       stopped += results.filter(result => result.status === 'fulfilled').length
       const failure = results.find(result => result.status === 'rejected')
       if (failure?.status === 'rejected') throw failure.reason
@@ -673,7 +769,7 @@ export async function withGitTimeout<T>(fn: () => Promise<T>, ms: number, label:
         // from the registry by its `close` handler, which cannot run while the
         // loop is blocked. Under a stall, processes that already exited are
         // still listed here and get counted as killed.
-        const killed = killGitProcesses(scope)
+        const killed = killGitProcesses(scope, 'deadline exceeded: ' + label)
         if (killed > 0) {
           logService.warn('git.timeout', `${error.message}; killed ${killed} orphaned git process(es)`)
         }

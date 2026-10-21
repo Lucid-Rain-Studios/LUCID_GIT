@@ -26,6 +26,9 @@ interface LogStore {
 }
 
 const MAX_SESSIONS = 5
+/** Clear writes `<store>.cleared-<timestamp>.json` first; only the newest few are kept. */
+const CLEARED_BACKUP_INFIX = '.cleared-'
+const MAX_CLEARED_BACKUPS = 3
 const PAD_TIME     = 12  // "HH:MM:SS.mmm"
 const PAD_LEVEL    = 5   // "ERROR"
 const PAD_SOURCE   = 20
@@ -200,7 +203,14 @@ class LogService {
 
   // ── Formatted output ──────────────────────────────────────────────────────────
 
-  async clear(): Promise<void> {
+  /**
+   * Empty the log. The previous contents are first written to a sibling backup
+   * file so a cleared log can still be recovered: a failure's evidence was lost
+   * when a log was cleared before reproducing. If the backup cannot be written
+   * nothing is cleared. Returns the backup path, or null when there was nothing
+   * to keep.
+   */
+  async clear(): Promise<string | null> {
     if (!this.storePath || !this.current) throw new Error('Logging is not initialized')
     if (this.flushTimer) clearTimeout(this.flushTimer)
     this.flushTimer = null
@@ -210,16 +220,40 @@ class LogService {
     this.current.entries = []
     const file = this.storePath
     const snapshot: LogStore = { sessions: [{ ...this.current, entries: [] }] }
-    const write = this.writes.then(() => writeJsonAsync(file, snapshot))
+    const hasContent = past.some(session => session.entries.length > 0) || entries.length > 0
+    const backupFile = hasContent
+      ? path.join(path.dirname(file), `${path.basename(file, '.json')}${CLEARED_BACKUP_INFIX}${new Date().toISOString().replace(/[:.]/g, '-')}.json`)
+      : null
+    const backup: LogStore = { sessions: [...past, { ...this.current, entries }] }
+    const write = this.writes.then(async () => {
+      if (backupFile) {
+        await writeJsonAsync(backupFile, backup)
+        await this.pruneClearedBackups(path.dirname(file), path.basename(file, '.json'))
+      }
+      await writeJsonAsync(file, snapshot)
+    })
     this.writes = write.catch(() => {})
     try {
       await write
+      return backupFile
     } catch (error) {
       this.pastSessions = past
       this.current.entries = [...entries, ...this.current.entries]
       this.schedulePersist()
-      throw error
+      throw new Error(`Logs were not cleared because the backup could not be saved: ${String(error)}`)
     }
+  }
+
+  /** Keep only the newest few cleared-log backups. Pruning problems never block a clear. */
+  private async pruneClearedBackups(dir: string, stem: string): Promise<void> {
+    try {
+      const names = (await fs.promises.readdir(dir))
+        .filter(name => name.startsWith(stem + CLEARED_BACKUP_INFIX) && name.endsWith('.json'))
+        .sort()
+      for (const name of names.slice(0, Math.max(0, names.length - MAX_CLEARED_BACKUPS))) {
+        await fs.promises.unlink(path.join(dir, name)).catch(() => {})
+      }
+    } catch { /* best effort */ }
   }
 
   getFormattedText(): string {

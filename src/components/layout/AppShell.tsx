@@ -165,7 +165,15 @@ export function AppShell() {
   const [authChecked, setAuthChecked] = useState(false)
 
   const [settingsSection, setSettingsSection] = useState('general')
-  const { repoPath, error, openRepo, refreshStatus, silentRefresh, recentRepos, removeRecentRepo } = useRepoStore()
+  // Selected piecewise: an unselected store read re-rendered the whole shell on
+  // every status or loading change.
+  const repoPath = useRepoStore(s => s.repoPath)
+  const error = useRepoStore(s => s.error)
+  const openRepo = useRepoStore(s => s.openRepo)
+  const refreshStatus = useRepoStore(s => s.refreshStatus)
+  const silentRefresh = useRepoStore(s => s.silentRefresh)
+  const recentRepos = useRepoStore(s => s.recentRepos)
+  const removeRecentRepo = useRepoStore(s => s.removeRecentRepo)
   const mergeWindowOpen = useRef(false)
   useEffect(() => {
     if (!mergeTarget || !repoPath) return

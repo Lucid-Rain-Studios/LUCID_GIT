@@ -139,6 +139,21 @@ export function IndexRecoveryTool({ repoPath, onRefresh }: { repoPath: string; o
     const d = await ipc.diagnoseIndex(repoPath)
     if (valid()) setDiagnosis(d)
   })
+  // Index repair refuses to run mid-merge, so offer the way out right here.
+  const abortMerge = () => run('Abort merge', async valid => {
+    if (!diagnosis?.blockedByMerge) return
+    const confirmed = await useDialogStore.getState().confirm({
+      title: 'Abort the unfinished merge?', confirmLabel: 'Abort merge', danger: true,
+      message: 'This returns the branch to its state before the merge started and discards the merge result. Commits you already made are kept. Save any edits to files involved in the merge first.',
+      detail: `Repository: ${repoPath}\nClose Unreal Editor and other Git clients first. After aborting, run Diagnose again, then retry your update.`,
+    })
+    if (!confirmed || !valid()) return
+    await ipc.mergeAbort(repoPath)
+    if (!valid()) return
+    useRepoStore.getState().bumpSyncTick(); onRefresh()
+    const d = await ipc.diagnoseIndex(repoPath)
+    if (valid()) setDiagnosis(d)
+  })
   const healthy = diagnosis?.issue === 'healthy'
   const state = busy ? 'checking' : error ? 'blocked' : diagnosis?.issue === 'blocked' ? 'blocked' : healthy ? 'healthy' : diagnosis ? 'repairable' : 'unchecked'
   const StateIcon = busy ? LoaderCircle : state === 'healthy' ? CheckCircle2 : state === 'blocked' || state === 'repairable' ? AlertTriangle : Activity
@@ -177,6 +192,13 @@ export function IndexRecoveryTool({ repoPath, onRefresh }: { repoPath: string; o
             {!busy && diagnosis?.gitVersion && <span className="ir-caption ir-git-version">{diagnosis.gitVersion}</span>}
           </div>
         </div>
+        {diagnosis?.blockedByMerge && <section className="ir-unblock" aria-label="Unfinished merge">
+          <div className="ir-action-row">
+            <div><h3 className="ir-action-title">Abort the unfinished merge</h3>
+              <p>An earlier update or merge did not finish, so index repair is paused. Abort the merge, diagnose again, then retry your update. If Abort fails, check tasks and the lock below and try once more.</p></div>
+            <ActionBtn className="ir-button" disabled={busy} onClick={abortMerge} disabledReason="Wait for the current operation to finish.">Abort merge</ActionBtn>
+          </div>
+        </section>}
         <section className="ir-unblock" aria-label="Git tasks and lock recovery" aria-busy={blockerBusy}>
           <div className="ir-action-row">
             <div><h3 className="ir-action-title">Check Git tasks and the index lock</h3>

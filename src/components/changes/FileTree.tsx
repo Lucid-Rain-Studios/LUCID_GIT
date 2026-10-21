@@ -182,6 +182,10 @@ export function FileTree({
   // Offering "Discard all changes" over thirteen thousand merge-staged files
   // is what sent a user into an hour of waiting for the wrong operation.
   const [mergeBranch, setMergeBranch] = useState<string | null>(null)
+  // Keyed on what a merge changes, not the array: every refresh yields a new
+  // array, and each lookup costs several git processes on a large repository.
+  const hasUnmerged = files.some(file => file.indexStatus === 'U' || file.workingStatus === 'U' || (file.indexStatus === 'A' && file.workingStatus === 'A') || (file.indexStatus === 'D' && file.workingStatus === 'D'))
+  const mergeKey = `${files.length}:${hasUnmerged}`
   useEffect(() => {
     let cancelled = false
     if (!repoPath) { setMergeBranch(null); return }
@@ -189,9 +193,9 @@ export function FileTree({
       .then(m => { if (!cancelled) setMergeBranch(m ? (m.mergedBranch || 'the merge') : null) })
       .catch(() => { if (!cancelled) setMergeBranch(null) })
     return () => { cancelled = true }
-    // `files` stands in for "the working tree changed": a merge starting or
-    // ending always moves it.
-  }, [repoPath, files])
+    // A merge starting or ending moves the changed-file count or the
+    // unmerged state.
+  }, [repoPath, mergeKey])
   const unlockFile = useLockStore(s => s.unlockFile)
   const { accounts, currentAccountId } = useAuthStore()
   const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login ?? null

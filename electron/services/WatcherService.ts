@@ -5,7 +5,7 @@ import { exec } from '../util/dugite-exec'
 import { logService } from './LogService'
 
 const TRANSIENT_WATCH_ERRORS = /^(EPERM|ENOENT|EBUSY|EACCES)\b/
-const IGNORED_SEGMENTS = /(?:^|\/)(?:node_modules|\.vs|Binaries|Intermediate|DerivedDataCache|Saved\/Autosaves)(?:\/|$)/
+const IGNORED_SEGMENTS = /(?:^|\/)(?:node_modules|\.vs|Binaries|Intermediate|DerivedDataCache|Saved)(?:\/|$)/
 const metadataRelevant = (file: string) => /^(HEAD|index|MERGE_HEAD|ORIG_HEAD|CHERRY_PICK_HEAD|REBASE_HEAD|packed-refs|config)$/.test(file) || file.startsWith('refs/')
 
 class WatcherService {

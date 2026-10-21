@@ -1,7 +1,8 @@
 import fs from 'fs/promises'
 import path from 'path'
 import { randomUUID } from 'crypto'
-import { exec, execSafe } from './dugite-exec'
+import { exec, execSafe, gitActivitySnapshot } from './dugite-exec'
+import { failureContext } from './diagnostics'
 import { nulPaths } from './git-paths'
 import { logService } from '../services/LogService'
 
@@ -17,6 +18,7 @@ interface MergeJournal {
   head: string
   incoming?: string[]
   failure?: string
+  failedAt?: string
 }
 
 async function optionalFile(file: string): Promise<string | null> {
@@ -35,22 +37,81 @@ async function context(repo: string): Promise<MergeContext> {
   return { gitDir, incoming, head: head.stdout.trim() }
 }
 
-async function journalReason(state: MergeContext): Promise<string | undefined> {
+/** The journal for the merge currently on disk, or undefined when none applies. Throws if unreadable. */
+async function matchingJournal(state: MergeContext): Promise<MergeJournal | undefined> {
   if (!state.incoming.length) return undefined
+  const raw = await optionalFile(path.join(state.gitDir, JOURNAL))
+  if (raw === null) return undefined
+  const record = JSON.parse(raw) as MergeJournal
+  if (typeof record.head !== 'string' || !/^[0-9a-f]{40,64}$/.test(record.head)
+    || typeof record.id !== 'string' || !record.id
+    || (record.incoming !== undefined && (!Array.isArray(record.incoming)
+      || !record.incoming.every(ref => typeof ref === 'string' && /^[0-9a-f]{40,64}$/.test(ref))))) {
+    throw new Error('Invalid merge safety record')
+  }
+  if (record.head !== state.head || (record.incoming && record.incoming.join(' ') !== state.incoming.join(' '))) return undefined
+  return record
+}
+
+async function journalReason(state: MergeContext): Promise<string | undefined> {
   try {
-    const raw = await optionalFile(path.join(state.gitDir, JOURNAL))
-    if (raw === null) return undefined
-    const record = JSON.parse(raw) as MergeJournal
-    if (typeof record.head !== 'string' || !/^[0-9a-f]{40,64}$/.test(record.head)
-      || typeof record.id !== 'string' || !record.id
-      || (record.incoming !== undefined && (!Array.isArray(record.incoming)
-        || !record.incoming.every(ref => typeof ref === 'string' && /^[0-9a-f]{40,64}$/.test(ref))))) {
-      throw new Error('Invalid merge safety record')
-    }
-    if (record.head !== state.head || (record.incoming && record.incoming.join(' ') !== state.incoming.join(' '))) return undefined
+    const record = await matchingJournal(state)
+    if (!record) return undefined
     return `${BLOCKED} ${record.failure ? 'The merge failed before its result could be trusted.' : 'The previous merge attempt was interrupted before its result was verified.'} ${NEXT_STEP}${record.failure ? ` Original failure: ${record.failure}` : ''}`
   } catch {
     return `${BLOCKED} The saved merge recovery record could not be read. ${NEXT_STEP}`
+  }
+}
+
+/** Operation that started the blocked merge ('update-from-main', 'pull', 'merge'), when a valid journal says so. */
+export async function mergeBlockedOperation(repo: string): Promise<string | undefined> {
+  try { return (await matchingJournal(await context(repo)))?.operation }
+  catch { return undefined }
+}
+
+const reportedLeftovers = new Set<string>()
+/** The UI polls merge state; skip even the journal lookup while a report is fresh. */
+const LEFTOVER_RECHECK_MS = 5 * 60_000
+const lastLeftoverCheck = new Map<string, number>()
+const leftoverKey = (repo: string): string => path.resolve(repo).toLowerCase()
+
+/**
+ * Say, in the log, that an earlier failed or interrupted merge is still blocking
+ * this repository. Finding it is otherwise silent, so a log taken after the
+ * fact showed a blocked dialog with no record of the failure behind it.
+ * 'detected' is reported once per journal; 'refused' (the user tried to start
+ * another operation) is reported every time.
+ */
+export async function logLeftoverBlockedMerge(repo: string, trigger: 'detected' | 'refused', requested?: string): Promise<void> {
+  try {
+    if (trigger === 'detected') {
+      const last = lastLeftoverCheck.get(leftoverKey(repo))
+      if (last !== undefined && Date.now() - last < LEFTOVER_RECHECK_MS) return
+      lastLeftoverCheck.set(leftoverKey(repo), Date.now())
+    }
+    const state = await context(repo)
+    let record: MergeJournal | undefined
+    let journalProblem: string | undefined
+    try { record = await matchingJournal(state) } catch (error) { journalProblem = String(error) }
+    if (!record && !journalProblem) return
+    const key = `${state.gitDir}|${record?.id ?? 'unreadable'}`
+    if (trigger === 'detected') {
+      if (reportedLeftovers.has(key)) return
+      reportedLeftovers.add(key)
+    }
+    const now = Date.now()
+    const startedMs = record ? Date.parse(record.startedAt) : NaN
+    const failedMs = record?.failedAt ? Date.parse(record.failedAt) : NaN
+    const headline = trigger === 'refused' ? `Refused to start ${requested ?? 'an operation'}` : 'Found'
+    logService.warn('git.merge-safety', `${headline} a leftover blocked merge: ${JSON.stringify({
+      repo, journalId: record?.id ?? null, journalProblem: journalProblem ?? null, operation: record?.operation ?? null,
+      startedAt: record?.startedAt ?? null, failedAt: record?.failedAt ?? null,
+      startedAgoMs: Number.isFinite(startedMs) ? now - startedMs : null, failedAgoMs: Number.isFinite(failedMs) ? now - failedMs : null,
+      failure: record?.failure ?? null, interrupted: record ? !record.failure : null,
+      head: state.head, incoming: state.incoming,
+    })}`)
+  } catch (error) {
+    logService.warn('git.merge-safety', `Could not describe a leftover blocked merge in ${repo}: ${String(error)}`)
   }
 }
 
@@ -59,12 +120,17 @@ export async function mergeBlockingReason(repo: string): Promise<string | undefi
   return journalReason(await context(repo))
 }
 
+/**
+ * Failures that stop Git writing the merged index or working files. Generic
+ * `fatal:` or `permission denied` text is deliberately not enough: unrelated
+ * failures (a bad ref, a network error) were being treated as write failures.
+ */
 export function isMergeWriteFailure(error: unknown): boolean {
-  return /(?:(?:unable|failed) to|could not|cannot) write (?:the |new )?(?:\.git[\\/])?index|index\.lock|smudge.*fail|filter.*fail|fatal:|permission denied|no space left|read.only file system|disk (?:is )?full/i.test(String(error))
+  return /(?:(?:unable|failed) to|could not|cannot) write (?:the |new )?(?:\.git[\\/])?index|index\.lock|smudge.*fail|filter.*fail|permission denied[^\n]*index|index[^\n]*permission denied|no space left|read.only file system|disk (?:is )?full/i.test(String(error))
 }
 
 /** Diagnostics use index/object metadata only; no worktree scan or asset reads. */
-async function diagnostics(repo: string, state: MergeContext) {
+async function diagnostics(repo: string, state: MergeContext, withActivity = false) {
   const [staged, unmerged, indexTree, headTree, lock, operationId] = await Promise.all([
     execSafe(['diff', '--cached', '--name-only', '--no-ext-diff', '--no-renames', '-z'], repo),
     execSafe(['diff', '--name-only', '--diff-filter=U', '--no-ext-diff', '-z'], repo),
@@ -82,13 +148,21 @@ async function diagnostics(repo: string, state: MergeContext) {
     stagedCount: staged.exitCode === 0 ? paths.length : null, stagedSample: paths.slice(0, 8),
     unresolvedCount: unmerged.exitCode === 0 ? unresolved.length : null,
     lock: lock ? { bytes: lock.size, ageMs: Math.max(0, Date.now() - lock.mtimeMs) } : null,
+    // Failure logs say what Lucid Git itself was running or had cancelled, so an
+    // outside process can be told apart from our own commands.
+    ...(withActivity ? { activity: gitActivitySnapshot(repo), context: await failureContext(repo) } : {}),
   }
 }
 
 /** Persist BEFORE starting: a process crash must not turn a failed write into a finishable merge. */
 export async function guardedMergeOperation<T>(repo: string, operation: string, run: () => Promise<T>): Promise<T> {
   const before = await context(repo)
-  if (before.incoming.length) throw new Error((await journalReason(before)) ?? 'A merge is already in progress. Finish or abort it before starting another merge.')
+  lastLeftoverCheck.delete(leftoverKey(repo))
+  if (before.incoming.length) {
+    const reason = await journalReason(before)
+    if (reason) await logLeftoverBlockedMerge(repo, 'refused', operation)
+    throw new Error(reason ?? 'A merge is already in progress. Finish or abort it before starting another merge.')
+  }
   const record: MergeJournal = { id: randomUUID(), operation, startedAt: new Date().toISOString(), head: before.head }
   const file = path.join(before.gitDir, JOURNAL)
   await fs.writeFile(file, JSON.stringify(record), 'utf8')
@@ -104,13 +178,13 @@ export async function guardedMergeOperation<T>(repo: string, operation: string, 
     // fails. A subsequent session will refuse to finish that interrupted merge.
     try {
       const after = await context(repo)
-      const detail = await diagnostics(repo, after)
+      const detail = await diagnostics(repo, after, true)
       const genuineConflict = !isMergeWriteFailure(error)
         && /CONFLICT\s*\(|automatic merge failed|cannot merge binary|fix conflicts|unmerged files|merge conflict/i.test(String(error))
         && detail.unresolvedCount !== null && detail.unresolvedCount > 0
       logService.error('git.merge-safety', `Merge failed: ${JSON.stringify({ id: record.id, operation, error: String(error).slice(0, 3000), genuineConflict, ...detail })}`)
       if (after.incoming.length && !genuineConflict) {
-        await fs.writeFile(file, JSON.stringify({ ...record, head: after.head, incoming: after.incoming, failure: String(error).slice(0, 1500) }), 'utf8')
+        await fs.writeFile(file, JSON.stringify({ ...record, head: after.head, incoming: after.incoming, failure: String(error).slice(0, 1500), failedAt: new Date().toISOString() }), 'utf8')
         throw new Error(`${BLOCKED} The merge did not finish safely. ${NEXT_STEP} Original failure: ${String(error)}`)
       }
       await fs.rm(file, { force: true })
@@ -150,7 +224,7 @@ export async function assertSafeMergeCommit(repo: string): Promise<MergeContext>
     }
   }
   if (reason) {
-    logService.error('git.merge-safety', `Commit blocked: ${JSON.stringify({ reason, ...await diagnostics(repo, state) })}`)
+    logService.error('git.merge-safety', `Commit blocked: ${JSON.stringify({ reason, ...await diagnostics(repo, state, true) })}`)
     throw new Error(reason)
   }
   return state
@@ -168,7 +242,7 @@ export async function guardedMergeCommit<T>(repo: string, run: () => Promise<T>)
     }
     return result
   } catch (error) {
-    if (before.incoming.length) logService.error('git.merge-safety', `Merge commit failed: ${JSON.stringify({ commitId, error: String(error).slice(0, 3000), ...await diagnostics(repo, await context(repo)) })}`)
+    if (before.incoming.length) logService.error('git.merge-safety', `Merge commit failed: ${JSON.stringify({ commitId, error: String(error).slice(0, 3000), ...await diagnostics(repo, await context(repo), true) })}`)
     throw error
   }
 }
@@ -177,5 +251,6 @@ export async function clearMergeGuardAfterAbort(repo: string): Promise<void> {
   const state = await context(repo)
   if (state.incoming.length) throw new Error('Git still reports an active merge after abort. The merge recovery guard was retained.')
   await fs.rm(path.join(state.gitDir, JOURNAL), { force: true })
+  lastLeftoverCheck.delete(leftoverKey(repo))
   logService.info('git.merge-safety', `Merge aborted; recovery guard cleared: ${JSON.stringify({ repo, head: state.head })}`)
 }

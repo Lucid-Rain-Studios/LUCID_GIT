@@ -16,6 +16,7 @@ import type { PresenceEntry, FirebasePresenceConfig } from '../types'
 import type { RecoveryGitTask } from '../indexRecoveryTypes'
 import { CHANNELS } from './channels'
 import { exec, execSafe, execWithStdin, withGitTimeout, preemptRepoReads } from '../util/dugite-exec'
+import { logFailureContext } from '../util/diagnostics'
 import { parseNumstat } from '../util/git-paths'
 import { withRepoSlot } from '../util/repo-gate'
 import { gitService } from '../services/GitService'
@@ -63,7 +64,7 @@ const PROGRESS_CHANNELS = new Set<string>([
   CHANNELS.CLEANUP_UNSHALLOW, CHANNELS.DEP_BUILD_GRAPH, CHANNELS.GIT_CLONE,
   CHANNELS.GIT_DISCARD, CHANNELS.GIT_DISCARD_ALL, CHANNELS.GIT_FETCH,
   CHANNELS.GIT_PULL, CHANNELS.GIT_PUSH, CHANNELS.GIT_STAGE, CHANNELS.GIT_UNSTAGE,
-  CHANNELS.GIT_UPDATE_FROM_MAIN, CHANNELS.LFS_MIGRATE, CHANNELS.LFS_RESTORE,
+  CHANNELS.GIT_UPDATE_FROM_MAIN, CHANNELS.GIT_MERGE_ABORT_RETRY_UPDATE, CHANNELS.LFS_MIGRATE, CHANNELS.LFS_RESTORE,
   CHANNELS.LOCK_FILE, CHANNELS.LOCK_FOLDER, CHANNELS.LOCK_UNLOCK,
   CHANNELS.LOCK_UNLOCK_BATCH, CHANNELS.UNLOCK_FOLDER_MINE,
 ])
@@ -87,6 +88,7 @@ const EXCLUSIVE_CHANNELS = new Set<string>([
   // watcher refreshes status after each — ungated, that refresh took
   // index.lock out from under the next checkout.
   CHANNELS.GIT_MERGE_RESOLVE_TEXT, CHANNELS.GIT_MERGE_CONTINUE, CHANNELS.GIT_MERGE_ABORT,
+  CHANNELS.GIT_MERGE_ABORT_RETRY_UPDATE,
   CHANNELS.GIT_CHERRY_PICK, CHANNELS.GIT_CHERRY_PICK_CONTINUE, CHANNELS.GIT_CHERRY_PICK_ABORT,
   CHANNELS.GIT_REVERT, CHANNELS.GIT_REBASE_ABORT, CHANNELS.GIT_RESTORE_FILE, CHANNELS.UNDO_LAST,
   CHANNELS.GIT_STASH_SAVE, CHANNELS.GIT_STASH_POP, CHANNELS.GIT_STASH_APPLY, CHANNELS.GIT_STASH_DROP,
@@ -175,6 +177,20 @@ function sanitizeForLog(value: unknown, depth = 0): unknown {
   return out
 }
 
+/**
+ * One line per write operation. A failure log alone says what broke; the trail
+ * says what the user was doing before it, how long it ran, and how long it sat
+ * waiting for the repository. Arguments are sanitized and cut short.
+ */
+function trailLine(channel: string, repoPath: string | null, args: unknown[]): string {
+  const rest = repoPath === null ? args : args.slice(1)
+  let detail = ''
+  try { detail = JSON.stringify(sanitizeForLog(rest)) ?? '' } catch { detail = '[unserializable]' }
+  if (detail === '[]') detail = ''
+  if (detail.length > 200) detail = detail.slice(0, 200) + '…'
+  return `${channel}${repoPath ? ` in ${repoPath}` : ''}${detail ? ` ${detail}` : ''}`
+}
+
 function formatIpcFailure(channel: string, args: unknown[], error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
   const stack = error instanceof Error && error.stack ? `\nStack:\n${error.stack}` : ''
@@ -234,13 +250,33 @@ export function registerHandlers(): void {
     ipcMain.handle(channel, async (event, ...args) => {
       if (ipcShuttingDown) throw new Error('Lucid Git is shutting down. App action was cancelled.')
       const callId = nextIpcCallId++
-      inFlightIpc.set(callId, { channel, startedAt: Date.now() })
+      const calledAt = Date.now()
+      inFlightIpc.set(callId, { channel, startedAt: calledAt })
       const repoPath = EXCLUSIVE_CHANNELS.has(channel) ? repoArgOf(args) : null
+      const trailed = EXCLUSIVE_CHANNELS.has(channel) || PROGRESS_CHANNELS.has(channel)
+      const trailRepo = repoPath ?? (PROGRESS_CHANNELS.has(channel) ? repoArgOf(args) : null)
+      let startedWork = calledAt
+      const trail = (level: 'info' | 'warn', message: string) => {
+        // Logging must never change the outcome of the operation it describes.
+        try { if (trailed) logService[level]('op', message) } catch { /* ignore */ }
+      }
+      const work = () => {
+        startedWork = Date.now()
+        trail('info', `Started ${trailLine(channel, trailRepo, args)}${startedWork - calledAt >= 1000 ? ` (waited ${((startedWork - calledAt) / 1000).toFixed(1)}s for the repository)` : ''}`)
+        return Promise.resolve(fn(event, ...(args as TArgs)))
+      }
       try {
-        return repoPath === null
-          ? await fn(event, ...(args as TArgs))
-          : await withRepoSlot(repoPath, 'write', () => Promise.resolve(fn(event, ...(args as TArgs))), preemptRepoReads)
+        const result = repoPath === null
+          ? await work()
+          : await withRepoSlot(repoPath, 'write', work, preemptRepoReads, channel)
+        trail('info', `Finished ${channel} in ${((Date.now() - startedWork) / 1000).toFixed(1)}s`)
+        return result
       } catch (error) {
+        // Read `message` directly: an error from another realm is not `instanceof Error`.
+        const reason = (error as { message?: unknown } | null)?.message
+        const firstLine = (typeof reason === 'string' ? reason : String(error)).split('\n')[0].slice(0, 200)
+        trail('warn', `Failed ${channel} after ${((Date.now() - startedWork) / 1000).toFixed(1)}s (queued ${((startedWork - calledAt) / 1000).toFixed(1)}s): ${firstLine}`)
+        if (trailed && trailRepo) { try { logFailureContext(`ipc.${channel}`, trailRepo, `Context for failed ${channel}`) } catch { /* ignore */ } }
         logService.error(`ipc.${channel}`, formatIpcFailure(channel, args, error))
         if (PROGRESS_CHANNELS.has(channel) && !event.sender.isDestroyed()) {
           event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, {
@@ -282,7 +318,7 @@ export function registerHandlers(): void {
       // Reads run a few at a time per repository and yield to a waiting write.
       // The deadline still belongs to the work, not to the queue, so it is
       // armed inside the slot rather than around the wait for one.
-      return repoPath === null ? run() : withRepoSlot(repoPath, 'read', run)
+      return repoPath === null ? run() : withRepoSlot(repoPath, 'read', run, undefined, channel)
     })
   }
 
@@ -515,11 +551,20 @@ export function registerHandlers(): void {
     return gitService.getSyncStatus(repoPath)
   })
 
-  handle(CHANNELS.GIT_UPDATE_FROM_MAIN, async (event, repoPath: string) => {
-    return withUndo(repoPath, 'update-from-main', 'Update from main', () =>
+  const updateFromMainWithUndo = (event: IpcMainInvokeEvent, repoPath: string) =>
+    withUndo(repoPath, 'update-from-main', 'Update from main', () =>
       gitService.updateFromMain(repoPath, (step) => {
         if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
       }))
+
+  handle(CHANNELS.GIT_UPDATE_FROM_MAIN, async (event, repoPath: string) => updateFromMainWithUndo(event, repoPath))
+
+  // One click for a blocked Update from main: abort, then run the update once.
+  // The abort runs outside the undo checkpoint so it never snapshots mid-merge
+  // state. A second failure leaves the guard in place; there is no retry loop.
+  handle(CHANNELS.GIT_MERGE_ABORT_RETRY_UPDATE, async (event, repoPath: string) => {
+    await runGitOp('Abort merge', () => gitService.abortMergeForRetry(repoPath))
+    return updateFromMainWithUndo(event, repoPath)
   })
 
   handle(CHANNELS.GIT_MERGE_OVERLAP, async (_event, repoPath: string, mergeRef: string) => {

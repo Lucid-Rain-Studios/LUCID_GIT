@@ -119,6 +119,8 @@ test('LG-048 watchers resolve external worktree metadata, preserve tracked gener
   await service.watch('H:/linked', () => changes++)
   expect(watchers.map(w => w.root.replace(/\\/g, '/'))).toEqual(['H:/linked', 'H:/main/.git/worktrees/linked', 'H:/main/.git'])
   watchers[0].callback('change', 'Intermediate/generated.tmp'); expect(timers.size).toBe(0)
+  // Unreal rewrites Saved/Logs and Saved/Config constantly; none of it is a repository change.
+  watchers[0].callback('change', 'Saved/Logs/Project.log'); watchers[0].callback('change', 'Plugins/Tool/Saved/runtime.json'); expect(timers.size).toBe(0)
   watchers[0].callback('change', 'Intermediate/tracked.txt'); watchers[1].callback('change', 'HEAD'); watchers[2].callback('change', 'packed-refs')
   expect(timers.size).toBe(1); [...timers.values()][0](); expect(changes).toBe(1); service.unwatchAll()
 })

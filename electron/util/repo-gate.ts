@@ -36,6 +36,13 @@ const PREEMPT_READS_AFTER_MS = 10_000
  */
 const MAX_WAIT_FOR_SLOT_MS = 60_000
 
+/**
+ * Log thresholds. A wait this long is invisible in the UI as anything but
+ * sluggishness, so the log says who the operation was queued behind. Mutable
+ * only so tests do not have to sleep.
+ */
+export const gateLogThresholds = { waitMs: 2_000 }
+
 type OperationKind = 'read' | 'write'
 
 interface Waiter {
@@ -45,10 +52,18 @@ interface Waiter {
   fail: (error: Error) => void
 }
 
+/** Who currently holds a slot, for the log line explaining a long wait. */
+interface Holder {
+  kind: OperationKind
+  label: string
+  since: number
+}
+
 interface RepoGate {
   activeReads: number
   activeWrite: boolean
   waiting: Waiter[]
+  holders: Set<Holder>
 }
 
 const gates = new Map<string, RepoGate>()
@@ -67,7 +82,7 @@ const heldSlot = new AsyncLocalStorage<{ key: string; active: boolean }>()
 function gateFor(key: string): RepoGate {
   let gate = gates.get(key)
   if (!gate) {
-    gate = { activeReads: 0, activeWrite: false, waiting: [] }
+    gate = { activeReads: 0, activeWrite: false, waiting: [], holders: new Set() }
     gates.set(key, gate)
   }
   return gate
@@ -119,12 +134,25 @@ function pump(key: string): void {
   }
 }
 
+/** "write git:update-from-main (82s), 3 reads: git:status, git:log; 1 queued ahead" */
+function describeHolders(gate: RepoGate): string {
+  const now = Date.now()
+  const writes = [...gate.holders].filter(h => h.kind === 'write')
+    .map(h => `write ${h.label} (${Math.round((now - h.since) / 1000)}s)`)
+  const reads = [...gate.holders].filter(h => h.kind === 'read')
+  const parts = [...writes]
+  if (reads.length) parts.push(`${reads.length} read${reads.length === 1 ? '' : 's'}: ${[...new Set(reads.map(h => h.label))].slice(0, 6).join(', ')}`)
+  if (gate.waiting.length) parts.push(`${gate.waiting.length} queued ahead`)
+  return parts.length ? parts.join('; ') : 'nothing recorded'
+}
+
 /** Wait until a slot has been claimed for this operation. */
 function waitForSlot(
   gate: RepoGate,
   kind: OperationKind,
   repoPath: string,
   preemptReads?: (repoPath: string) => void,
+  label = 'internal',
 ): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     let settled = false
@@ -155,7 +183,7 @@ function waitForSlot(
       if (at !== -1) gate.waiting.splice(at, 1)
       logService.warn(
         'git.gate',
-        `A ${kind} timed out waiting for the repository slot: ${repoPath}`,
+        `A ${kind} (${label}) timed out waiting for the repository slot: ${repoPath}; held by: ${describeHolders(gate)}`,
       )
       finish(new Error(`Timed out waiting for repository ${kind} access. Retry after the current operation finishes.`))
       pump(gateKey(repoPath))
@@ -172,12 +200,15 @@ function waitForSlot(
  *
  * `preemptReads` is called when a write has waited past the threshold — the
  * caller decides what that means, which keeps process handling out of here.
+ *
+ * `label` names the operation (an IPC channel) in wait and timeout log lines.
  */
 export async function withRepoSlot<T>(
   repoPath: string,
   kind: OperationKind,
   fn: () => Promise<T>,
   preemptReads?: (repoPath: string) => void,
+  label = 'internal',
 ): Promise<T> {
   if (shuttingDown) throw new Error('Lucid Git is shutting down. Repository work was cancelled.')
   const key = gateKey(repoPath)
@@ -185,8 +216,19 @@ export async function withRepoSlot<T>(
   if (held?.key === key && held.active) return fn()
 
   const gate = gateFor(key)
+  const queuedAt = Date.now()
+  let blockedBy: string | null = null
   if (canRun(gate, kind)) claim(gate, kind)
-  else await waitForSlot(gate, kind, repoPath, preemptReads)
+  else {
+    blockedBy = describeHolders(gate)
+    await waitForSlot(gate, kind, repoPath, preemptReads, label)
+  }
+  const waitedMs = Date.now() - queuedAt
+  if (blockedBy !== null && waitedMs >= gateLogThresholds.waitMs) {
+    logService.warn('git.gate', `${label} (${kind}) waited ${(waitedMs / 1000).toFixed(1)}s for ${repoPath}; was queued behind: ${blockedBy}`)
+  }
+  const holder: Holder = { kind, label, since: Date.now() }
+  gate.holders.add(holder)
 
   const token = { key, active: true }
   try {
@@ -195,6 +237,7 @@ export async function withRepoSlot<T>(
     return await heldSlot.run(token, fn)
   } finally {
     token.active = false
+    gate.holders.delete(holder)
     release(gate, kind)
     pump(key)
   }

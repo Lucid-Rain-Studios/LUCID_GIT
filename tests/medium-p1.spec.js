@@ -403,3 +403,27 @@ test('LG-039 late lock loading cannot replace the active project locks', async (
   old.resolve([{ id: 'A', path: 'file' }]); await loading
   expect(locks.getState().locks).toEqual([{ id: 'B', path: 'file' }])
 })
+
+test('LG-051 embedded thumbnail scan stops at the first valid PNG without reading the whole asset', async () => {
+  const dir = tmpDir('lg-thumb-'), target = path.join(dir, 'Hero.uasset'), out = path.join(dir, 'thumb.png')
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64')
+  const signature = png.subarray(0, 8), window = 4 * 1024 * 1024
+  // Truncated decoy signature, then the real thumbnail straddling a scan-window boundary, then a second PNG.
+  const bytes = Buffer.alloc(3 * window)
+  signature.copy(bytes, 1000)
+  const straddle = window - 3
+  png.copy(bytes, straddle)
+  png.copy(bytes, 2 * window + 50)
+  fs.writeFileSync(target, bytes)
+  let whole = 0
+  const guarded = { ...fs, promises: { ...fs.promises, readFile: async (...args) => { whole++; return fs.promises.readFile(...args) } } }
+  const service = component('electron/services/AssetDiffService.ts', {
+    fs: guarded, path, os: require('os'), crypto: require('crypto'), sharp: () => {},
+    '../util/dugite-exec': runner, './AuthService': { authService: { getCurrentToken: async () => null } }, './GitService': { gitService },
+  }, { Buffer }).exports.assetDiffService
+  expect(await service.extractUEThumbnail(target, out)).toBe(true)
+  expect(fs.readFileSync(out).equals(png)).toBe(true)
+  expect(whole).toBe(0)
+  fs.writeFileSync(target, Buffer.concat([Buffer.alloc(100), signature, Buffer.alloc(200)]))
+  expect(await service.extractUEThumbnail(target, path.join(dir, 'none.png'))).toBe(false)
+})

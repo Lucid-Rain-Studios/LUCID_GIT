@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lucid Git – Performance settings mockup</title>
+<style>
+  :root {
+    --bg: #0b0d13; --bg2: #10131c; --elev: #161a27; --accent: #4a9eff; --ok: #2dbd6e; --warn: #f5a623;
+    --text: #e2e6f4; --muted: #7b8499; --border: #1d2535; --border2: #283047; --radius: 6px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.45 system-ui, sans-serif; }
+  .shell { display: grid; grid-template-columns: 200px 1fr; min-height: 100vh; }
+  nav { background: var(--bg2); border-right: 1px solid var(--border); padding: 16px 8px; }
+  nav h2 { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 8px 10px; }
+  nav a { display: block; padding: 7px 10px; border-radius: var(--radius); color: var(--muted); text-decoration: none; }
+  nav a.on { background: var(--elev); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
+  main { padding: 24px 28px 48px; max-width: 880px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .lede { color: var(--muted); margin: 0 0 20px; }
+  .card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .card h3 { margin: 0 0 12px; font-size: 13px; }
+  .presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .preset { text-align: left; background: var(--elev); color: var(--text); border: 1px solid var(--border2); border-radius: 8px; padding: 12px; cursor: pointer; font: inherit; }
+  .preset:hover { border-color: var(--accent); }
+  .preset[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 14px rgba(74,158,255,.22); }
+  .preset b { display: block; font-size: 14px; margin-bottom: 2px; }
+  .preset span { color: var(--muted); font-size: 12px; }
+  .meter { display: flex; gap: 3px; margin-top: 8px; }
+  .meter i { width: 18px; height: 5px; border-radius: 2px; background: var(--border2); }
+  .meter i.f { background: var(--ok); }
+  .status { margin-top: 12px; color: var(--muted); font-size: 12px; }
+  .status em { color: var(--warn); font-style: normal; }
+  .group { margin: 18px 0 4px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .row { display: grid; grid-template-columns: 1fr 190px; gap: 16px; align-items: center; padding: 9px 0; border-top: 1px solid var(--border); }
+  .row:first-of-type { border-top: 0; }
+  .row small { display: block; color: var(--muted); font-size: 11.5px; }
+  select { width: 100%; background: var(--elev); color: var(--text); border: 1px solid var(--border2); border-radius: var(--radius); padding: 6px 8px; font: inherit; }
+  select:focus-visible, .preset:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .guards { margin: 0; padding: 0; list-style: none; }
+  .guards li { padding: 5px 0 5px 22px; position: relative; color: var(--muted); }
+  .guards li::before { content: "✓"; position: absolute; left: 4px; color: var(--ok); }
+  .actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .btn { background: var(--elev); color: var(--text); border: 1px solid var(--border2); border-radius: var(--radius); padding: 7px 14px; font: inherit; cursor: pointer; }
+  .btn.primary { background: var(--accent); color: #07111f; border-color: var(--accent); font-weight: 600; }
+  @media (max-width: 720px) { .shell { grid-template-columns: 1fr; } nav { display: none; } .presets { grid-template-columns: 1fr; } .row { grid-template-columns: 1fr; gap: 6px; } main { padding: 16px; } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <nav aria-label="Settings sections">
+    <h2>Settings</h2>
+    <a href="#">General</a><a href="#">Appearance</a><a href="#">Notifications</a>
+    <a href="#" class="on" aria-current="page">Performance</a><a href="#">Team</a>
+  </nav>
+  <main>
+    <h1>Performance</h1>
+    <p class="lede">Choose how much background work Lucid Git does. Presets change the settings below; edit any one to switch to Custom.</p>
+
+    <div class="card">
+      <h3>Preset</h3>
+      <div class="presets" id="presets"></div>
+      <div class="status" id="status"></div>
+    </div>
+
+    <div class="card" id="settings"></div>
+
+    <div class="card">
+      <h3>Always on, in every preset</h3>
+      <ul class="guards">
+        <li>Background polling pauses while the window is hidden or minimized</li>
+        <li>No interval can be set below 15 seconds</li>
+        <li>A refresh that finds nothing new causes no re-render</li>
+        <li>Only one git status per repository runs at a time</li>
+      </ul>
+    </div>
+
+    <div class="actions"><button class="btn" id="reset">Reset to Medium</button><button class="btn primary">Save</button></div>
+  </main>
+</div>
+
+<script>
+// Values per preset: [Low, Medium, High]. High is capped so no setting is more demanding than today's defaults.
+const GROUPS = [
+  { name: 'Previews', rows: [
+    { id: 'previews', label: 'Asset previews', hint: '3D scene, mesh and map viewers', opts: ['Off','Click to load','Auto for selected file'], v: [0,1,2] },
+    { id: 'thumbs', label: 'Thumbnails', hint: 'File rows and version history', opts: ['Off','Selected file only','Selected + last 10 versions'], v: [0,1,2] },
+    { id: 'thumbConc', label: 'Thumbnail workers', hint: 'Simultaneous thumbnail jobs', opts: ['1','2'], v: [0,0,1] },
+    { id: 'dots', label: 'Map dots shown', hint: 'Fewer dots pan faster', opts: ['200','500','800'], v: [0,1,2] },
+  ]},
+  { name: 'Interface', rows: [
+    { id: 'anim', label: 'Animated glow', hint: 'Pulsing buttons in the top bar', opts: ['Off','Limited (3 cycles)'], v: [0,1,1] },
+  ]},
+  { name: 'Refresh', rows: [
+    { id: 'debounce', label: 'File-change delay', hint: 'Wait after the last change before refreshing', opts: ['2 s','1 s','750 ms'], v: [0,1,2] },
+    { id: 'focus', label: 'Refresh on window focus', hint: 'Catches edits made in Unreal or Explorer', opts: ['Off','On'], v: [0,1,1] },
+    { id: 'fetch', label: 'Auto-fetch', hint: 'Check the remote for new commits', opts: ['Every 15 min','Every 10 min','Every 5 min'], v: [0,1,2] },
+    { id: 'sync', label: 'Ahead / behind check', hint: 'Sidebar counters', opts: ['Every 60 s','Every 30 s','Every 20 s'], v: [0,1,2] },
+    { id: 'pr', label: 'PR, forecast and activity checks', hint: 'GitHub and activity panels', opts: ['Every 2 min','Every 60 s','Every 45 s'], v: [0,1,2] },
+  ]},
+  { name: 'Team', rows: [
+    { id: 'locks', label: 'Lock polling', hint: 'How soon new locks appear', opts: ['Every 60 s','Every 45 s','Every 30 s'], v: [0,1,2] },
+    { id: 'presence', label: 'Presence heartbeat', hint: 'How soon teammates show as online', opts: ['Every 3 min','Every 2 min','Every 60 s'], v: [0,1,2] },
+    { id: 'forecast', label: 'Conflict forecast', hint: 'Background merge-conflict prediction', opts: ['Off','Every 10 min','Every 5 min'], v: [0,1,2] },
+    { id: 'update', label: 'Update check', hint: 'Look for a new Lucid Git version', opts: ['Every 2 h','Every 60 min','Every 30 min'], v: [0,1,2] },
+  ]},
+];
+const PRESETS = [
+  { name: 'Low', blurb: 'Lightest. Slower to notice remote changes; previews load on request.', fill: 1 },
+  { name: 'Medium', blurb: 'Balanced. Recommended for large Unreal repositories.', fill: 2 },
+  { name: 'High', blurb: 'Most responsive, still capped below the old defaults.', fill: 3 },
+];
+const rows = GROUPS.flatMap(g => g.rows);
+let preset = 1;
+const state = {};
+const set = p => { rows.forEach(r => state[r.id] = r.v[p]); };
+set(1);
+
+const presetsEl = document.getElementById('presets'), settingsEl = document.getElementById('settings'), statusEl = document.getElementById('status');
+function render() {
+  presetsEl.innerHTML = PRESETS.map((p, i) =>
+    `<button class="preset" data-i="${i}" aria-pressed="${preset === i}"><b>${p.name}</b><span>${p.blurb}</span>
+     <div class="meter" aria-hidden="true">${[1,2,3].map(n => `<i class="${n <= p.fill ? 'f' : ''}"></i>`).join('')}</div></button>`).join('');
+  settingsEl.innerHTML = GROUPS.map(g => `<div class="group">${g.name}</div>` + g.rows.map(r =>
+    `<div class="row"><div><label for="${r.id}">${r.label}</label><small>${r.hint}</small></div>
+     <select id="${r.id}" data-id="${r.id}">${r.opts.map((o, i) => `<option value="${i}" ${state[r.id] === i ? 'selected' : ''}>${o}</option>`).join('')}</select></div>`).join('')).join('');
+  statusEl.innerHTML = preset === -1
+    ? '<em>Custom</em> — you changed individual settings.'
+    : `${PRESETS[preset].name} preset applied to ${rows.length} settings.`;
+}
+presetsEl.addEventListener('click', e => { const b = e.target.closest('.preset'); if (!b) return; preset = +b.dataset.i; set(preset); render(); });
+settingsEl.addEventListener('change', e => { state[e.target.dataset.id] = +e.target.value; preset = -1; render(); document.getElementById(e.target.id).focus(); });
+document.getElementById('reset').addEventListener('click', () => { preset = 1; set(1); render(); });
+render();
+</script>
+</body>
+</html>

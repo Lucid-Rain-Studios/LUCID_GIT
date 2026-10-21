@@ -1429,7 +1429,7 @@ function SyncBtn({
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled && !active ? 0.5 : 1,
         boxShadow: active && !disabled ? `0 0 12px ${countColor}25` : 'none',
-        animation: active && !disabled ? 'glow-pulse 2.5s ease-in-out infinite' : 'none',
+        animation: active && !disabled ? 'glow-pulse 2.5s ease-in-out 3' : 'none',
         transition: 'border-color 0.12s, background 0.12s',
       }}
     >
@@ -1830,7 +1830,7 @@ function FetchPullSplitBtn({
         border: `1px solid ${borderColor}`,
         borderRadius: 5, overflow: 'hidden', height: 28,
         boxShadow: hasBehind ? '0 0 10px rgba(245,168,50,0.15)' : 'none',
-        animation: hasBehind ? 'glow-pulse 2.5s ease-in-out infinite' : 'none',
+        animation: hasBehind ? 'glow-pulse 2.5s ease-in-out 3' : 'none',
       }}>
         {fetchButton}
 

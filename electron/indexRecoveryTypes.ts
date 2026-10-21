@@ -39,6 +39,8 @@ export interface IndexDiagnosis {
   backupPath?: string
   canUndo: boolean
   undoReason?: string
+  /** An unfinished merge (MERGE_HEAD) is why recovery stopped; aborting it unblocks recovery. */
+  blockedByMerge?: boolean
 }
 
 export interface IndexRepairResult {

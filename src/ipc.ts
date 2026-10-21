@@ -775,6 +775,8 @@ export interface LucidGitAPI {
   mergeResolveText: (repoPath: string, filePath: string, choice: 'ours' | 'theirs') => Promise<void>
   mergeContinue: (repoPath: string, targetBranch: string) => Promise<void>
   mergeAbort: (repoPath: string) => Promise<void>
+  /** Abort a blocked Update from main and run it once more. Rejects if the merge did not come from an update. */
+  mergeAbortRetryUpdate: (repoPath: string) => Promise<void>
   mergeInProgress: (repoPath: string) => Promise<{
     /**
      * 'merge' when MERGE_HEAD exists and the merge can be concluded or aborted.
@@ -787,6 +789,8 @@ export interface LucidGitAPI {
     mergedBranch: string
     unresolvedFiles: string[]
     blockingReason?: string
+    /** Set when the blocked merge came from Update from main and can be aborted and re-run in one step. */
+    retryOperation?: 'update-from-main'
     conflicts: ConflictPreviewFile[]
   } | null>
 
@@ -969,7 +973,8 @@ export interface LucidGitAPI {
 
   // Bug logs
   logGetText: () => Promise<string>
-  logClear: () => Promise<void>
+  /** Resolves to the path of the backup holding the cleared logs, or null when there was nothing to keep. */
+  logClear: () => Promise<string | null | void>
   logGetSuggestion: () => Promise<string | null>
   logSaveDialog: () => Promise<string | null>
   logRendererEvent: (source: string, message: string, detail?: unknown) => Promise<void>

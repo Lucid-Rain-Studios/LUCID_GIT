@@ -99,7 +99,7 @@ async function context(repo: string): Promise<Context> {
 async function blockers(c: Context, ignoreLock = false): Promise<void> {
   if (!ignoreLock && await exists(c.index + '.lock')) throw new Error('Index.lock exists; its owner is unknown. Automatic index repair preserves the lock. Use Check tasks and lock below, stop Lucid Git tasks if needed, and close other Git clients before deliberate lock recovery.')
   for (const name of operations) if (await exists(path.join(c.gitDir, name))) {
-    throw new Error(`An operation is in progress (${name}). Finish or abort that operation before index recovery.`)
+    throw Object.assign(new Error(`An operation is in progress (${name}). Finish or abort that operation before index recovery.`), { operation: name })
   }
   const sparse = await git(c.root, ['config', '--bool', '--get', 'core.sparseCheckout'])
   if (sparse.exitCode > 1) throw new Error(sparse.stderr || 'Could not check sparse-checkout configuration.')
@@ -297,7 +297,10 @@ export class IndexRecoveryService {
           d.canUndo = true
         } catch (e) { d.undoReason = String(e) }
       }
-    } catch (e) { d.canRepair = false; d.issue = 'blocked'; d.summary = 'Recovery stopped safely'; d.detail = String(e) }
+    } catch (e) {
+      d.canRepair = false; d.issue = 'blocked'; d.summary = 'Recovery stopped safely'; d.detail = String(e)
+      if ((e as { operation?: string }).operation === 'MERGE_HEAD') d.blockedByMerge = true
+    }
     return d
   }
 

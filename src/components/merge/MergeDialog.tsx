@@ -106,6 +106,7 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged, standalone
   // assume otherwise have to say something different.
   const [isRealMerge, setIsRealMerge] = useState(true)
   const [blockingReason, setBlockingReason] = useState<string | null>(null)
+  const [canRetryUpdate, setCanRetryUpdate] = useState(false)
   const opRun = useOperationStore(s => s.run)
   const displayMergeBranch = recoveredMergeBranch ?? targetBranch
   // Auto-resolved files don't need a choice — git already wrote one to the
@@ -144,6 +145,7 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged, standalone
           setRecoveredMergeBranch(inProgress.mergedBranch)
           setConflicts(inProgress.conflicts)
           setBlockingReason(inProgress.blockingReason ?? null)
+          setCanRetryUpdate(inProgress.retryOperation === 'update-from-main')
           setInConflictResolution(true)
           setLoading(false)
           return
@@ -192,6 +194,7 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged, standalone
         const pending = await ipc.mergeInProgress(repoPath).catch(() => null)
         if (pending?.kind === 'merge') {
           setBlockingReason(pending.blockingReason ?? msg)
+          setCanRetryUpdate(pending.retryOperation === 'update-from-main')
           setRecoveredMergeBranch(pending.mergedBranch)
           setIsRealMerge(true)
           setConflicts([])
@@ -258,6 +261,36 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged, standalone
       setError(String(e))
       busy.current = false
       setMerging(false)
+    }
+  }
+
+  // Abort the failed update and run it once more. If it fails again the guard
+  // stays in place and the dialog shows the new failure; it never loops.
+  const abortAndRetryUpdate = async () => {
+    if (!repoPath || busy.current) return
+    busy.current = true
+    setMerging(true)
+    try {
+      setError(null)
+      await opRun('Aborting merge and retrying update…', () => ipc.mergeAbortRetryUpdate(repoPath))
+      if (!standalone) { await refreshStatus(); bumpSyncTick() }
+      onMerged()
+      onClose()
+    } catch (e) {
+      const msg = String(e)
+      const pending = await ipc.mergeInProgress(repoPath).catch(() => null)
+      if (pending?.kind === 'merge') {
+        setBlockingReason(pending.blockingReason ?? null)
+        setCanRetryUpdate(pending.retryOperation === 'update-from-main')
+        setRecoveredMergeBranch(pending.mergedBranch)
+        setConflicts(pending.conflicts)
+        setInConflictResolution(true)
+        // A real conflict after the retry is resolved in this dialog, and a
+        // blocked merge is already explained by the recovery banner.
+        setError(pending.blockingReason || pending.conflicts.length ? null : msg)
+      } else setError(msg)
+      setMerging(false)
+      busy.current = false
     }
   }
 
@@ -493,6 +526,16 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged, standalone
               >
                 {inConflictResolution && isRealMerge ? 'Abort merge' : 'Cancel'}
               </ActionBtn>
+              {inConflictResolution && isRealMerge && blockingReason && canRetryUpdate && (
+                <button
+                  onClick={abortAndRetryUpdate}
+                  disabled={merging}
+                  className="px-3 h-7 rounded text-[11px] font-mono bg-lg-accent/20 border border-lg-accent/60 text-lg-accent hover:bg-lg-accent/30 transition-colors disabled:opacity-40"
+                  title="Abort this merge, then run Update from main again. Close Unreal Editor and other Git clients first."
+                >
+                  {merging ? 'Retrying…' : 'Abort & retry update'}
+                </button>
+              )}
               {inConflictResolution ? (
                 <button
                   onClick={finalizeMerge}

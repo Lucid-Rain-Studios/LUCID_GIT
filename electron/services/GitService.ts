@@ -7,9 +7,10 @@ import { performance } from 'node:perf_hooks'
 import { exec, execSafe, execWithProgress, execWithStdin, gitAuthArgs, withGitTimeout, gitOpActivity, waitForGitOpsToDrain, ProgressCallback } from '../util/dugite-exec'
 import { nulPaths, parseNameStatus, parseNumstat } from '../util/git-paths'
 import { withRepoSlot } from '../util/repo-gate'
-import { assertSafeMergeCommit, clearMergeGuardAfterAbort, guardedMergeCommit, guardedMergeOperation, isMergeWriteFailure, mergeBlockingReason } from '../util/merge-safety'
+import { assertSafeMergeCommit, clearMergeGuardAfterAbort, guardedMergeCommit, guardedMergeOperation, isMergeWriteFailure, logLeftoverBlockedMerge, mergeBlockedOperation, mergeBlockingReason } from '../util/merge-safety'
 import { authService } from './AuthService'
 import { logService } from './LogService'
+import { logFailureContext } from '../util/diagnostics'
 import { parseGitLog, GIT_LOG_FORMAT } from '../util/git-log-parse'
 import { FileStatus, BranchInfo, CommitEntry, ChangelogEntry, ChangelogQuery, DiffContent, StashEntry, ContributorInfo, ConflictPreviewFile, SyncStatus, LFSStatus, LfsLockCacheFile, LfsLocksMaintenanceResult, SizeBreakdown, CleanupResult, BranchActivity, BranchDiffSummary, BranchDiffFile, PotentialMergeConflictReport, RepoSearchResult, BranchHealth, BranchHealthReport } from '../types'
 
@@ -423,14 +424,21 @@ class GitService {
   }
 
   /**
-   * Paths still unmerged in the index. `git diff` against the working tree
-   * writes its refreshed index back, taking index.lock, so this holds a read
-   * slot like `status`.
+   * Paths still unmerged in the index. Reads index entries only: the previous
+   * `git diff --diff-filter=U` stat-scanned the whole working tree (seconds on
+   * a 50k-file Unreal repo) and polled via mergeInProgress on every refresh.
+   * Records are `<mode> <sha> <stage>\t<path>`, one per conflict stage.
    */
   private unmergedPaths(repoPath: string): Promise<string[]> {
-    return withRepoSlot(repoPath, 'read', () =>
-      execSafe(['diff', '--name-only', '-z', '--diff-filter=U'], repoPath))
-      .then(res => nulPaths(res.stdout))
+    return withRepoSlot(repoPath, 'read', () => execSafe(['ls-files', '-u', '-z'], repoPath))
+      .then(res => {
+        const paths = new Set<string>()
+        for (const record of res.stdout.split('\0')) {
+          const tab = record.indexOf('\t')
+          if (tab >= 0) paths.add(record.slice(tab + 1))
+        }
+        return [...paths]
+      })
   }
 
   /** Absolute path to this repository's .git directory. */
@@ -1442,6 +1450,8 @@ class GitService {
         )
       }
 
+      await this.prefetchIncomingLfs(repoPath, defaultBranch.ref, gitAuthArgs(token, remoteUrl), onProgress)
+
       onProgress?.({
         id: 'stage',
         label: `Merging ${defaultBranch.ref}`,
@@ -1606,6 +1616,7 @@ class GitService {
     if (!orphanedDuringAppWork && (Date.now() - current.mtimeMs) / 1000 < STALE_INDEX_LOCK_S) return false
     await fs.promises.rm(info.path, { force: true })
     logService.warn('git.index-lock-recovery', `Automatically removed index lock using ${orphanedDuringAppWork ? 'app activity' : 'five-second age'} heuristic: ${info.path}; ageMs=${Math.max(0, Date.now() - info.mtimeMs)}; bytes=${current.size}; activeAppOperations=${gitOpActivity(repoPath).inFlight}; mergeInProgress=${await this.hasRef(repoPath, 'MERGE_HEAD')}. Lock removal does not validate or rebuild the index; merge completion is checked separately.`)
+    logFailureContext('git.index-lock-recovery', repoPath, 'An index lock was removed automatically')
     return true
   }
 
@@ -2603,11 +2614,146 @@ ${lastError}` : '')
         + 'last commit.',
       )
     }
-    const res = await execSafe(['merge', '--abort'], repoPath)
+    let res = await execSafe(['merge', '--abort'], repoPath)
+    // Abort rewrites the index too, so it can hit the same orphaned lock that
+    // broke the merge. Reuse the bounded, heuristic lock recovery once.
+    const lockText = `${res.stderr}\n${res.stdout}`
+    if (res.exitCode !== 0 && this.isStaleIndexLockError(lockText) && await this.clearStaleIndexLock(repoPath)) {
+      res = await execSafe(['merge', '--abort'], repoPath)
+    }
     if (res.exitCode !== 0) {
-      throw new Error(res.stderr || res.stdout || 'No merge is currently in progress.')
+      const detail = res.stderr || res.stdout || 'No merge is currently in progress.'
+      logService.error('git.merge-safety', `Abort merge failed in ${repoPath}: ${detail.slice(0, 1500)}`)
+      logFailureContext('git.merge-safety', repoPath, 'Abort merge failed')
+      if (isMergeWriteFailure(detail)) {
+        throw new Error(
+          `The merge could not be aborted because Git could not write the index. Close Unreal Editor, other Git clients and `
+          + `antivirus scans of this folder, then use Index Recovery → Check tasks and lock, and abort again. Git said: ${detail}`,
+        )
+      }
+      throw new Error(detail)
     }
     await clearMergeGuardAfterAbort(repoPath)
+  }
+
+  /**
+   * Abort a merge that failed during Update from main so the caller can run the
+   * update again. Refuses anything else: a conflict being resolved by hand, or a
+   * merge this app did not start, must not be aborted behind the user's back.
+   */
+  async abortMergeForRetry(repoPath: string): Promise<void> {
+    const operation = await mergeBlockedOperation(repoPath)
+    if (operation !== 'update-from-main') {
+      throw new Error('Only a failed Update from main can be retried automatically. Abort the merge, then start the operation again.')
+    }
+    logService.info('git.merge-safety', `Abort and retry requested for a blocked update-from-main in ${repoPath}`)
+    const incoming = (await execSafe(['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'], repoPath)).stdout.trim()
+    await this.abortMerge(repoPath)
+    if (incoming) await this.discardFailedMergeArtifacts(repoPath, incoming)
+  }
+
+  /** Split paths into groups whose joined length stays under a safe command-line size. */
+  private chunkPaths(paths: string[], maxChars: number): string[][] {
+    const chunks: string[][] = [[]]
+    let size = 0
+    for (const p of paths) {
+      if (size + p.length + 1 > maxChars && chunks[chunks.length - 1].length) { chunks.push([]); size = 0 }
+      chunks[chunks.length - 1].push(p); size += p.length + 1
+    }
+    return chunks
+  }
+
+  /**
+   * A merge that failed while writing leaves incoming files in the working tree
+   * with no index entry to explain them. After the abort they look like local
+   * edits and make the retry stop with "local changes would be overwritten".
+   * Remove only files whose content is byte-identical (same blob) to the
+   * incoming commit's version — nothing a user wrote can match — and leave
+   * everything else for the normal overlap check. Best effort; never throws.
+   */
+  private async discardFailedMergeArtifacts(repoPath: string, incoming: string): Promise<void> {
+    const MAX_ARG_CHARS = 20_000
+    const MAX_PATHS = 20_000
+    try {
+      const base = await execSafe(['merge-base', 'HEAD', incoming], repoPath)
+      if (base.exitCode !== 0 || !base.stdout.trim()) return
+      const diff = await execSafe(['diff', '--name-only', '-z', '--no-renames', '--diff-filter=d', base.stdout.trim(), incoming, '--'], repoPath)
+      if (diff.exitCode !== 0) return
+      const paths = nulPaths(diff.stdout).filter(p => !/[\r\n]/.test(p))
+      if (!paths.length) return
+      if (paths.length > MAX_PATHS) {
+        logService.warn('git.merge-safety', `Skipped cleanup of failed-merge leftovers in ${repoPath}: ${paths.length} incoming files exceeds ${MAX_PATHS}.`)
+        return
+      }
+      // Pathspec-limited metadata queries only: no repository-wide status scan.
+      const untracked = new Set<string>(), modified = new Set<string>()
+      for (const chunk of this.chunkPaths(paths, MAX_ARG_CHARS)) {
+        const others = await execSafe(['--literal-pathspecs', 'ls-files', '--others', '--exclude-standard', '-z', '--', ...chunk], repoPath)
+        if (others.exitCode === 0) for (const p of nulPaths(others.stdout)) untracked.add(p)
+        const dirty = await execSafe(['--literal-pathspecs', 'diff', '--name-only', '-z', '--', ...chunk], repoPath)
+        if (dirty.exitCode === 0) for (const p of nulPaths(dirty.stdout)) modified.add(p)
+      }
+      const candidates = [...untracked, ...modified]
+      if (!candidates.length) return
+      const wanted = new Map<string, string>()
+      for (const chunk of this.chunkPaths(candidates, MAX_ARG_CHARS)) {
+        const tree = await execSafe(['--literal-pathspecs', 'ls-tree', '-r', '-z', incoming, '--', ...chunk], repoPath)
+        if (tree.exitCode !== 0) continue
+        for (const entry of tree.stdout.split('\0')) {
+          const tab = entry.indexOf('\t')
+          if (tab > 0) wanted.set(entry.slice(tab + 1), entry.slice(0, tab).split(' ')[2])
+        }
+      }
+      const toHash = candidates.filter(p => wanted.has(p))
+      if (!toHash.length) return
+      const hashed = (await execWithStdin(['hash-object', '--stdin-paths'], repoPath, toHash.join('\n') + '\n')).stdout.split('\n').filter(Boolean)
+      if (hashed.length !== toHash.length) return
+      const same = toHash.filter((p, i) => hashed[i] === wanted.get(p))
+      const removeUntracked = same.filter(p => untracked.has(p))
+      const restoreModified = same.filter(p => modified.has(p))
+      for (const p of removeUntracked) await fs.promises.rm(path.join(repoPath, p), { force: true })
+      if (restoreModified.length) {
+        await execWithStdin(['--literal-pathspecs', 'restore', '--source=HEAD', '--worktree', '--pathspec-from-file=-', '--pathspec-file-nul'], repoPath, restoreModified.join('\0') + '\0')
+      }
+      logService.info('git.merge-safety', `Cleaned failed-merge leftovers in ${repoPath}: removed ${removeUntracked.length} untracked and restored ${restoreModified.length} modified file(s) identical to ${incoming}; ${candidates.length - same.length} differing file(s) were left alone.`)
+    } catch (error) {
+      logService.warn('git.merge-safety', `Could not clean failed-merge leftovers in ${repoPath}; the retry may ask you to stash overlapping files: ${String(error).slice(0, 1500)}`)
+    }
+  }
+
+  /**
+   * Download the LFS objects the incoming merge will need before Git starts
+   * rewriting the index. Otherwise smudge downloads happen mid-merge, holding
+   * the index open for minutes where antivirus or another client can interfere.
+   * Best effort: a failure here only means the merge downloads them itself.
+   */
+  private async prefetchIncomingLfs(repoPath: string, ref: string, auth: string[], onProgress?: ProgressCallback): Promise<void> {
+    const MAX_ARG_CHARS = 20_000
+    const MAX_CHUNKS = 40
+    try {
+      const base = await execSafe(['merge-base', 'HEAD', ref], repoPath)
+      if (base.exitCode !== 0 || !base.stdout.trim()) return
+      // -G on the pointer's oid line selects only changed LFS pointers; this
+      // reads incoming blobs but never scans the working tree or LFS payloads.
+      const diff = await execSafe(['diff', '--name-only', '-z', '--no-renames', '--diff-filter=d', '-G^oid sha256:', base.stdout.trim(), ref, '--'], repoPath)
+      if (diff.exitCode !== 0) return
+      // --include is comma separated and gitignore-style; leave awkward names
+      // to the merge itself rather than fetching the wrong thing.
+      const paths = nulPaths(diff.stdout).filter(p => !/[,*?[\]\\!#]/.test(p))
+      if (!paths.length) return
+      const chunks = this.chunkPaths(paths, MAX_ARG_CHARS)
+      if (chunks.length > MAX_CHUNKS) {
+        logService.warn('git.lfs-prefetch', `Skipped LFS prefetch for ${ref} in ${repoPath}: ${paths.length} files need ${chunks.length} batches.`)
+        return
+      }
+      onProgress?.({ id: 'stage', label: `Downloading ${paths.length} incoming large file${paths.length === 1 ? '' : 's'}`, status: 'running' })
+      for (const chunk of chunks) {
+        await this.withRemote(repoPath, () => execWithProgress([...auth, 'lfs', 'fetch', `--include=${chunk.join(',')}`, 'origin', ref], repoPath, onProgress))
+      }
+      logService.info('git.lfs-prefetch', `Prefetched LFS objects for ${paths.length} incoming file(s) from ${ref} in ${repoPath}`)
+    } catch (error) {
+      logService.warn('git.lfs-prefetch', `LFS prefetch for ${ref} in ${repoPath} failed; the merge will download what it needs: ${String(error).slice(0, 1500)}`)
+    }
   }
 
   /**
@@ -2626,6 +2772,8 @@ ${lastError}` : '')
     mergedBranch: string
     unresolvedFiles: string[]
     blockingReason?: string
+    /** Set when the blocked merge came from Update from main and can be aborted and re-run in one step. */
+    retryOperation?: 'update-from-main'
   } | null> {
     const gitDirRes = await execSafe(['rev-parse', '--git-dir'], repoPath)
     if (gitDirRes.exitCode !== 0) return null
@@ -2655,7 +2803,10 @@ ${lastError}` : '')
     const branchRes = await execSafe(['for-each-ref', '--points-at', mergeHead, '--format=%(refname:short)', 'refs/heads/', 'refs/remotes/'], repoPath)
     const mergedBranch = branchRes.stdout.trim().split('\n').filter(Boolean)[0] ?? mergeHead.slice(0, 7)
 
-    return { kind: 'merge', mergeHead, mergedBranch, unresolvedFiles, blockingReason: await mergeBlockingReason(repoPath) }
+    const blockingReason = await mergeBlockingReason(repoPath)
+    if (blockingReason) void logLeftoverBlockedMerge(repoPath, 'detected')
+    const retryOperation = blockingReason && (await mergeBlockedOperation(repoPath)) === 'update-from-main' ? 'update-from-main' as const : undefined
+    return { kind: 'merge', mergeHead, mergedBranch, unresolvedFiles, blockingReason, retryOperation }
   }
 
   /**

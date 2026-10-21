@@ -40,6 +40,7 @@ export const CHANNELS = {
   GIT_MERGE_RESOLVE_TEXT: 'git:merge-resolve-text',
   GIT_MERGE_CONTINUE: 'git:merge-continue',
   GIT_MERGE_ABORT: 'git:merge-abort',
+  GIT_MERGE_ABORT_RETRY_UPDATE: 'git:merge-abort-retry-update',
   GIT_MERGE_IN_PROGRESS: 'git:merge-in-progress',
   GIT_REMOTE_URL:    'git:remote-url',
   GIT_SYNC_STATUS:   'git:sync-status',

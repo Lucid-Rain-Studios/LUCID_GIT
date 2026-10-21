@@ -56,9 +56,9 @@ export function BugLogsPanel() {
     setFeedback(null)
     setSavedPath(null)
     try {
-      await ipc.logClear()
+      const backup = await ipc.logClear()
       await load()
-      setFeedback('Logs cleared.')
+      setFeedback(backup ? `Logs cleared. The previous logs were saved to ${backup}` : 'Logs cleared.')
     } catch (error) {
       setFeedback(`Could not clear logs: ${String(error)}`)
     } finally {

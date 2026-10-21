@@ -9,6 +9,7 @@ import { desktopNotificationService } from './services/DesktopNotificationServic
 import { settingsService } from './services/SettingsService'
 import { shutdownGitProcesses, describeLiveGitProcesses } from './util/dugite-exec'
 import { shutdownRepoGate } from './util/repo-gate'
+import { logSessionEnvironment } from './util/diagnostics'
 import { showRecovery } from './services/RecoveryService'
 import { attachTextContextMenu } from './util/text-context-menu'
 import { MergeWindowService } from './services/MergeWindowService'
@@ -347,6 +348,10 @@ app.commandLine.appendSwitch('disable-features', 'AutofillServerCommunication')
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null)
   logService.init(app.getPath('userData'), app.getVersion())
+  // Diagnostics must never stop the app from starting.
+  try {
+    void logSessionEnvironment({ appVersion: app.getVersion(), packaged: app.isPackaged, userDataPath: app.getPath('userData') })
+  } catch { /* ignore */ }
   // Registered before the monitor starts, so the very first stall is reported
   // with the git processes and IPC calls that were outstanding during it.
   logService.registerActivityProbe('git processes running', describeLiveGitProcesses)

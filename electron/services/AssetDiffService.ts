@@ -88,6 +88,12 @@ async function withThumbnailSlot<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 const PREVIEW_MAX_BYTES = 256 * 1024 * 1024
+// Embedded thumbnail scan: bounded windows, never the whole asset in memory.
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+const PNG_SCAN_WINDOW = 4 * 1024 * 1024
+const PNG_MAX_BYTES = 16 * 1024 * 1024
+const PNG_MAX_CHUNKS = 4096
+const PNG_MIN_BYTES = 67 // smallest valid PNG
 const CACHE_MAX_BYTES = 5 * 1024 * 1024 * 1024 // 5 GB
 
 // ── Sharp (optional native dep) ───────────────────────────────────────────────
@@ -239,50 +245,58 @@ class AssetDiffService {
   }
 
   /**
-   * Scan a buffer for embedded PNG streams (UE assets embed thumbnails as raw PNG).
-   * Returns all valid PNG buffers found, largest first.
+   * Find the first complete PNG stream embedded in a file (UE assets store
+   * their thumbnail as raw PNG). Reads fixed-size windows through a file handle
+   * instead of loading the whole asset, which can be hundreds of megabytes, and
+   * stops at the first valid stream. Each window is one async read, so the main
+   * process keeps servicing IPC between windows.
    */
-  private extractPNGsFromBuffer(buf: Buffer): Buffer[] {
-    const PNG_SIG  = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
-    const IEND_TYPE = Buffer.from([0x49, 0x45, 0x4E, 0x44]) // 'IEND'
-    const results: Buffer[] = []
-    let searchFrom = 0
-
-    while (searchFrom < buf.length) {
-      const start = buf.indexOf(PNG_SIG, searchFrom)
-      if (start === -1) break
-
-      let pos = start + 8  // skip 8-byte signature
-      let found = false
-
-      while (pos + 12 <= buf.length) {
-        const dataLen = buf.readUInt32BE(pos)
-        if (dataLen > 64 * 1024 * 1024) break  // sanity: no chunk > 64 MB
-        const chunkEnd = pos + 4 + 4 + dataLen + 4  // len(4) + type(4) + data + crc(4)
-        if (chunkEnd > buf.length) break
-        if (buf.slice(pos + 4, pos + 8).equals(IEND_TYPE)) {
-          results.push(buf.slice(start, chunkEnd))
-          searchFrom = chunkEnd
-          found = true
-          break
+  private async findFirstPng(blobPath: string): Promise<Buffer | null> {
+    const handle = await fs.promises.open(blobPath, 'r')
+    try {
+      const { size } = await handle.stat()
+      // The extra bytes let a signature that straddles two windows be seen once.
+      const window = Buffer.allocUnsafe(PNG_SCAN_WINDOW + PNG_SIGNATURE.length - 1)
+      for (let offset = 0; offset < size; offset += PNG_SCAN_WINDOW) {
+        const { bytesRead } = await handle.read(window, 0, window.length, offset)
+        const view = window.subarray(0, bytesRead)
+        // A hit belongs to the window that contains its first byte.
+        for (let at = view.indexOf(PNG_SIGNATURE); at !== -1 && at < PNG_SCAN_WINDOW; at = view.indexOf(PNG_SIGNATURE, at + 1)) {
+          const png = await this.readPngAt(handle, offset + at, size)
+          if (png) return png
         }
-        pos = chunkEnd
+        if (bytesRead < window.length) break
       }
-
-      if (!found) searchFrom = start + 1
-    }
-
-    // Largest PNG first (highest resolution thumbnail)
-    return results.sort((a, b) => b.length - a.length)
+      return null
+    } finally { await handle.close() }
   }
 
-  /** Extract the best embedded PNG thumbnail from a UE asset binary file. */
+  /** Walk PNG chunks from a signature to IEND with small positional reads; null when the stream is not a bounded, complete PNG. */
+  private async readPngAt(handle: fs.promises.FileHandle, start: number, size: number): Promise<Buffer | null> {
+    const header = Buffer.allocUnsafe(8)
+    let position = start + PNG_SIGNATURE.length
+    for (let chunks = 0; chunks < PNG_MAX_CHUNKS && position + 12 <= size; chunks++) {
+      await handle.read(header, 0, 8, position)
+      const length = header.readUInt32BE(0)
+      const end = position + 12 + length  // length(4) + type(4) + data + crc(4)
+      if (end > size || end - start > PNG_MAX_BYTES) return null
+      if (header.toString('latin1', 4, 8) === 'IEND') {
+        if (end - start < PNG_MIN_BYTES) return null
+        const png = Buffer.allocUnsafe(end - start)
+        const { bytesRead } = await handle.read(png, 0, png.length, start)
+        return bytesRead === png.length ? png : null
+      }
+      position = end
+    }
+    return null
+  }
+
+  /** Extract the embedded PNG thumbnail from a UE asset binary file. */
   private async extractUEThumbnail(blobPath: string, outPng: string): Promise<boolean> {
     try {
-      const buf  = await fs.promises.readFile(blobPath)
-      const pngs = this.extractPNGsFromBuffer(buf)
-      if (pngs.length === 0 || pngs[0].length < 67) return false  // min valid PNG ~67 bytes
-      await fs.promises.writeFile(outPng, pngs[0])
+      const png = await this.findFirstPng(blobPath)
+      if (!png) return false
+      await fs.promises.writeFile(outPng, png)
       return true
     } catch {
       return false
