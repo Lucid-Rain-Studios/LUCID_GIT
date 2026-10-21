@@ -3,14 +3,15 @@ import { ipc, PresenceEntry } from '@/ipc'
 import { useAuthStore } from '@/stores/authStore'
 import { ActionBtn } from '@/components/ui/ActionBtn'
 import { presenceStatus } from '@/lib/presence'
-import { usePerformanceStore } from '@/stores/performanceStore'
 import { pollWhileVisible } from '@/lib/visiblePolling'
 
 const labels = { active: 'Active', away: 'Away', offline: 'Offline' }
 const colors = { active: '#2ec573', away: '#f5a832', offline: '#8b94b0' }
 
+// Fixed, not a Performance setting: the panel text and teammates' offline timing assume one minute.
+const PRESENCE_REFRESH_MS = 60_000
+
 export function PresencePanel({ repoPath, onConfigure }: { repoPath: string; onConfigure?: () => void }) {
-  const panelPollMs = usePerformanceStore(s => s.settings.panelPollSeconds) * 1000
   const isAdmin = useAuthStore(s => s.isAdmin(repoPath))
   const accountId = useAuthStore(s => s.currentAccountId)
   const [entries, setEntries] = useState<PresenceEntry[]>([])
@@ -42,9 +43,9 @@ export function PresencePanel({ repoPath, onConfigure }: { repoPath: string; onC
       }
     }
     void load()
-    const stop = pollWhileVisible(() => { setNow(Date.now()); void load() }, panelPollMs)
+    const stop = pollWhileVisible(() => { setNow(Date.now()); void load() }, PRESENCE_REFRESH_MS)
     return () => { cancelled = true; stop() }
-  }, [repoPath, isAdmin, accountId, refresh, panelPollMs])
+  }, [repoPath, isAdmin, accountId, refresh])
 
   if (!isAdmin) return <div role="alert">Admin access is required to view Team activity.</div>
 
