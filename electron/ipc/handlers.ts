@@ -18,7 +18,7 @@ import { CHANNELS } from './channels'
 import { exec, execSafe, execWithStdin, withGitTimeout, preemptRepoReads } from '../util/dugite-exec'
 import { logFailureContext } from '../util/diagnostics'
 import { parseNumstat } from '../util/git-paths'
-import { withRepoSlot } from '../util/repo-gate'
+import { withRepoSlot, repoSlotState } from '../util/repo-gate'
 import { gitService } from '../services/GitService'
 import { indexRecoveryService } from '../services/IndexRecoveryService'
 import { authService } from '../services/AuthService'
@@ -44,6 +44,12 @@ type IpcHandler<TArgs extends unknown[]> = (event: IpcMainInvokeEvent, ...args: 
 // slow disk still answers, short enough that a wedged process surfaces as an
 // error instead of an endless spinner.
 const READ_TIMEOUT_MS = 30_000
+/** Cheap, argument-free-per-repo reads that many panels request at once. */
+const COALESCED_READS = new Set<string>([
+  CHANNELS.GIT_STATUS, CHANNELS.GIT_CURRENT_BRANCH, CHANNELS.GIT_BRANCH_LIST,
+  CHANNELS.GIT_REMOTE_URL, CHANNELS.GIT_SYNC_STATUS, CHANNELS.GIT_DEFAULT_BRANCH,
+])
+const coalescedReads = new Map<string, Promise<unknown>>()
 
 // Channels whose handlers stream operation progress to the renderer. When one
 // of them throws, the progress it was drawing needs a terminal event or the
@@ -286,6 +292,8 @@ export function registerHandlers(): void {
         }
         throw error
       } finally {
+        // Exclusive operations are the ones that change the tree; drop the monitors' cached status.
+        if (repoPath !== null) gitService.invalidateStatusCache(repoPath)
         inFlightIpc.delete(callId)
       }
     })
@@ -318,7 +326,20 @@ export function registerHandlers(): void {
       // Reads run a few at a time per repository and yield to a waiting write.
       // The deadline still belongs to the work, not to the queue, so it is
       // armed inside the slot rather than around the wait for one.
-      return repoPath === null ? run() : withRepoSlot(repoPath, 'read', run, undefined, channel)
+      if (repoPath === null) return run()
+      if (!COALESCED_READS.has(channel)) return withRepoSlot(repoPath, 'read', run, undefined, channel)
+      // Startup asks for the same cheap answer from a dozen panels at once; sharing
+      // one in-flight call keeps them from filling every read slot. Never join
+      // once a write is active or queued, so no caller gets a pre-write answer.
+      const key = `${channel} ${path.resolve(repoPath).toLowerCase()} ${JSON.stringify(args.slice(1))}`
+      const state = repoSlotState(repoPath)
+      const shared = coalescedReads.get(key)
+      if (shared && !state.activeWrite && state.waiting === 0) return shared
+      const request = withRepoSlot(repoPath, 'read', run, undefined, channel)
+      coalescedReads.set(key, request)
+      const clear = () => { if (coalescedReads.get(key) === request) coalescedReads.delete(key) }
+      request.then(clear, clear)
+      return request
     })
   }
 
@@ -505,7 +526,7 @@ export function registerHandlers(): void {
     return result
   })
 
-  handleRead(CHANNELS.GIT_LOG, async (_event, repoPath: string, args?: { limit?: number; all?: boolean; filePath?: string; refs?: string[] }) => {
+  handleRead(CHANNELS.GIT_LOG, async (_event, repoPath: string, args?: { limit?: number; all?: boolean; filePath?: string; refs?: string[]; since?: string; until?: string }) => {
     return gitService.log(repoPath, args)
   })
 

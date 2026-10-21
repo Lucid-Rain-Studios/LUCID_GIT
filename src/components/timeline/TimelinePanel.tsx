@@ -31,8 +31,8 @@ type CenterFile =
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const INITIAL_LIMIT = 300
-const MORE_INC = 300
+const INITIAL_LIMIT = 150
+const MORE_INC = 150
 const MAIN_BRANCH_COLOR = '#7dd3fc'
 const TL_LANE_W = 10
 const LEFT_WIDTH_MAX = 860

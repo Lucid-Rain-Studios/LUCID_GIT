@@ -14,7 +14,7 @@ test('LG-042 push unlocks on the resolved default branch and still finishes othe
     electron: { ipcMain: { handle: (name, fn) => handlers.set(name, fn) } },
     './channels': { CHANNELS },
     '../util/repo-gate': { withRepoSlot: (repo, mode, fn) => { slots.push([repo, mode]); return fn() } },
-    '../services/GitService': { gitService: { status: async () => [], push: async () => ({ branch, filesAhead: ['asset.uasset'] }), defaultBranch: async () => 'develop', resetTo: async (...args) => resets.push(args) } },
+    '../services/GitService': { gitService: { status: async () => [], invalidateStatusCache() {}, push: async () => ({ branch, filesAhead: ['asset.uasset'] }), defaultBranch: async () => 'develop', resetTo: async (...args) => resets.push(args) } },
     '../services/UndoService': { undoService: { recordCheckpoint: async () => {}, markAvailable() {} } },
     '../services/AuthService': { authService: { listAccounts: () => ({ accounts: [{ userId: 1, login: 'test' }], currentAccountId: 1 }) } },
     '../services/LockService': { lockService: { listLocks: async () => [{ id: 'lock', path: 'asset.uasset', owner: { login: 'test' } }], unlockFiles: async (...args) => { unlocks.push(args); return { unlocked: [], failed: [] } } } },
@@ -61,12 +61,14 @@ test('LG-073 contributions deduplicate loads and invalidate cache on history upd
   const { contributionData } = component('src/lib/contributionData.ts', {
     '@/ipc': { ipc: { log: async () => { calls++; return [{ hash: `${calls}` }] }, gitGetIdentity: async () => ({ name: 'Test', email: 'test@example.com' }) } },
   }).exports
-  const [a, b] = await Promise.all([contributionData('repo', 0), contributionData('repo', 0)])
+  const [a, b] = await Promise.all([contributionData('repo', 0, 2026, 9), contributionData('repo', 0, 2026, 9)])
   expect(a).toEqual(b)
   expect(calls).toBe(1)
-  await contributionData('repo', 0)
+  await contributionData('repo', 0, 2026, 9)
   expect(calls).toBe(1)
-  expect((await contributionData('repo', 1)).commits[0].hash).toBe('2')
+  expect((await contributionData('repo', 1, 2026, 9)).commits[0].hash).toBe('2')
+  // Each month is its own request and cache entry.
+  expect((await contributionData('repo', 1, 2026, 8)).commits[0].hash).toBe('3')
 })
 
 test('LG-073 graph refreshes after history ticks, debounces and labels bounded coverage', async () => {
@@ -81,7 +83,7 @@ test('LG-073 graph refreshes after history ticks, debounces and labels bounded c
   graph.render('ContributionGraph', { repoPath: 'repo' })
   graph.effects[0](); await timer(); await flush()
   let tree = graph.render('ContributionGraph', { repoPath: 'repo' })
-  expect(JSON.stringify(tree)).toContain('Coverage: ')
+  expect(JSON.stringify(tree)).toContain('commits loaded for this month')
   state.historyTick = 1
   graph.render('ContributionGraph', { repoPath: 'repo' })
   graph.effects[0]()
@@ -91,8 +93,8 @@ test('LG-073 graph refreshes after history ticks, debounces and labels bounded c
   tree = graph.render('ContributionGraph', { repoPath: 'repo' })
   const previous = find(tree, n => n.type?.name === 'NavButton' && n.props.children[0] === '‹').props.onClick
   for (let i = 0; i < 20; i++) previous()
-  const year = graph.slots[4]
-  expect(year).toBeGreaterThanOrEqual(new Date().getFullYear() - 5)
+  const shown = graph.slots[4]
+  expect(shown.year * 12 + shown.month).toBeGreaterThanOrEqual(new Date().getUTCFullYear() * 12 + new Date().getUTCMonth() - 60)
 })
 
 test('LG-080 diff options and theme follow live appearance settings without remounting', () => {

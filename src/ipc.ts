@@ -740,7 +740,7 @@ export interface LucidGitAPI {
   pushLockCheck: (repoPath: string) => Promise<PushLockCheck>
   pull: (repoPath: string) => Promise<void>
   fetch: (repoPath: string, background?: boolean) => Promise<void>
-  log: (repoPath: string, args?: { limit?: number; all?: boolean; filePath?: string; refs?: string[] }) => Promise<CommitEntry[]>
+  log: (repoPath: string, args?: { limit?: number; all?: boolean; filePath?: string; refs?: string[]; since?: string; until?: string }) => Promise<CommitEntry[]>
   changelog: (repoPath: string, query: ChangelogQuery) => Promise<ChangelogEntry[]>
   commitFiles: (repoPath: string, hash: string) => Promise<CommitFileChange[]>
   branchList:    (repoPath: string) => Promise<BranchInfo[]>

@@ -912,8 +912,8 @@ function LegendItem({ symbol, label, color }: { symbol: string; label: string; c
 
 // ── Main panel ─────────────────────────────────────────────────────────────────
 
-const INITIAL_LIMIT  = 300
-const MORE_INCREMENT = 300
+const INITIAL_LIMIT  = 150
+const MORE_INCREMENT = 150
 
 export function HistoryPanel({ repoPath }: HistoryPanelProps) {
   const opRun        = useOperationStore(s => s.run)

@@ -424,6 +424,41 @@ class GitService {
   }
 
   /**
+   * Status for background monitors only (PR monitor, conflict forecast).
+   *
+   * Shares one scan between callers and reuses it for a few seconds. Nothing the
+   * user sees or acts on may use this: the Changes panel, commit, pull, push,
+   * merge, stash and unlock all call status() for a fresh scan. A write dropping
+   * the entry (invalidateStatusCache) means a monitor never reads a result that
+   * started before it. Failures are never cached.
+   */
+  async cachedStatus(repoPath: string): Promise<FileStatus[]> {
+    const key = path.resolve(repoPath).toLowerCase()
+    const generation = this._statusGeneration.get(key) ?? 0
+    const cached = this._statusCache.get(key)
+    if (cached && Date.now() - cached.ts < GitService.STATUS_TTL) return cached.value.slice()
+    const pending = this._statusInFlight.get(key)
+    if (pending && pending.generation === generation) return (await pending.request).slice()
+
+    const request = this.status(repoPath).then(value => {
+      // A write finished while this scan ran, so its answer may predate that write.
+      if ((this._statusGeneration.get(key) ?? 0) === generation) this._statusCache.set(key, { ts: Date.now(), value })
+      return value
+    }).finally(() => {
+      if (this._statusInFlight.get(key)?.request === request) this._statusInFlight.delete(key)
+    })
+    this._statusInFlight.set(key, { generation, request })
+    return (await request).slice()
+  }
+
+  /** Forget cached status after anything that can change the working tree or index. */
+  invalidateStatusCache(repoPath: string): void {
+    const key = path.resolve(repoPath).toLowerCase()
+    this._statusCache.delete(key)
+    this._statusGeneration.set(key, (this._statusGeneration.get(key) ?? 0) + 1)
+  }
+
+  /**
    * Paths still unmerged in the index. Reads index entries only: the previous
    * `git diff --diff-filter=U` stat-scanned the whole working tree (seconds on
    * a 50k-file Unreal repo) and polled via mergeInProgress on every refresh.
@@ -1648,11 +1683,15 @@ class GitService {
    *  Timeline / History to read top-to-bottom newest-to-oldest. */
   async log(
     repoPath: string,
-    args: { limit?: number; all?: boolean; filePath?: string; refs?: string[] } = {}
+    args: { limit?: number; all?: boolean; filePath?: string; refs?: string[]; since?: string; until?: string } = {}
   ): Promise<CommitEntry[]> {
     const cmdArgs = ['log', `--format=${GIT_LOG_FORMAT}`, '--author-date-order']
     if (args.all && !args.filePath && !args.refs?.length) cmdArgs.push('--all')
     if (args.limit) cmdArgs.push(`-${args.limit}`)
+    // ISO dates only: the value goes straight onto the git command line.
+    const isoDate = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}Z)?$/
+    if (args.since && isoDate.test(args.since)) cmdArgs.push(`--since=${args.since}`)
+    if (args.until && isoDate.test(args.until)) cmdArgs.push(`--until=${args.until}`)
     if (args.refs?.length) cmdArgs.push(...args.refs)
     if (args.filePath) cmdArgs.push('--follow', '--', args.filePath)
 
@@ -3029,6 +3068,10 @@ ${lastError}` : '')
   // nothing in the app ever changes. Short TTL so a remote reconfigured outside
   // Lucid Git is still picked up promptly.
   private _remoteUrlCache = new Map<string, { ts: number; value: string | null }>()
+  private _statusCache = new Map<string, { ts: number; value: FileStatus[] }>()
+  private _statusInFlight = new Map<string, { generation: number; request: Promise<FileStatus[]> }>()
+  private _statusGeneration = new Map<string, number>()
+  private static readonly STATUS_TTL = 3000
   private _remoteUrlInFlight = new Map<string, Promise<string | null>>()
   private static readonly REMOTE_URL_TTL = 5 * 60 * 1000 // 5 minutes
 

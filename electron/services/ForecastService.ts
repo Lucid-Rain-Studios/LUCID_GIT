@@ -125,7 +125,7 @@ class ForecastService {
     if (this.status.get(repoPath) !== expected) return
 
     // 2. Get locally modified files (staged + unstaged)
-    const modifiedFiles = new Set((await gitService.status(repoPath)).map(file => file.path))
+    const modifiedFiles = new Set((await gitService.cachedStatus(repoPath)).map(file => file.path))
 
     // 3. Get current branch
     const branchRes = await execSafe(['rev-parse', '--abbrev-ref', 'HEAD'], repoPath)

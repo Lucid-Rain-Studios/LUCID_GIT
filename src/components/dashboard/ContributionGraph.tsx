@@ -33,14 +33,14 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
   const [identity, setIdentity] = useState<{ name: string; email: string }>({ name: '', email: '' })
   const [view, setView] = useState<'you' | 'team'>('you')
   const [loading, setLoading] = useState(true)
-  const [currentYear, setCurrentYear] = useState(() => new Date().getFullYear())
+  const [shown, setShown] = useState(() => { const now = new Date(); return { year: now.getUTCFullYear(), month: now.getUTCMonth() } })
 
   // Load commits on mount and when repoPath changes
   useEffect(() => {
     let mounted = true
     setLoading(true)
 
-    const timer = setTimeout(() => contributionData(repoPath, historyTick)
+    const timer = setTimeout(() => contributionData(repoPath, historyTick, shown.year, shown.month)
       .then(({ commits: data, identity: gitIdentity }) => {
         if (mounted) {
           setCommits(data)
@@ -56,7 +56,7 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
       }), 150)
 
     return () => { mounted = false; clearTimeout(timer) }
-  }, [repoPath, historyTick])
+  }, [repoPath, historyTick, shown])
 
   const visibleCommits = useMemo(() => {
     if (view === 'team') return commits
@@ -71,46 +71,42 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
 
   // Compute activity data for the last 1825 days
   const activity = useMemo(() => computeActivity(visibleCommits, 1825), [visibleCommits])
-  const coveredDates = [...activity.keys()].sort()
-  const firstDate = coveredDates[0] ?? toDateKey(Date.now())
-  const lastDate = coveredDates[coveredDates.length - 1] ?? firstDate
-  const firstYear = Number(firstDate.slice(0, 4))
-  const lastYear = Number(lastDate.slice(0, 4))
-
-  const goToPreviousYear = useCallback(() => setCurrentYear(y => Math.max(firstYear, y - 1)), [firstYear])
-  const goToNextYear     = useCallback(() => setCurrentYear(y => Math.min(lastYear, y + 1)), [lastYear])
-  const goToThisYear     = useCallback(() => setCurrentYear(new Date().getFullYear()), [])
-
   const todayKey = toDateKey(Date.now())
+  const nowDate = new Date()
+  const thisMonthIndex = nowDate.getUTCFullYear() * 12 + nowDate.getUTCMonth()
+  const shownIndex = shown.year * 12 + shown.month
+  const oldestIndex = thisMonthIndex - 60 // computeActivity keeps five years
+  const goToMonth = useCallback((index: number) => {
+    setShown({ year: Math.floor(index / 12), month: index % 12 })
+  }, [])
+  const goToPreviousMonth = useCallback(() => goToMonth(Math.max(oldestIndex, shownIndex - 1)), [goToMonth, oldestIndex, shownIndex])
+  const goToNextMonth     = useCallback(() => goToMonth(Math.min(thisMonthIndex, shownIndex + 1)), [goToMonth, thisMonthIndex, shownIndex])
+  const goToThisMonth     = useCallback(() => goToMonth(thisMonthIndex), [goToMonth, thisMonthIndex])
 
-  const yearActivity = useMemo(() => {
-    const prefix = `${currentYear}-`
+  const monthActivity = useMemo(() => {
+    const prefix = `${shown.year}-${String(shown.month + 1).padStart(2, '0')}-`
     const filtered = new Map<string, DayActivity>()
     for (const [key, val] of activity) {
       if (key.startsWith(prefix)) filtered.set(key, val)
     }
     return filtered
-  }, [activity, currentYear])
+  }, [activity, shown])
 
-  const stats = useMemo(() => calculateStats(yearActivity), [yearActivity])
+  const stats = useMemo(() => calculateStats(monthActivity), [monthActivity])
 
-  // Calculate visible weeks for year view
+  // Weeks covering the shown month, Monday first
   const { yearWeeks, monthLabels, overflowKeys } = useMemo(() => {
-    // Grid bounds — all UTC
-    const jan1  = new Date(Date.UTC(currentYear, 0, 1))
-    const dec31 = new Date(Date.UTC(currentYear, 11, 31))
+    const first = new Date(Date.UTC(shown.year, shown.month, 1))
+    const last  = new Date(Date.UTC(shown.year, shown.month + 1, 0))
     const getMondayFirstDay = (date: Date) => (date.getUTCDay() + 6) % 7
 
-    // Monday on or before Jan 1
-    const gridStart = new Date(jan1)
+    const gridStart = new Date(first)
     gridStart.setUTCDate(gridStart.getUTCDate() - getMondayFirstDay(gridStart))
-
-    // Sunday on or after Dec 31
-    const gridEnd = new Date(dec31)
+    const gridEnd = new Date(last)
     gridEnd.setUTCDate(gridEnd.getUTCDate() + (6 - getMondayFirstDay(gridEnd)))
 
-    const jan1Key  = toDateKey(jan1.getTime())
-    const dec31Key = toDateKey(dec31.getTime())
+    const firstKey = toDateKey(first.getTime())
+    const lastKey  = toDateKey(last.getTime())
 
     const weeks: DayActivity[][] = []
     const overflow = new Set<string>()
@@ -120,8 +116,8 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
       const week: DayActivity[] = []
       for (let i = 0; i < 7; i++) {
         const key = toDateKey(cur.getTime())
-        if (key < jan1Key || key > dec31Key) overflow.add(key)
-        week.push(activity.get(key) ?? {
+        if (key < firstKey || key > lastKey) overflow.add(key)
+        week.push(monthActivity.get(key) ?? {
           date: key, count: 0, commits: [], authors: new Set(), filesChanged: 0,
         })
         cur.setUTCDate(cur.getUTCDate() + 1)
@@ -129,19 +125,8 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
       weeks.push(week)
     }
 
-    // Month label: find which week column the 1st of each month falls in
-    const labels: Array<{ label: string; weekIdx: number }> = []
-    for (let m = 0; m < 12; m++) {
-      const firstOfMonth = new Date(Date.UTC(currentYear, m, 1))
-      const daysSinceStart = (firstOfMonth.getTime() - gridStart.getTime()) / 86400000
-      const weekIdx = Math.floor(daysSinceStart / 7)
-      if (weekIdx >= 0 && weekIdx < weeks.length) {
-        labels.push({ label: SHORT_MONTHS[m], weekIdx })
-      }
-    }
-
-    return { yearWeeks: weeks, monthLabels: labels, overflowKeys: overflow }
-  }, [activity, currentYear])
+    return { yearWeeks: weeks, monthLabels: [{ label: `${SHORT_MONTHS[shown.month]} ${shown.year}`, weekIdx: 0 }], overflowKeys: overflow }
+  }, [monthActivity, shown])
 
   // SVG dimensions
   const svgWidth  = yearWeeks.length * (DAY_SIZE + DAY_GAP) + WEEKDAY_LABEL_WIDTH + 10
@@ -169,15 +154,14 @@ export function ContributionGraph({ repoPath }: ContributionGraphProps) {
             <Stat label="Current" value={`${stats.currentStreak}d`} />
           </div>
           <div style={{ display: 'flex', gap: 4 }}>
-            <NavButton onClick={goToPreviousYear}>‹</NavButton>
-            <NavButton onClick={goToThisYear}>{currentYear}</NavButton>
-            <NavButton onClick={goToNextYear}>›</NavButton>
+            <NavButton onClick={goToPreviousMonth}>‹</NavButton>
+            <NavButton onClick={goToThisMonth}>{SHORT_MONTHS[shown.month]} {shown.year}</NavButton>
+            <NavButton onClick={goToNextMonth}>›</NavButton>
           </div>
         </div>
 
         <div style={{ fontSize: 10, color: '#4a566a' }}>
-          Coverage: {firstDate} to {lastDate} · latest {commits.length.toLocaleString()} loaded commits (limit 10,000)
-          {commits.length >= 10000 && ' · older history may be incomplete'}
+          {SHORT_MONTHS[shown.month]} {shown.year} · {commits.length.toLocaleString()} commits loaded for this month
         </div>
         {/* Graph container */}
         <div style={{ overflowX: 'auto', paddingTop: 4 }}>

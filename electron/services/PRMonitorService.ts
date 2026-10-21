@@ -441,7 +441,7 @@ class PRMonitorService {
   }
 
   private async currentChangedFileSet(repoPath: string): Promise<Set<string>> {
-    const files = await gitService.status(repoPath)
+    const files = await gitService.cachedStatus(repoPath)
     return new Set(files.map(file => file.path))
   }
 

@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Menu, shell, ipcMain, dialog } from 'electron'
 import path from 'path'
+import fs from 'fs'
 import { autoUpdater } from 'electron-updater'
 import { registerHandlers, describeInFlightIpc, stopPresenceForQuit } from './ipc/handlers'
 import { CHANNELS } from './ipc/channels'
@@ -157,12 +158,16 @@ function fmt(bytes: number): string {
 let updateCheckTimer: NodeJS.Timeout | null = null
 let currentUpdateIntervalMs = 0
 
+// Unpacked or portable builds ship without app-update.yml; electron-updater then errors on every check.
+const updaterConfigured = !isDev && fs.existsSync(path.join(process.resourcesPath, 'app-update.yml'))
+
 function silentCheckForUpdates(): void {
+  if (!updaterConfigured) return
   autoUpdater.checkForUpdates().catch(() => { /* swallowed; the 'error' event already logs */ })
 }
 
 function applyUpdateCheckInterval(minutes: number): void {
-  if (isDev) return
+  if (!updaterConfigured) return
   const ms = Math.max(0, Math.floor(minutes)) * 60_000
   if (ms === currentUpdateIntervalMs) return
   currentUpdateIntervalMs = ms
@@ -318,7 +323,7 @@ function registerUpdaterHandlers() {
   }
 
   handle(CHANNELS.UPDATE_CHECK, async () => {
-    if (isDev) return { available: false, version: null as string | null, source: 'dev' as const }
+    if (!updaterConfigured) return { available: false, version: null as string | null, source: isDev ? 'dev' as const : 'unavailable' as const }
     try {
       const result = await autoUpdater.checkForUpdates()
       return {

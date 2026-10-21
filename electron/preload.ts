@@ -79,7 +79,7 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GIT_PULL, repoPath),
   fetch: (repoPath: string, background?: boolean) =>
     ipcRenderer.invoke(CHANNELS.GIT_FETCH, repoPath, background),
-  log: (repoPath: string, args?: { limit?: number; all?: boolean; filePath?: string; refs?: string[] }) =>
+  log: (repoPath: string, args?: { limit?: number; all?: boolean; filePath?: string; refs?: string[]; since?: string; until?: string }) =>
     ipcRenderer.invoke(CHANNELS.GIT_LOG, repoPath, args),
   changelog: (repoPath: string, query: { fromDate?: string; toDate?: string; fromCommit?: string; toCommit?: string; ref?: string }) =>
     ipcRenderer.invoke(CHANNELS.GIT_CHANGELOG, repoPath, query),
