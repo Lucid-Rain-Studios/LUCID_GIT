@@ -4,6 +4,21 @@ import type { RecoveryGitTask } from './indexRecoveryTypes'
 import type { BlueprintRequest } from './blueprintTypes'
 
 const api = {
+  openMergeWindow: (context: import('./mergeWindowTypes').MergeWindowContext): Promise<void> =>
+    ipcRenderer.invoke(CHANNELS.MERGE_WINDOW_OPEN, context),
+  mergeWindowContext: (): Promise<import('./mergeWindowTypes').MergeWindowContext> =>
+    ipcRenderer.invoke(CHANNELS.MERGE_WINDOW_CONTEXT),
+  closeMergeWindow: (): Promise<void> => ipcRenderer.invoke(CHANNELS.MERGE_WINDOW_CLOSE),
+  onMergeWindowCloseRequest: (cb: () => void) => {
+    const handler = () => cb()
+    ipcRenderer.on(CHANNELS.EVT_MERGE_WINDOW_CLOSE_REQUEST, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.EVT_MERGE_WINDOW_CLOSE_REQUEST, handler)
+  },
+  onMergeWindowClosed: (cb: (repoPath: string) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, repoPath: string) => cb(repoPath)
+    ipcRenderer.on(CHANNELS.EVT_MERGE_WINDOW_CLOSED, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.EVT_MERGE_WINDOW_CLOSED, handler)
+  },
   blueprintCompare: (repoPath: string, request: BlueprintRequest) => ipcRenderer.invoke(CHANNELS.BLUEPRINT_COMPARE, repoPath, request),
   blueprintCancel: (requestId: string) => ipcRenderer.invoke(CHANNELS.BLUEPRINT_CANCEL, requestId),
   nativeSceneRead: (key: string) => ipcRenderer.invoke(CHANNELS.NATIVE_SCENE_READ, key),

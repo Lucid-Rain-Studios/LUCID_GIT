@@ -1,5 +1,4 @@
 import { BINARY_EXTENSIONS } from '../util/binary-formats'
-import Database from 'better-sqlite3'
 import type { PushLockCheck, PushLockOverride } from '../pushTypes'
 import fs from 'fs'
 import os from 'os'
@@ -3106,7 +3105,7 @@ ${lastError}` : '')
 
   /**
    * Fast path for the "Clear Lock Cache" toolbar action: delete every Git LFS
-   * `lockcache.db` without the SQLite integrity inspection / double directory
+   * `lockcache.db` without the Git LFS snapshot inspection / double directory
    * walk that `lfsLocksMaintenance` performs. Returns the number of files removed.
    */
   async clearLfsLockCache(repoPath: string): Promise<number> {
@@ -3124,49 +3123,48 @@ ${lastError}` : '')
     return deleted
   }
 
-  private async inspectLfsLockCacheFile(filePath: string): Promise<LfsLockCacheFile> {
+  private async inspectLfsLockCacheFile(repoPath: string, filePath: string): Promise<LfsLockCacheFile> {
+    let snapshotDir: string | undefined
+    let sizeBytes = 0
     try {
       const stat = await fs.promises.stat(filePath)
+      sizeBytes = stat.size
       if (stat.size === 0) {
         return { path: filePath, sizeBytes: 0, exists: true, integrity: 'empty' }
       }
 
-      let db: Database.Database | null = null
-      try {
-        db = new Database(filePath, { readonly: true, fileMustExist: true })
-        const row = db.prepare('PRAGMA integrity_check').get() as Record<string, unknown> | undefined
-        const value = row ? String(Object.values(row)[0] ?? '') : ''
-        return {
-          path: filePath,
-          sizeBytes: stat.size,
-          exists: true,
-          integrity: value.toLowerCase() === 'ok' ? 'ok' : 'corrupt',
-          error: value && value.toLowerCase() !== 'ok' ? value : undefined,
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        if (/file is not a database|database disk image is malformed/i.test(message) && stat.size < 1024) {
-          return {
-            path: filePath,
-            sizeBytes: stat.size,
-            exists: true,
-            integrity: 'stale',
-            error: 'Small unreadable lock cache; clearing and refreshing is recommended.',
-          }
-        }
-        return {
-          path: filePath,
-          sizeBytes: stat.size,
-          exists: true,
-          integrity: 'corrupt',
-          error: message,
-        }
-      } finally {
-        db?.close()
+      // Git LFS uses Go gob, not SQLite. Let the installed Git LFS decode an
+      // isolated copy, offline; never let a diagnostic rewrite the real cache.
+      snapshotDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'lucid-lock-check-'))
+      await fs.promises.copyFile(filePath, path.join(snapshotDir, 'lockcache.db'))
+      const check = await withGitTimeout(() => execSafe([
+        '-c', `lfs.storage=${snapshotDir}`, 'lfs', 'locks', '--local', '--json',
+      ], repoPath, { LC_ALL: 'C', LANG: 'C', GIT_OPTIONAL_LOCKS: '0' }), 10_000, 'Checking local LFS lock cache')
+      const current = await fs.promises.stat(filePath)
+      if (current.size !== stat.size || current.mtimeMs !== stat.mtimeMs || current.ctimeMs !== stat.ctimeMs || current.ino !== stat.ino) {
+        return { path: filePath, sizeBytes: current.size, exists: true, integrity: 'unknown', error: 'Lock cache changed while it was being checked. Run Check Locks again.' }
       }
-    } catch {
-      return { path: filePath, sizeBytes: 0, exists: false, integrity: 'missing' }
+      if (check.exitCode === 0) {
+        return { path: filePath, sizeBytes, exists: true, integrity: 'ok' }
+      }
+      const message = check.stderr.trim() || check.stdout.trim() || `Git LFS exited with code ${check.exitCode}.`
+      // Permission, unsupported-tool and process failures do not prove damaged
+      // bytes. Only the native decoder's explicit data errors mean corruption.
+      const corrupt = /(?:problem checking version of key\/value data|problem reading updated key\/value data)[\s\S]*:\s*(?:gob:|(?:unexpected )?EOF\b)/i.test(message)
+      return { path: filePath, sizeBytes, exists: true, integrity: corrupt ? 'corrupt' : 'unknown', error: message.split(snapshotDir).join(path.dirname(filePath)) }
+    } catch (error) {
+      const missing = (error as NodeJS.ErrnoException).code === 'ENOENT' && !snapshotDir
+      return { path: filePath, sizeBytes, exists: !missing, integrity: missing ? 'missing' : 'unknown', error: missing ? undefined : String(error) }
+    } finally {
+      if (snapshotDir) await fs.promises.rm(snapshotDir, { recursive: true, force: true })
     }
+  }
+
+  private async inspectLfsLockCaches(repoPath: string, paths: string[]): Promise<LfsLockCacheFile[]> {
+    const files: LfsLockCacheFile[] = []
+    // One offline decoder at a time, regardless of how many old caches exist.
+    for (const filePath of paths) files.push(await this.inspectLfsLockCacheFile(repoPath, filePath))
+    return files
   }
 
   private parseLfsLocksCount(stdout: string): number | null {
@@ -3207,13 +3205,12 @@ ${lastError}` : '')
 
   async lfsLocksMaintenance(repoPath: string, repair: boolean): Promise<LfsLocksMaintenanceResult> {
     const beforePaths = await this.findLfsLockCacheFiles(repoPath)
-    // A repair deletes every cache database, so running SQLite's full
-    // integrity_check first only adds work (and can be very slow for a large
-    // lock cache). Checks still inspect the existing files; repairs validate
+    // A repair deletes every cache database, so inspecting it first only adds
+    // work. Checks inspect the existing files; repairs validate
     // only the cache rebuilt by Git LFS below.
     const before = repair
       ? []
-      : await Promise.all(beforePaths.map(filePath => this.inspectLfsLockCacheFile(filePath)))
+      : await this.inspectLfsLockCaches(repoPath, beforePaths)
     const deletedLockCacheFiles: string[] = []
 
     if (repair) {
@@ -3230,17 +3227,19 @@ ${lastError}` : '')
     const verify = await this.runLfsLocksCheck(repoPath)
     const afterPaths = repair ? await this.findLfsLockCacheFiles(repoPath) : beforePaths
     const after = repair
-      ? await Promise.all(afterPaths.map(filePath => this.inspectLfsLockCacheFile(filePath)))
+      ? await this.inspectLfsLockCaches(repoPath, afterPaths)
       : before
 
     const lockCount = this.parseLfsLocksCount(verify.stdout)
-    const corruptCount = after.filter(file => file.integrity === 'corrupt' || file.integrity === 'empty').length
+    const corruptCount = after.filter(file => file.integrity === 'corrupt').length
+    const unknownCount = after.filter(file => file.integrity === 'unknown' || file.integrity === 'missing').length
     const staleCount = after.filter(file => file.integrity === 'stale').length
-    const hasErrors = verify.exitCode !== 0 || corruptCount > 0
+    const hasErrors = verify.exitCode !== 0 || corruptCount > 0 || unknownCount > 0
     const summaryText = hasErrors
       ? [
           verify.exitCode !== 0 ? 'Git LFS lock verification failed.' : '',
           corruptCount > 0 ? `${corruptCount} lock cache file${corruptCount === 1 ? '' : 's'} need attention.` : '',
+          unknownCount > 0 ? `${unknownCount} lock cache file${unknownCount === 1 ? '' : 's'} could not be checked.` : '',
         ].filter(Boolean).join(' ')
       : [
           verify.usedVerify ? 'Git LFS locks verified' : 'Git LFS locks checked',

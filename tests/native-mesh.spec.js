@@ -4,7 +4,7 @@ const { execFileSync } = require('node:child_process')
 const { EventEmitter } = require('node:events')
 const { DIST, tmpDir, cleanup, git } = require('./helpers')
 const { component } = require('./renderer-harness')
-const { NativeMeshService, validateNativeGeometry } = require(path.join(DIST, 'services/NativeMeshService'))
+const { NativeMeshService, validateNativeGeometry, MAX_SOURCE_VERTICES, MAX_SOURCE_TRIANGLES } = require(path.join(DIST, 'services/NativeMeshService'))
 const { ueHeadlessService } = require(path.join(DIST, 'services/UEHeadlessService'))
 const root = path.resolve(__dirname, '..')
 const mesh = { id:'',name:'SavedName',path:'SavedName',classPath:'/Script/Engine.StaticMesh',outer:'',properties:{},decoded:true,opaqueBytes:0,opaqueHash:'',diagnostics:[] }
@@ -99,11 +99,21 @@ test('real warm worker exports distinct package paths and removes its idle works
 
 test('native geometry validator rejects invalid topology, counts, duplicates and output budgets', () => {
   expect(validateNativeGeometry(geometry()).lods).toHaveLength(2)
-  for (const mutate of [g=>g.lods[0].vertices[0][0]=Infinity,g=>g.lods[0].indices[0]=8,g=>g.lods[0].indices.push(1),g=>g.lods[0].vertexCount=4,g=>g.lods[1].index=0,g=>g.lods[0].reason='omitted',g=>g.lods[0].vertices=Array.from({length:20001},()=>[0,0,0]),g=>g.totalLods=-1]) {
+  for (const mutate of [g=>g.lods[0].vertices[0][0]=Infinity,g=>g.lods[0].indices[0]=8,g=>g.lods[0].indices.push(1),g=>g.lods[0].vertexCount=4,g=>g.lods[1].index=0,g=>g.lods[0].reason='omitted',g=>g.lods[0].vertices=Array.from({length:MAX_SOURCE_VERTICES+1},()=>[0,0,0]),g=>g.totalLods=-1]) {
     const data=geometry();mutate(data);expect(()=>validateNativeGeometry(data)).toThrow()
   }
   const data=geometry();data.lods[0]={index:0,vertexCount:100000,triangleCount:200000,vertices:[],indices:[],reason:'Budget exceeded'}
   expect(validateNativeGeometry(data).lods[0].vertexCount).toBe(100000)
+})
+
+test('large source geometry is accepted at the new limits and aggregate LOD budgets still apply', () => {
+  const data=geometry();data.lods=data.lods.slice(0,1)
+  const lod=data.lods[0]
+  lod.vertices=Array.from({length:MAX_SOURCE_VERTICES},(_,i)=>[i%500,Math.floor(i/500),0]);lod.vertexCount=lod.vertices.length
+  lod.indices=Array.from({length:MAX_SOURCE_TRIANGLES*3},(_,i)=>i%lod.vertices.length);lod.triangleCount=MAX_SOURCE_TRIANGLES
+  expect(validateNativeGeometry(data).lods[0].vertices).toHaveLength(MAX_SOURCE_VERTICES)
+  data.lods.push(geometry().lods[1]);expect(()=>validateNativeGeometry(data)).toThrow('oversized')
+  data.lods.pop();lod.indices.push(0,1,2);lod.triangleCount++;expect(()=>validateNativeGeometry(data)).toThrow('oversized')
 })
 
 test('source geometry resolves one mesh root and does not substitute a missing revision LOD', () => {
@@ -194,9 +204,9 @@ test('cancelled queued native exports release their queue entries without spawni
   } finally {ueHeadlessService.findEditorBinary=original.find;ueHeadlessService.runCommandlet=original.run}
 })
 
-for(const kind of ['static','skeletal']) test(`real ${kind} mesh exports bounded source LODs from immutable Git revisions without changing assets`, async ({}, testInfo) => {
+for(const kind of ['static','skeletal','large static']) test(`real ${kind} mesh exports bounded source LODs from immutable Git revisions without changing assets`, async ({}, testInfo) => {
   test.setTimeout(300000)
-  const fixture=process.env[kind==='static'?'UNREAL_NATIVE_MESH':'UNREAL_NATIVE_SKELETAL']
+  const fixture=process.env[kind==='static'?'UNREAL_NATIVE_MESH':kind==='skeletal'?'UNREAL_NATIVE_SKELETAL':'UNREAL_NATIVE_LARGE_MESH']
   test.skip(!fixture,'Enable a local source mesh fixture and matching installed Unreal engine')
   const before=fs.readFileSync(fixture),repo=tmpDir('lg-native-real-'),cache=tmpDir('lg-native-real-cache-'),file='Content/Meshes/Renamed.uasset'
   git(repo,'init','-q');git(repo,'config','user.name','Test');git(repo,'config','user.email','test@example.com');fs.mkdirSync(path.dirname(path.join(repo,file)),{recursive:true});fs.copyFileSync(fixture,path.join(repo,file));git(repo,'add','-A');git(repo,'commit','-qm','mesh');const commit=git(repo,'rev-parse','HEAD').trim()
@@ -208,6 +218,12 @@ for(const kind of ['static','skeletal']) test(`real ${kind} mesh exports bounded
   const result=await service.compare(repo,{filePath:file,leftRef:'ABSENT',rightRef:commit,requestId:'native-real',nativeGeometry:true})
   expect(result.right.status).toBe('ready');expect(result.right.resolvedRef).toBe(commit);expect(result.right.geometry.reason).toBeUndefined();expect(result.right.geometry.status).toBe('ready');expect(result.right.geometry.totalLods).toBeGreaterThan(0)
   if(kind==='static')expect(result.right.geometry.lods[0]).toMatchObject({vertexCount:8,triangleCount:12})
+  if(kind==='large static') {
+    const lod=result.right.geometry.lods[0]
+    expect(lod.vertexCount>20000 || lod.triangleCount>10000).toBe(true)
+    expect(lod.vertices.length).toBe(lod.vertexCount);expect(lod.indices.length/3).toBe(lod.triangleCount)
+    if(process.env.UNREAL_NATIVE_LARGE_OUTPUT)fs.writeFileSync(process.env.UNREAL_NATIVE_LARGE_OUTPUT,JSON.stringify(result.right.geometry))
+  }
   expect(result.right.geometry.lods.some(lod=>lod.vertices.length>0)).toBe(true)
   const evidence={kind,engine:result.right.geometry.engineVersion,totalLods:result.right.geometry.totalLods,sourceBytes:result.right.sourceBytes,geometryBytes:Buffer.byteLength(JSON.stringify(result.right.geometry)),lods:result.right.geometry.lods.map(({index,vertexCount,triangleCount,reason})=>({index,vertexCount,triangleCount,reason}))}
   console.log('Native fixture evidence:',JSON.stringify(evidence))

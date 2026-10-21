@@ -11,6 +11,7 @@ import { shutdownGitProcesses, describeLiveGitProcesses } from './util/dugite-ex
 import { shutdownRepoGate } from './util/repo-gate'
 import { showRecovery } from './services/RecoveryService'
 import { attachTextContextMenu } from './util/text-context-menu'
+import { MergeWindowService } from './services/MergeWindowService'
 
 const isDev = !app.isPackaged
 const openDevToolsOnStart = process.env.LUCID_OPEN_DEVTOOLS === '1'
@@ -29,6 +30,7 @@ autoUpdater.autoInstallOnAppQuit = true
 autoUpdater.logger           = null   // suppress verbose logging in prod
 
 let mainWin: BrowserWindow | null = null
+const mergeWindows = new MergeWindowService(() => mainWin, () => quitReady)
 // Session-only: remind again on the next launch, including after an update.
 const promptedUpdateVersions = new Set<string>()
 
@@ -220,6 +222,8 @@ function createWindow(): BrowserWindow {
 
   mainWin = win
 
+  win.on('close', event => mergeWindows.closeWithParent(event))
+
   win.on('closed', () => {
     watcherService.unwatchAll()
     mainWin = null
@@ -351,6 +355,7 @@ app.whenReady().then(() => {
   registerHandlers()
   registerUpdaterHandlers()
   registerWindowHandlers()
+  mergeWindows.register()
   settingsService.onChange((next) => applyUpdateCheckInterval(next.updateCheckIntervalMinutes))
   createWindow()
 

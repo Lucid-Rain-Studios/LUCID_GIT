@@ -2,6 +2,7 @@
 import type { IndexDiagnosis, IndexRepairResult, IndexRecoveryBlockers, IndexLockRecoveryResult, RecoveryGitTask } from '../electron/indexRecoveryTypes'
 import type { BlueprintRequest, BlueprintComparison } from '../electron/blueprintTypes'
 import { createBlueprintClient } from './lib/blueprintClient'
+import { observeRepositoryDiagnostic } from './stores/repositoryIssueStore'
 import type { PushLockCheck, PushLockOverride } from '../electron/pushTypes'
 export type { BlueprintRequest, BlueprintComparison, BlueprintDocument, BlueprintGraph, BlueprintNode, BlueprintPin, BlueprintSide } from '../electron/blueprintTypes'
 export type { IndexDiagnosis, IndexRepairResult, IndexRecoveryBlockers, IndexLockRecoveryResult, RecoveryGitTask } from '../electron/indexRecoveryTypes'
@@ -691,6 +692,11 @@ export type RepoPermission = 'admin' | 'write' | 'read'
 // ── API surface type ──────────────────────────────────────────────────────────
 
 export interface LucidGitAPI {
+  openMergeWindow: (context: import('../electron/mergeWindowTypes').MergeWindowContext) => Promise<void>
+  mergeWindowContext: () => Promise<import('../electron/mergeWindowTypes').MergeWindowContext>
+  closeMergeWindow: () => Promise<void>
+  onMergeWindowCloseRequest: (cb: () => void) => () => void
+  onMergeWindowClosed: (cb: (repoPath: string) => void) => () => void
   // OS dialogs + shell
   openDirectory:  () => Promise<string | null>
   openFile:       (defaultPath?: string) => Promise<string | null>
@@ -1008,6 +1014,7 @@ function logRendererEvent(source: string, message: string, detail?: unknown): vo
 
 function wrapApi<T extends LucidGitAPI>(api: T): T {
   const wrapped: Partial<T> = {}
+  const diagnosticRequests = new Map<string, symbol>()
 
   for (const key of Object.keys(api) as Array<keyof T>) {
     const value = api[key]
@@ -1017,16 +1024,29 @@ function wrapApi<T extends LucidGitAPI>(api: T): T {
     }
 
     wrapped[key] = ((...args: unknown[]) => {
+        const group = ['diagnoseIndex', 'repairIndex', 'undoIndexRepair'].includes(String(key)) ? 'index'
+          : ['lfsLocksCheck', 'lfsLocksRepair', 'clearLockCache'].includes(String(key)) ? 'lock-cache' : null
+        const requestKey = group && typeof args[0] === 'string' ? `${args[0]}\0${group}` : null
+        const request = Symbol()
+        if (requestKey) diagnosticRequests.set(requestKey, request)
+        const observe = (value: unknown, failure = false) => {
+          if (!requestKey || diagnosticRequests.get(requestKey) === request) observeRepositoryDiagnostic(String(key), args[0], value, failure)
+        }
+        const finish = () => { if (requestKey && diagnosticRequests.get(requestKey) === request) diagnosticRequests.delete(requestKey) }
         try {
           const result = value.apply(api, args)
           if (result && typeof result.then === 'function') {
-            return result.catch((error: unknown) => {
+            return result.then((value: unknown) => { observe(value); return value }).catch((error: unknown) => {
+              observe(error, true)
               logRendererEvent(`renderer.ipc.${String(key)}`, `IPC call failed: ${describeUnknown(error)}`, { args, error })
               throw error
-            })
+            }).finally(finish)
           }
+          finish()
           return result
         } catch (error) {
+          observe(error, true)
+          finish()
           logRendererEvent(`renderer.ipc.${String(key)}`, `IPC call threw synchronously: ${describeUnknown(error)}`, { args, error })
           throw error
         }

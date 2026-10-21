@@ -125,6 +125,7 @@ test('Locked Files keeps live progress, all failures and completed results visib
   const op = { steps: [], start() { this.steps = [] }, finish() {} }
   const state = { locks, loadLocks() {}, unlockFiles: () => fail ? Promise.reject(Error('offline')) : new Promise(r => { resolve = r }) }
   const c = component('src/components/locks/LockedFilesPanel.tsx', {
+    '@/lib/useBlueprintFileMenu': { useBlueprintFileMenu: () => ({}) },
     '@/stores/lockStore': { useLockStore: store(state) },
     '@/stores/authStore': { useAuthStore: store({ accounts: [{ userId: 'me', login: 'me' }], currentAccountId: 'me', isAdmin: () => false }) },
     '@/stores/dialogStore': { useDialogStore: store({ confirm: async () => true, alert: async () => {} }) },

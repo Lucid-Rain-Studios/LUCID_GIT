@@ -26,6 +26,7 @@ import { useDialogStore } from '@/stores/dialogStore'
 import { setTopBarSyncHandlers, updateTopBarSyncSnapshot, hasBranchIntegrated, markBranchIntegrated } from '@/lib/topBarSyncBridge'
 import { ActionBtn } from '@/components/ui/ActionBtn'
 import { RepositoryRefreshWarning } from './RepositoryRefreshWarning'
+import { RepositoryErrorIndicator } from './RepositoryErrorIndicator'
 
 interface TopBarProps {
   onOpen:           () => void
@@ -762,6 +763,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
           {repoPath && (
             <>
               <RepositoryRefreshWarning key={repoPath} />
+              <RepositoryErrorIndicator key={`error:${repoPath}`} />
               <FetchPullSplitBtn
                 fetchLabel={fetchButtonLabel(busyState)}
                 pullLabel={pullButtonLabel(busyState)}

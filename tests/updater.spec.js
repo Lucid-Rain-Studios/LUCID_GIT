@@ -50,6 +50,7 @@ function launch({ response = 1, downloadError, packaged = true, checkError, vers
       if (name === 'path') return path
       if (name === 'electron-updater') return { autoUpdater: updater }
       if (name === './ipc/channels') return { CHANNELS }
+      if (name === './services/MergeWindowService') return { MergeWindowService: class { register() {} closeWithParent() {} } }
       if (name === './services/RecoveryService') return { showRecovery: (...args) => recoveries.push(args) }
       if (name === './ipc/handlers') return { registerHandlers: () => { if(bootstrapError) throw Error(bootstrapError) }, describeInFlightIpc: noop,
         stopPresenceForQuit: () => { presenceStops++; return presenceDrain() } }

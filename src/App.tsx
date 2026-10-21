@@ -3,6 +3,7 @@ import { ipc, logUiError } from './ipc'
 import { applyAppearanceSettings } from './lib/appearance'
 import { AppShell } from './components/layout/AppShell'
 import { DisabledButtonTooltip } from './components/ui/DisabledButtonTooltip'
+import { MergeWindow } from './components/merge/MergeWindow'
 
 export function App() {
   useEffect(() => {
@@ -33,7 +34,7 @@ export function App() {
 
   return (
     <>
-      <AppShell />
+      {new URLSearchParams(window.location.search).get('window') === 'merge' ? <MergeWindow /> : <AppShell />}
       <DisabledButtonTooltip />
     </>
   )

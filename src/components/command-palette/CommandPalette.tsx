@@ -1,9 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { Command } from 'cmdk'
-import { ipc, RepoSearchResult, UndoInfo } from '@/ipc'
+import { ipc, RepoSearchResult } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useAuthStore } from '@/stores/authStore'
-import { useDialogStore } from '@/stores/dialogStore'
 import { cn } from '@/lib/utils'
 import { markFetchPerformed } from '@/lib/fetchState'
 import { getTopBarSyncHandlers, getTopBarSyncSnapshot } from '@/lib/topBarSyncBridge'
@@ -59,23 +58,19 @@ export function CommandPalette({
 }: CommandPaletteProps) {
   const { repoPath, refreshStatus, bumpSyncTick } = useRepoStore()
   const { accounts, currentAccountId } = useAuthStore()
-  const dialog = useDialogStore()
   const [syncing, setSyncing] = useState(false)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<RepoSearchResult | null>(null)
-  const [undoInfo, setUndoInfo] = useState<UndoInfo | null>(null)
 
   const run = useCallback((fn: () => void | Promise<void>) => {
     onClose()
     void fn()
   }, [onClose])
 
-  // Load undo availability + reset search whenever the palette opens.
+  // Reset search whenever the palette closes.
   useEffect(() => {
     if (!open) { setQuery(''); setResults(null); return }
-    if (repoPath) ipc.undoGet(repoPath).then(setUndoInfo).catch(() => setUndoInfo(null))
-    else setUndoInfo(null)
-  }, [open, repoPath])
+  }, [open])
 
   // Debounced global search across commits / branches / files.
   useEffect(() => {
@@ -86,22 +81,6 @@ export function CommandPalette({
     }, 150)
     return () => { cancelled = true; window.clearTimeout(t) }
   }, [open, repoPath, query])
-
-  const doUndo = async () => {
-    if (!repoPath || !undoInfo) return
-    const label = undoInfo.label
-    onClose()
-    const ok = await dialog.confirm({
-      title: `Undo ${label.toLowerCase()}?`,
-      message: `This restores your repository to the state from before the ${label.toLowerCase()}.`,
-      detail: 'Any work in progress is re-applied from the automatic snapshot.',
-      confirmLabel: 'Undo',
-      danger: true,
-    })
-    if (!ok) return
-    await ipc.undoLast(repoPath).catch(() => {})
-    refreshStatus(); bumpSyncTick()
-  }
 
   const revealFile = (file: string) => {
     const full = `${repoPath}/${file}`.replace(/\//g, '\\')
@@ -176,13 +155,6 @@ export function CommandPalette({
       disabled: !repoPath,
       action: () => run(doPush),
     },
-    ...(undoInfo ? [{
-      id: 'repo-undo',
-      group: 'Repository',
-      label: `Undo ${undoInfo.label.toLowerCase()}`,
-      keywords: 'undo revert back checkpoint restore safety',
-      action: () => doUndo(),
-    }] : []),
     {
       id: 'repo-refresh',
       group: 'Repository',

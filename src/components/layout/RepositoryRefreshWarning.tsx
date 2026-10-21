@@ -30,14 +30,14 @@ export function RepositoryRefreshWarning() {
         onBlur={() => setAnchor(null)}
         onKeyDown={event => { if (event.key === 'Escape') setAnchor(null) }}
         onClick={() => { void refreshStatus() }}
-        className="relative flex items-center justify-center rounded hover:bg-lg-bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-lg-warning disabled:cursor-wait"
-        style={{ width: 30, height: 30, flexShrink: 0, color: 'var(--lg-warning)' }}
+        className="lg-toolbar-control lg-icon-control relative flex items-center justify-center hover:bg-lg-bg-hover transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-lg-warning"
+        style={{ width: 32, height: 28, padding: 0, border: 0, borderRadius: 5, flexShrink: 0, cursor: isLoading ? 'wait' : 'pointer', color: 'var(--lg-warning)' }}
       >
-        <RefreshCw size={18} aria-hidden="true" className={isLoading ? 'animate-spin motion-reduce:animate-none' : undefined} />
+        <RefreshCw size={14} aria-hidden="true" className={isLoading ? 'animate-spin motion-reduce:animate-none' : undefined} />
         <span aria-hidden="true" style={{
-          position: 'absolute', right: 0, top: 0, width: 12, height: 12,
+          position: 'absolute', right: 2, top: 1, width: 10, height: 10,
           borderRadius: '50%', background: 'var(--lg-warning)', color: 'var(--lg-bg-primary)',
-          fontSize: 10, fontWeight: 800, lineHeight: '12px', textAlign: 'center',
+          fontSize: 8, fontWeight: 800, lineHeight: '10px', textAlign: 'center',
         }}>!</span>
         <span role="status" className="sr-only">{message}</span>
       </button>

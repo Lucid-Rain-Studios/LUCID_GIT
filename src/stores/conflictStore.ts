@@ -3,7 +3,7 @@ import { create } from 'zustand'
 /**
  * Requests to open the conflict resolver, from anywhere in the tree.
  *
- * The resolver is hosted by AppShell, but conflicts surface far from it — the
+ * AppShell opens the resolver in a dedicated desktop window. Conflicts surface far from it — the
  * stash panel is nested two levels inside History and Timeline, and a stash
  * apply conflicts as readily as a merge does. Threading a callback down every
  * one of those paths would be a lot of prop drilling for one rare event, and

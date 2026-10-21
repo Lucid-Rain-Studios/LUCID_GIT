@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { ipc, BranchDiffSummary, ConflictPreviewFile, FileStatus } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useOperationStore } from '@/stores/operationStore'
@@ -11,6 +11,9 @@ interface MergePreviewDialogProps {
   targetBranch: string
   onClose: () => void
   onMerged: () => void
+  standalone?: boolean
+  onRequestClose?: (active: boolean) => void | Promise<void>
+  children?: React.ReactNode
 }
 
 function timeAgo(iso: string): string {
@@ -86,7 +89,7 @@ function fallbackConflict(path: string, status: FileStatus, currentBranch: strin
   }
 }
 
-export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePreviewDialogProps) {
+export function MergePreviewDialog({ targetBranch, onClose, onMerged, standalone = false, onRequestClose, children }: MergePreviewDialogProps) {
   const { repoPath, currentBranch, refreshStatus, bumpSyncTick } = useRepoStore()
 
   const [loading, setLoading]   = useState(true)
@@ -94,6 +97,7 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
   const [diffSummary, setDiffSummary] = useState<BranchDiffSummary | null>(null)
   const [error, setError]       = useState<string | null>(null)
   const [merging, setMerging]   = useState(false)
+  const busy = useRef(false)
   const [inConflictResolution, setInConflictResolution] = useState(false)
   const [preselectedChoices, setPreselectedChoices] = useState<Record<string, 'ours' | 'theirs'>>({})
   const [recoveredMergeBranch, setRecoveredMergeBranch] = useState<string | null>(null)
@@ -113,6 +117,16 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
   // auto-resolved everything but stopped before committing. In that case the
   // user just needs to finalize; there are no per-file choices required.
   const canFinalizeWithoutChoices = inConflictResolution && unresolvedFiles.length === 0
+  const closeRequest = useRef(() => {})
+  closeRequest.current = () => {
+    if (busy.current) return
+    if (onRequestClose) void onRequestClose(inConflictResolution)
+    else onClose()
+  }
+  useEffect(() => {
+    if (!standalone) return
+    return ipc.onMergeWindowCloseRequest(() => closeRequest.current())
+  }, [standalone])
 
   useEffect(() => {
     if (!repoPath) return
@@ -163,13 +177,13 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
   const mergeFileCount = diffSummary?.files.length ?? 0
 
   const doMerge = async () => {
-    if (!repoPath) return
+    if (!repoPath || busy.current) return
+    busy.current = true
     setMerging(true)
     setError(null)
     try {
       await opRun(`Merging ${targetBranch}…`, () => ipc.merge(repoPath, targetBranch))
-      await refreshStatus()
-      bumpSyncTick()
+      if (!standalone) { await refreshStatus(); bumpSyncTick() }
       onMerged()
       onClose()
     } catch (e) {
@@ -199,6 +213,7 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
         setError(msg)
       }
       setMerging(false)
+      busy.current = false
     }
   }
 
@@ -207,7 +222,8 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
   // twice just re-stages the same content — so we always resolve all files
   // here to honor whatever the user has selected most recently in the UI.
   const finalizeMerge = async () => {
-    if (!repoPath) return
+    if (!repoPath || busy.current) return
+    busy.current = true
     setMerging(true)
     setError(null)
     try {
@@ -218,39 +234,42 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
       }
       await opRun(isRealMerge ? 'Finalizing merge...' : 'Applying choices...',
         () => ipc.mergeContinue(repoPath, displayMergeBranch))
-      await refreshStatus()
-      bumpSyncTick()
+      if (!standalone) { await refreshStatus(); bumpSyncTick() }
       onMerged()
       onClose()
     } catch (e) {
       if (String(e).includes('Merge completion blocked:')) setBlockingReason(String(e))
       else setError(String(e))
       setMerging(false)
+      busy.current = false
     }
   }
 
   const abortMerge = async () => {
-    if (!repoPath) return
+    if (!repoPath || busy.current) return
+    busy.current = true
+    setMerging(true)
     try {
       setError(null)
       await opRun('Aborting merge...', () => ipc.mergeAbort(repoPath))
-      await refreshStatus()
-      bumpSyncTick()
+      if (!standalone) { await refreshStatus(); bumpSyncTick() }
       onClose()
     } catch (e) {
       setError(String(e))
+      busy.current = false
+      setMerging(false)
     }
   }
 
-  const overlayDismiss = useDialogOverlayDismiss(onClose, !inConflictResolution)
+  const overlayDismiss = useDialogOverlayDismiss(() => closeRequest.current(), !merging && (standalone || !inConflictResolution), 'Merge')
 
   return (
     /* Backdrop */
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      className={standalone ? 'flex-1 min-h-0 flex flex-col' : 'fixed inset-0 z-50 flex items-center justify-center bg-black/60'}
       {...overlayDismiss}
     >
-      <div className="bg-lg-bg-elevated border border-lg-border rounded-lg shadow-2xl w-[640px] max-h-[80vh] flex flex-col">
+      <div className={standalone ? 'bg-lg-bg-elevated flex-1 min-h-0 flex flex-col' : 'bg-lg-bg-elevated border border-lg-border rounded-lg shadow-2xl w-[640px] max-h-[80vh] flex flex-col'}>
 
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-lg-border shrink-0">
@@ -265,7 +284,9 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
             </div>
           </div>
           <button
-            onClick={inConflictResolution ? abortMerge : onClose}
+            onClick={standalone ? () => closeRequest.current() : inConflictResolution ? abortMerge : onClose}
+            disabled={merging}
+            aria-label="Close Merge"
             className="text-lg-text-secondary hover:text-lg-text-primary text-lg font-mono leading-none"
           >
             ×
@@ -323,7 +344,7 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
                   No changes to merge. Current branch already contains all commits from {displayMergeBranch}.
                 </div>
               ) : (
-                <div className="max-h-44 overflow-y-auto">
+                <div className={standalone ? 'max-h-[40vh] overflow-y-auto' : 'max-h-44 overflow-y-auto'}>
                   {diffSummary.files.map(file => (
                     <div key={file.path} className="px-4 py-1.5 border-b border-lg-border/40 flex items-center gap-3 text-[10px] font-mono">
                       <span className="w-4 shrink-0 text-lg-text-secondary">{file.status}</span>
@@ -445,7 +466,7 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
 
         {/* Footer */}
 
-        {!loading && !error && (
+        {!loading && (!error || inConflictResolution || diffSummary) && (
           <div className="flex items-center justify-between px-4 py-3 border-t border-lg-border shrink-0 gap-3">
             {conflicts.length > 0 && (
               <div className="text-[10px] font-mono text-lg-text-secondary">
@@ -461,7 +482,7 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
             {conflicts.length === 0 && <div />}
             <div className="flex gap-2 shrink-0">
               <ActionBtn
-                onClick={inConflictResolution && isRealMerge ? abortMerge : onClose}
+                onClick={inConflictResolution && isRealMerge ? abortMerge : () => closeRequest.current()}
                 disabled={merging}
                 color={inConflictResolution && isRealMerge ? '#e84545' : undefined}
                 size="sm"
@@ -501,6 +522,7 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged }: MergePre
           </div>
         )}
       </div>
+      {children}
     </div>
   )
 }

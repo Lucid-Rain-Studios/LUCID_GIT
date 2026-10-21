@@ -1010,10 +1010,13 @@ function LfsMaintenanceSection({ repoPath, onLocksRefreshed }: { repoPath: strin
               ) : (
                 <div style={{ border: '1px solid #1a2030', borderRadius: 6, overflow: 'hidden' }}>
                   {result.lockCacheFiles.map(file => (
-                    <div key={file.path} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderBottom: '1px solid #1a2030' }}>
-                      <span style={{ width: 58, fontFamily: 'var(--lg-font-mono)', fontSize: 10, color: file.integrity === 'ok' ? '#2ec573' : file.integrity === 'corrupt' ? '#e84545' : '#f5a832', textTransform: 'uppercase' }}>{file.integrity}</span>
-                      <FilePathText path={file.path} style={{ flex: 1, minWidth: 0, fontFamily: 'var(--lg-font-mono)', fontSize: 11, color: '#8b94b0' }} />
-                      <span style={{ fontFamily: 'var(--lg-font-mono)', fontSize: 10, color: '#4e5870' }}>{formatBytes(file.sizeBytes)}</span>
+                    <div key={file.path} style={{ padding: '8px 10px', borderBottom: '1px solid #1a2030' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ width: 58, fontFamily: 'var(--lg-font-mono)', fontSize: 10, color: file.integrity === 'ok' ? '#2ec573' : file.integrity === 'corrupt' ? '#e84545' : '#f5a832', textTransform: 'uppercase' }}>{file.integrity}</span>
+                        <FilePathText path={file.path} style={{ flex: 1, minWidth: 0, fontFamily: 'var(--lg-font-mono)', fontSize: 11, color: '#8b94b0' }} />
+                        <span style={{ fontFamily: 'var(--lg-font-mono)', fontSize: 10, color: '#4e5870' }}>{formatBytes(file.sizeBytes)}</span>
+                      </div>
+                      {file.error && <pre style={{ margin: '6px 0 0', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontFamily: 'var(--lg-font-mono)', fontSize: 12, color: file.integrity === 'corrupt' ? '#e84545' : '#f5a832' }}>{file.error}</pre>}
                     </div>
                   ))}
                 </div>

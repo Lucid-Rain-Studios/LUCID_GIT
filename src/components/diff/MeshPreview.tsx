@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef } from 'react'
 import { Loader2 } from 'lucide-react'
 import type { NativeMeshGeometry, UnrealAssetObject } from '../../../electron/blueprintTypes'
 import { collisionBounds, collisionHulls, sourceMeshHulls, initialMeshCamera, type MeshCamera, type Vertex } from '../../lib/meshReview'
+
+const SourceMeshCanvas = lazy(() => import('./SourceMeshCanvas').then(module => ({ default: module.SourceMeshCanvas })))
 
 /** CPU/SVG captured geometry; bounded, read-only, no dependency reads or GPU resources. */
 export function MeshPreview({ objects, allObjects, camera, onCamera, selected, onSelect, labels = { left: 'Base', right: 'Selected' }, single = false, boneLocal = false, nativeSides, lod = 0, showWireframeControl = true, loading = false }: {
@@ -14,7 +16,8 @@ export function MeshPreview({ objects, allObjects, camera, onCamera, selected, o
   const decoded = useMemo(() => sides[allObjects.indexOf(objects)] ?? (nativeSides ? sourceMeshHulls(objects, undefined, lod) : collisionHulls(objects, boneLocal)), [objects, allObjects, sides, boneLocal, nativeSides, lod])
   const savedBounds = useMemo(() => collisionBounds(decoded.hulls), [decoded])
   const bounds = useMemo(() => collisionBounds(sides.flatMap(side => side.hulls)), [sides])
-  const topology = useMemo(() => nativeSides ? decoded.hulls.map(hull => {
+  const gpu = !!nativeSides && (decoded.vertices > 20000 || decoded.triangles > 10000)
+  const topology = useMemo(() => nativeSides && !gpu ? decoded.hulls.map(hull => {
     const edges = new Map<string, [number, number]>()
     for (let i = 0; i < hull.indices.length; i += 3) {
       const triangle = hull.indices.slice(i, i + 3)
@@ -24,7 +27,7 @@ export function MeshPreview({ objects, allObjects, camera, onCamera, selected, o
       }
     }
     return { hull, edges: [...edges.values()] }
-  }) : [], [decoded, nativeSides])
+  }) : [], [decoded, nativeSides, gpu])
   const field = useRef<SVGSVGElement>(null)
   const drag = useRef<{ id: number; x: number; y: number; camera: MeshCamera } | null>(null)
   const project = (vertex: Vertex) => {
@@ -33,7 +36,7 @@ export function MeshPreview({ objects, allObjects, camera, onCamera, selected, o
     const depth = Math.sin(camera.yaw) * x + Math.cos(camera.yaw) * y
     return { x: 200 + horizontal * 145 * camera.zoom, y: 180 - (Math.cos(camera.pitch) * z - Math.sin(camera.pitch) * depth) * 145 * camera.zoom, depth: Math.cos(camera.pitch) * depth + Math.sin(camera.pitch) * z }
   }
-  const faces = nativeSides && camera.wireframe ? [] : decoded.hulls.flatMap(hull => {
+  const faces = gpu || nativeSides && camera.wireframe ? [] : decoded.hulls.flatMap(hull => {
     const projected = hull.vertices.map(project)
     return Array.from({ length: hull.indices.length / 3 }, (_, index) => {
       const points = hull.indices.slice(index * 3, index * 3 + 3).map(i => projected[i])
@@ -63,6 +66,7 @@ export function MeshPreview({ objects, allObjects, camera, onCamera, selected, o
       onPointerUp={event => { if (drag.current?.id === event.pointerId) { drag.current = null; event.currentTarget.releasePointerCapture(event.pointerId) } }} onLostPointerCapture={() => { drag.current = null }}
       onKeyDown={event => { if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', '+', '=', '-', 'Home'].includes(event.key)) { event.preventDefault(); if (event.key === 'Home') onCamera({ ...initialMeshCamera, wireframe: camera.wireframe }); else if (['+', '=', '-'].includes(event.key)) zoom(event.key === '-' ? 1 / 1.5 : 1.5); else onCamera({ ...camera, yaw: camera.yaw + (event.key === 'ArrowLeft' ? -.15 : event.key === 'ArrowRight' ? .15 : 0), pitch: Math.max(-1.5, Math.min(1.5, camera.pitch + (event.key === 'ArrowUp' ? .15 : event.key === 'ArrowDown' ? -.15 : 0))) }) } }}>
       {!(nativeSides && camera.wireframe) && faces.map(face => <polygon key={`${face.hull.object.path}:${face.hull.kind}:${face.hull.index}:${face.index}`} points={face.points} fill={camera.wireframe ? 'none' : selected === face.hull.object.path ? 'var(--lg-warning)' : 'var(--lg-accent)'} fillOpacity=".25" stroke={selected === face.hull.object.path ? 'var(--lg-warning)' : 'var(--lg-text-secondary)'} strokeWidth=".7"><title>{face.hull.object.name} · {face.hull.kind} {face.hull.kind === "source LOD" ? face.hull.index : face.hull.index + 1}</title></polygon>)}
+      {gpu && <Suspense fallback={<text x="20" y="180">Loading source viewer…</text>}><SourceMeshCanvas hulls={decoded.hulls} center={bounds.center} radius={bounds.radius} camera={camera} selected={selected}/></Suspense>}
       {nativeSides && camera.wireframe && topology.map(({ hull, edges }) => {
         const points = hull.vertices.map(project)
         const color = selected === hull.object.path ? 'var(--lg-warning)' : 'var(--lg-text-secondary)'

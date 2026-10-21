@@ -8,6 +8,8 @@ import type { BlueprintDocument, NativeMeshGeometry } from '../blueprintTypes'
 
 const PROVIDER = 'unreal-source-mesh-v1' as const
 const MAX_INPUT_BYTES = 64 * 1024 * 1024
+export const MAX_SOURCE_VERTICES = 250000
+export const MAX_SOURCE_TRIANGLES = 500000
 // Only generated script/configuration and captured package bytes enter this project.
 // No repository project, plugins, Python startup scripts or mutable dependencies are loaded.
 export const MESH_SCRIPT = 'import unreal, json, os\ndef extract(base):\n' + String.raw`
@@ -23,7 +25,7 @@ lists = unreal.GeometryScript_List
 count = unreal.SkeletalMeshEditorSubsystem.get_lod_count(mesh) if skeletal else api.get_num_static_mesh_lods_of_type(mesh, unreal.GeometryScriptLODType.SOURCE_MODEL)
 result = {'status': 'ready', 'provider': 'unreal-source-mesh-v1', 'engineVersion': unreal.SystemLibrary.get_engine_version(),
           'totalLods': count, 'lods': [], 'diagnostics': ['Isolated captured package only. Materials, textures and repository dependencies are not loaded.', 'Source-model geometry, not generated render LODs, Nanite, skinning or playback.']}
-vertices_left, triangles_left = 20000, 10000
+vertices_left, triangles_left = ${MAX_SOURCE_VERTICES}, ${MAX_SOURCE_TRIANGLES}
 for index in range(min(count, 8)):
     dynamic = unreal.DynamicMesh()
     lod = unreal.GeometryScriptMeshReadLOD(lod_type=unreal.GeometryScriptLODType.SOURCE_MODEL, lod_index=index)
@@ -35,7 +37,7 @@ for index in range(min(count, 8)):
     nv, nt = query.get_vertex_count(dynamic), dynamic.get_triangle_count()
     item = {'index': index, 'vertexCount': nv, 'triangleCount': nt, 'vertices': [], 'indices': []}
     if nv > vertices_left or nt > triangles_left:
-        item['reason'] = 'Source geometry exceeds the shared 20000 vertex / 10000 triangle preview budget.'
+        item['reason'] = 'Source geometry exceeds the shared ${MAX_SOURCE_VERTICES} vertex / ${MAX_SOURCE_TRIANGLES} triangle preview budget. Select a lower-detail source LOD if available.'
     else:
         dynamic, positions, vertex_gaps = query.get_all_vertex_positions(dynamic, False)
         dynamic, triangles, triangle_gaps = query.get_all_triangle_indices(dynamic, False)
@@ -63,7 +65,7 @@ export function validateNativeGeometry(value: unknown): NativeMeshGeometry {
     if (!lod || !Number.isInteger(lod.index) || lod.index < 0 || lod.index >= data.totalLods || indexes.has(lod.index) || !Number.isInteger(lod.vertexCount) || lod.vertexCount < 0 || !Number.isInteger(lod.triangleCount) || lod.triangleCount < 0 || !Array.isArray(lod.vertices) || !Array.isArray(lod.indices) || lod.indices.length % 3 || (lod.reason !== undefined && (typeof lod.reason !== 'string' || lod.reason.length > 1024))) throw new Error('Invalid source LOD response.')
     indexes.add(lod.index)
     vertices += lod.vertices.length; triangles += lod.indices.length / 3
-    if (vertices > 20000 || triangles > 10000 || lod.vertices.some(p => !Array.isArray(p) || p.length !== 3 || p.some(n => typeof n !== 'number' || !Number.isFinite(n) || Math.abs(n) > 1e12)) || lod.indices.some(i => !Number.isInteger(i) || i < 0 || i >= lod.vertices.length) || (!lod.reason && (lod.vertices.length !== lod.vertexCount || lod.indices.length / 3 !== lod.triangleCount)) || (lod.reason && (lod.vertices.length || lod.indices.length))) throw new Error('Invalid or oversized source geometry.')
+    if (vertices > MAX_SOURCE_VERTICES || triangles > MAX_SOURCE_TRIANGLES || lod.vertices.some(p => !Array.isArray(p) || p.length !== 3 || p.some(n => typeof n !== 'number' || !Number.isFinite(n) || Math.abs(n) > 1e12)) || lod.indices.some(i => !Number.isInteger(i) || i < 0 || i >= lod.vertices.length) || (!lod.reason && (lod.vertices.length !== lod.vertexCount || lod.indices.length / 3 !== lod.triangleCount)) || (lod.reason && (lod.vertices.length || lod.indices.length))) throw new Error('Invalid or oversized source geometry.')
   }
   return data
 }
@@ -113,7 +115,7 @@ export class NativeMeshService {
       }
     }
     const contentKey = content.digest('hex')
-    const key = crypto.createHash('sha256').update(PROVIDER).update(editor).update(`${binary.size}:${binary.mtimeMs}`).update(file).update(contentKey).digest('hex')
+    const key = crypto.createHash('sha256').update(PROVIDER).update(MESH_SCRIPT).update(editor).update(`${binary.size}:${binary.mtimeMs}`).update(file).update(contentKey).digest('hex')
     const cached = this.cache.get(key)
     if (cached) return cached
     if (this.active) {
@@ -149,14 +151,16 @@ export class NativeMeshService {
         return directory
       }, bytes.length + (extra?.length ?? 0))
       const output = path.join(directory, 'geometry.json')
-      if ((await fs.stat(output)).size > 4 * 1024 * 1024) throw new Error('Native geometry exceeds the 4 MB response limit.')
+      if ((await fs.stat(output)).size > 32 * 1024 * 1024) throw new Error('Native geometry exceeds the 32 MB response limit.')
       // Verify copies after the job; no repository source is ever opened by Unreal.
       if (!(await fs.readFile(target)).equals(bytes) || extra && !(await fs.readFile(target.replace(/\.uasset$/i, '.uexp'))).equals(extra)) throw new Error('The isolated engine changed captured package bytes; export discarded.')
       const result = validateNativeGeometry(JSON.parse(await fs.readFile(output, 'utf8')))
       if (!result.engineVersion.startsWith(version + '.')) throw new Error('Installed engine version does not match this saved package.')
       if (cancellation.aborted) throw new Error('Asset preview cancelled.')
       this.cache.set(key, result)
-      while (this.cache.size > 8) this.cache.delete(this.cache.keys().next().value!)
+      // Large entries must not turn the eight-entry cache into unbounded retention.
+      const retained = () => [...this.cache.values()].reduce((sum, item) => sum + item.lods.reduce((total, lod) => total + lod.vertices.length * 3 + lod.indices.length, 0), 0)
+      while (this.cache.size > 8 || retained() > 2 * (MAX_SOURCE_VERTICES + MAX_SOURCE_TRIANGLES) * 3) this.cache.delete(this.cache.keys().next().value!)
       return result
     } catch (error) { return unavailable(error instanceof Error ? error.message : String(error)) }
     finally {

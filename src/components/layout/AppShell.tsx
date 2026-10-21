@@ -18,7 +18,6 @@ import { StatusBar } from './StatusBar'
 import { CloneDialog } from '@/components/repo/CloneDialog'
 import { DeviceFlowLogin } from '@/components/auth/DeviceFlowLogin'
 import { BranchPanel } from '@/components/branches/BranchPanel'
-import { MergePreviewDialog } from '@/components/merge/MergeDialog'
 import { useConflictStore } from '@/stores/conflictStore'
 import { CherryPickConflictDialog } from '@/components/merge/CherryPickConflictDialog'
 import { PushBlockedByLocksDialog } from '@/components/locks/PushBlockedByLocksDialog'
@@ -167,6 +166,27 @@ export function AppShell() {
 
   const [settingsSection, setSettingsSection] = useState('general')
   const { repoPath, error, openRepo, refreshStatus, silentRefresh, recentRepos, removeRecentRepo } = useRepoStore()
+  const mergeWindowOpen = useRef(false)
+  useEffect(() => {
+    if (!mergeTarget || !repoPath) return
+    // Consume the request immediately; StrictMode must not open two windows.
+    closeMergeTarget()
+    mergeWindowOpen.current = true
+    void ipc.openMergeWindow({ repoPath, targetBranch: mergeTarget, currentBranch: useRepoStore.getState().currentBranch })
+      .catch(e => {
+        mergeWindowOpen.current = false
+        useRepoStore.getState().setError(`Could not open Merge: ${String(e)}`)
+      })
+  }, [mergeTarget, repoPath, closeMergeTarget])
+
+  useEffect(() => ipc.onMergeWindowClosed(closedRepo => {
+    mergeWindowOpen.current = false
+    const repo = useRepoStore.getState()
+    if (repo.repoPath !== closedRepo) return
+    void repo.refreshStatus()
+    repo.bumpSyncTick()
+    void useLockStore.getState().loadLocks(closedRepo)
+  }), [])
   const prTick = useRepoStore(s => s.prTick)
   useAutoFetch(repoPath)
   const { updateStep } = useOperationStore()
@@ -270,26 +290,7 @@ export function AppShell() {
     return () => window.removeEventListener('keydown', handler)
   }, [repoPath])
 
-  // ── Undo last operation — offer an Undo toast after a risky op completes ────
-  useEffect(() => {
-    const unsub = ipc.onUndoAvailable(({ repoPath: opRepo, label }) => {
-      if (!opRepo || opRepo !== repoPath) return
-      showStatusToast(`${label} done`, {
-        durationMs: 12_000,
-        action: {
-          label: 'Undo',
-          onClick: async () => {
-            const res = await ipc.undoLast(opRepo).catch(() => null)
-            showStatusToast(res?.ok ? res.message : (res?.message ?? 'Undo failed.'))
-            useRepoStore.getState().refreshStatus()
-            useRepoStore.getState().bumpSyncTick()
-            loadLocks(opRepo)
-          },
-        },
-      })
-    })
-    return unsub
-  }, [repoPath, showStatusToast, loadLocks])
+  // Automatic checkpoint Undo prompts are suspended until the recovery flow is revisited.
 
   // ── IPC events ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -443,7 +444,9 @@ export function AppShell() {
   // about to act on the changes list, so make sure it is fresh.
   useEffect(() => {
     if (!repoPath) return
-    const onFocus = () => { silentRefresh() }
+    // Closing Merge already schedules a full refresh. Native focus return must
+    // not start another scan just before that completion event arrives.
+    const onFocus = () => { if (!mergeWindowOpen.current) silentRefresh() }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [repoPath])
@@ -755,13 +758,6 @@ export function AppShell() {
 
       {showCloneDialog && <CloneDialog onClose={() => setShowCloneDialog(false)} />}
       {showLoginDialog && <DeviceFlowLogin onClose={() => setShowLoginDialog(false)} />}
-      {mergeTarget && (
-        <MergePreviewDialog
-          targetBranch={mergeTarget}
-          onClose={closeMergeTarget}
-          onMerged={() => { closeMergeTarget(); handleRefresh() }}
-        />
-      )}
       {cherryPickConflict && (
         <CherryPickConflictDialog
           onClose={() => setCherryPickConflict(false)}
