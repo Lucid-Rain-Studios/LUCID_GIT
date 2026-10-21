@@ -454,6 +454,7 @@ async function execWithProgressInner(
     let lastProgressAt = 0
     let lastProgressId = ''
     let pendingProgress: OperationStep | null = null
+    let progressTimer: ReturnType<typeof setTimeout> | undefined
 
     const emitProgress = (step: OperationStep, force = false) => {
       if (!onProgress) return
@@ -462,18 +463,28 @@ async function execWithProgressInner(
       // Phase changes and completion are delivered immediately. Repetitive
       // percentage updates are capped to reduce Electron IPC/render churn.
       if (force || step.id !== lastProgressId || step.status === 'done' || now - lastProgressAt >= 75) {
+        clearTimeout(progressTimer)
+        progressTimer = undefined
         onProgress(step)
         pendingProgress = null
         lastProgressAt = now
         lastProgressId = step.id
+      } else if (!progressTimer) {
+        progressTimer = setTimeout(() => {
+          progressTimer = undefined
+          if (pendingProgress) emitProgress(pendingProgress, true)
+        }, 75 - (now - lastProgressAt))
       }
     }
 
-    const scanForProgress = (text: string) => {
+    const remainder = { stdout: '', stderr: '' }
+    const scanForProgress = (stream: 'stdout' | 'stderr', text: string, flush = false) => {
       if (!onProgress) return
-      // Git and git-lfs both write multiple progress lines per chunk,
-      // separated by \r or \n
-      for (const line of text.split(/[\r\n]+/)) {
+      // Pipe chunks can end in the middle of a percentage or count. Keep
+      // stdout/stderr separate and parse complete CR/LF-delimited records.
+      const lines = (remainder[stream] + text).split(/[\r\n]+/)
+      remainder[stream] = flush ? '' : lines.pop() ?? ''
+      for (const line of lines) {
         const step = parseGitProgress(line)
         if (step) emitProgress(step)
       }
@@ -484,18 +495,24 @@ async function execWithProgressInner(
       stdout += text
       // git-lfs's forced progress meter (e.g. `lfs pull`) writes to stdout,
       // unlike git's own `--progress` output which goes to stderr.
-      scanForProgress(text)
+      scanForProgress('stdout', text)
     })
 
     proc.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString()
       stderr += text
-      scanForProgress(text)
+      scanForProgress('stderr', text)
     })
 
-    proc.on('error', reject)
+    proc.on('error', error => {
+      clearTimeout(progressTimer)
+      reject(error)
+    })
 
     proc.on('close', (code: number | null) => {
+      scanForProgress('stdout', '', true)
+      scanForProgress('stderr', '', true)
+      clearTimeout(progressTimer)
       if (pendingProgress) emitProgress(pendingProgress, true)
       if (code === 0) {
         resolve({ stdout, stderr })

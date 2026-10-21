@@ -1442,26 +1442,22 @@ class GitService {
         )
       }
 
-      // Pre-count files that will change in the merge, so the synthetic stage
-      // event already shows "0/N" before git's own "Updating files" lines kick in.
-      const diffRes = await execSafe(['diff', '--name-only', '-z', 'HEAD', defaultBranch.ref], repoPath)
-      const diffCount = diffRes.exitCode === 0 ? nulPaths(diffRes.stdout).length : undefined
       onProgress?.({
         id: 'stage',
         label: `Merging ${defaultBranch.ref}`,
         status: 'running',
-        current: diffCount !== undefined ? 0 : undefined,
-        total:   diffCount,
-    })
-    // --progress on merge surfaces "Updating files: N% (X/Y)" during the
-    // checkout phase — the main thing the user wants to watch on a big update.
-    const mergeArgs = [...gitAuthArgs(token, remoteUrl), 'merge', '--no-edit', '--progress', defaultBranch.ref]
-    try {
-      await this.withStalePackRetry(repoPath, () => execWithProgress(mergeArgs, repoPath, onProgress), onProgress)
-    } catch (error) {
-      if (!await this.recoverForRetry(repoPath, error)) throw error
-      await execWithProgress(mergeArgs, repoPath, onProgress)
-    }
+      })
+      // ort only enables checkout progress above verbosity 2. --progress alone
+      // controls rename detection, leaving divergent merges silent. Scope this
+      // setting to this command; let Git supply actual counts instead of a diff
+      // estimate (which also includes changes belonging only to our branch).
+      const mergeArgs = [...gitAuthArgs(token, remoteUrl), '-c', 'merge.verbosity=3', 'merge', '--no-edit', '--progress', defaultBranch.ref]
+      try {
+        await this.withStalePackRetry(repoPath, () => execWithProgress(mergeArgs, repoPath, onProgress), onProgress)
+      } catch (error) {
+        if (!await this.recoverForRetry(repoPath, error)) throw error
+        await execWithProgress(mergeArgs, repoPath, onProgress)
+      }
     })
   }
 
