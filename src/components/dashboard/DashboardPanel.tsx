@@ -5,6 +5,7 @@ import { useRepoStore } from '@/stores/repoStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useOperationStore } from '@/stores/operationStore'
 import { useLockStore } from '@/stores/lockStore'
+import { useDialogStore } from '@/stores/dialogStore'
 import { usePRStore } from '@/stores/prStore'
 import { ContributionGraph } from './ContributionGraph'
 import { PotentialConflictsDialog } from './PotentialConflictsDialog'
@@ -257,14 +258,6 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <MyPRStatusPill repoPath={repoPath} />
-          <ActionBtn
-            onClick={doFetch}
-            disabled={busyState !== 'idle'}
-            disabledReason={fetchDisabledReason(busyState)}
-            size="sm"
-          >
-            <RefreshIcon /> {fetchButtonLabel(busyState)}
-          </ActionBtn>
           <AutoFetchControl repoPath={repoPath} busy={busyState} />
         </div>
       </div>
@@ -295,22 +288,19 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
         </div>
       )}
 
-      {/* ── Suggestions + Contribution Graph ─────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: 14, marginBottom: 14 }}>
-        <SuggestionsCard
-          lastFetch={lastFetch}
-          lastPull={lastPull}
-          sync={effectiveSync}
-          fileStatus={fileStatus}
-          conflictReport={conflictReport}
-          conflictChecking={conflictChecking}
-          onDeepConflictCheck={() => runPotentialConflictCheck('deep')}
-          onShowConflictDialog={() => setConflictDialogOpen(true)}
-          onFetch={doFetch}
-          busy={busyState === 'idle' ? null : busyState}
-        />
-        <ContributionGraph repoPath={repoPath} />
-      </div>
+      {/* ── Suggestions ──────────────────────────────────────────────────── */}
+      <SuggestionsCard
+        lastFetch={lastFetch}
+        lastPull={lastPull}
+        sync={effectiveSync}
+        fileStatus={fileStatus}
+        conflictReport={conflictReport}
+        conflictChecking={conflictChecking}
+        onDeepConflictCheck={() => runPotentialConflictCheck('deep')}
+        onShowConflictDialog={() => setConflictDialogOpen(true)}
+        onFetch={doFetch}
+        busy={busyState === 'idle' ? null : busyState}
+      />
 
       {/* ── Daily Flow Guide ───────────────────────────────────────────── */}
       <DailyFlowStrip
@@ -344,16 +334,17 @@ export function DashboardPanel({ repoPath, onNavigate }: DashboardPanelProps) {
         }}
       />
 
-      {/* ── Status grid (3 columns) ─────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gridAutoRows: '1fr', gap: 14, marginTop: 16, flex: 1, minHeight: 300 }}>
-        <LocalStatusCard
+      {/* ── Status grid: two rows share the remaining height equally ───────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gridTemplateRows: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14, marginTop: 14, flex: '1 0 560px', minHeight: 0 }}>
+        <LocalChangesCard
           repoPath={repoPath}
-          sync={effectiveSync} files={fileStatus}
+          files={fileStatus}
           staged={staged} unstaged={unstaged}
           onNavigate={onNavigate}
         />
         <LocksCard locks={locks} currentLogin={currentLogin} repoPath={repoPath} unlockFile={unlockFile} isAdmin={isAdmin} />
         <PRsCard ghSlug={ghSlug} />
+        <ContributionGraph repoPath={repoPath} />
       </div>
 
       {conflictDialogOpen && conflictReport && (
@@ -663,11 +654,6 @@ function SuggestionsCard({ lastFetch, lastPull, sync, fileStatus, conflictReport
       urgency: 'tip',
       text: `${hrs} hour${hrs !== 1 ? 's' : ''} since last sync. Nothing urgent, but a quick fetch keeps you current with the team.`,
     })
-  } else {
-    suggestions.push({
-      urgency: 'ok',
-      text: `Last synced ${timeAgo(lastSyncTime)} — you are up to date with the remote.`,
-    })
   }
 
   // ── Morning tip ───────────────────────────────────────────────────────────
@@ -693,103 +679,79 @@ function SuggestionsCard({ lastFetch, lastPull, sync, fileStatus, conflictReport
     }
   }
 
+  if (suggestions.length === 0) return null
+
+  // Left-aligned header, one row per suggestion to its right (text, then actions at the far end).
   return (
-    <Card title="Suggestions" icon={<SuggestionsIcon />}>
-      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', flex: 1, minHeight: 0 }}>
+    <div style={{
+      display: 'flex', alignItems: 'flex-start', gap: 14, padding: '10px 14px', marginBottom: 14, flexShrink: 0,
+      background: '#131720', border: '1px solid #1a2030', borderRadius: 10,
+      boxShadow: '0 2px 8px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.025)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: 126, flexShrink: 0, height: 32, color: '#2e3a50' }}>
+        <SuggestionsIcon />
+        <span style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 10.5, fontWeight: 700, color: '#4a566a', letterSpacing: '0.07em', textTransform: 'uppercase' }}>
+          Suggestions
+        </span>
+      </div>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
         {suggestions.map((s, i) => {
           const uc = URGENCY_COLOR[s.urgency]
           return (
-            <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', borderRadius: 7, background: uc.bg, border: `1px solid ${uc.border}` }}>
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, minHeight: 32, padding: '4px 6px 4px 12px', borderRadius: 7, background: uc.bg, border: `1px solid ${uc.border}` }}>
               {s.loading ? (
                 <div
                   aria-label="Loading"
                   style={{
-                    width: 12, height: 12, borderRadius: '50%', flexShrink: 0, marginTop: 3,
+                    width: 12, height: 12, borderRadius: '50%', flexShrink: 0,
                     border: `2px solid ${uc.dot}33`,
                     borderTopColor: uc.dot,
                     animation: 'spin 0.8s linear infinite',
                   }}
                 />
               ) : (
-                <div style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: uc.dot, marginTop: 5, boxShadow: `0 0 6px ${uc.dot}66` }} />
+                <div style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: uc.dot, boxShadow: `0 0 6px ${uc.dot}66` }} />
               )}
-              <div style={{ flex: 1 }}>
-                <p style={{ margin: 0, fontSize: 12, lineHeight: 1.65, color: uc.text, fontFamily: 'var(--lg-font-ui)' }}>
-                  {s.text}
-                </p>
+              <p style={{ margin: 0, flex: 1, minWidth: 0, fontSize: 12, lineHeight: 1.5, color: uc.text, fontFamily: 'var(--lg-font-ui)' }}>
+                {s.text}
                 {s.conflictSummary && (
-                  <div style={{
-                    marginTop: 8,
-                    display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-                    padding: '7px 10px',
-                    borderRadius: 6,
-                    background: 'rgba(232,69,69,0.06)',
-                    border: '1px solid rgba(232,69,69,0.18)',
-                  }}>
-                    <span style={{ fontFamily: 'var(--lg-font-mono)', fontSize: 11, color: '#ff8a8a', flex: 1, minWidth: 0 }}>
-                      {s.conflictSummary.branchCount} potential merge conflict{s.conflictSummary.branchCount !== 1 ? 's' : ''} found
-                      <span style={{ color: '#9a5560' }}> · {s.conflictSummary.fileCount} of your file{s.conflictSummary.fileCount !== 1 ? 's' : ''}</span>
-                    </span>
-                    <SmallBtn
-                      label="View Details"
-                      color="#e84545"
-                      disabled={false}
-                      onClick={s.conflictSummary.onView}
-                    />
-                  </div>
+                  <span style={{ fontFamily: 'var(--lg-font-mono)', fontSize: 11, color: '#ff8a8a', marginLeft: 10 }}>
+                    {s.conflictSummary.branchCount} potential merge conflict{s.conflictSummary.branchCount !== 1 ? 's' : ''}
+                    <span style={{ color: '#9a5560' }}> · {s.conflictSummary.fileCount} of your file{s.conflictSummary.fileCount !== 1 ? 's' : ''}</span>
+                  </span>
+                )}
+              </p>
+              <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                {s.conflictSummary && (
+                  <SmallBtn label="View Details" color="#e84545" disabled={false} onClick={s.conflictSummary.onView} />
                 )}
                 {s.action && (
-                  <div style={{ marginTop: 8 }}>
-                    <SmallBtn label={s.action.label} color={uc.dot} disabled={s.action.disabled} disabledReason={s.action.disabled ? 'Operation in progress' : null} onClick={s.action.onClick} />
-                  </div>
+                  <SmallBtn label={s.action.label} color={uc.dot} disabled={s.action.disabled} disabledReason={s.action.disabled ? 'Operation in progress' : null} onClick={s.action.onClick} />
                 )}
               </div>
             </div>
           )
         })}
       </div>
-    </Card>
+    </div>
   )
 }
 
-// ── Local Status Card (sync + changes combined) ───────────────────────────────
+// ── Local Changes Card ────────────────────────────────────────────────────────
 
-function LocalStatusCard({ repoPath, sync, files, staged, unstaged, onNavigate }: {
+function LocalChangesCard({ repoPath, files, staged, unstaged, onNavigate }: {
   repoPath: string
-  sync: SyncStatus | null
   files: FileStatus[]; staged: number; unstaged: number
   onNavigate: (tab: string) => void
 }) {
   const graphMenu = useBlueprintFileMenu(repoPath)
-  const behind      = sync?.behind ?? 0
-  const ahead       = sync?.ahead  ?? 0
-  const clean       = sync && behind === 0 && ahead === 0
-  const total       = staged + unstaged
-  const preview     = files.slice(0, 4)
+  const total = staged + unstaged
 
   return (
-    <Card title="Local Status" icon={<SyncIcon />} onAction={() => onNavigate('timeline')} actionLabel="View All">
+    <Card title="Local Changes" icon={<SyncIcon />} onAction={() => onNavigate('timeline')} actionLabel={total > 0 ? 'Review & commit' : 'Open Timeline'}>
       {graphMenu.menu}
-      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 9, overflowY: 'auto', flex: 1, minHeight: 0 }}>
-        <div style={{ fontFamily: 'var(--lg-font-mono)', fontSize: 10, color: '#344057', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {sync?.hasUpstream ? `→ ${sync.remoteName}/${sync.remoteBranch}` : 'No upstream configured'}
-        </div>
-
-        <div style={{ display: 'flex', gap: 14 }}>
-          <StatPill icon="↑" value={sync?.ahead  ?? '—'} label="ahead"  color={ahead  > 0 ? '#e8622f' : '#283047'} />
-          <StatPill icon="↓" value={sync?.behind ?? '—'} label="behind" color={behind > 0 ? '#f5a832' : '#283047'} />
-        </div>
-
-        {clean && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ color: '#2dbd6e', fontSize: 12 }}>✓</span>
-            <span style={{ fontSize: 11.5, color: '#344057' }}>In sync with remote</span>
-          </div>
-        )}
-
-        <div style={{ height: 1, background: '#1a2030', marginLeft: -14, marginRight: -14 }} />
-
-        <div style={{ display: 'flex', gap: 12 }}>
+      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 9, flex: 1, minHeight: 0 }}>
+        <div style={{ display: 'flex', gap: 14, flexShrink: 0 }}>
           <StatPill icon="●" value={staged}   label="staged"   color={staged   > 0 ? '#2dbd6e' : '#283047'} />
           <StatPill icon="○" value={unstaged} label="modified" color={unstaged > 0 ? '#f5a832' : '#283047'} />
         </div>
@@ -800,11 +762,11 @@ function LocalStatusCard({ repoPath, sync, files, staged, unstaged, onNavigate }
             <span style={{ fontSize: 11.5, color: '#344057' }}>Working directory clean</span>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {preview.map(f => {
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, overflowY: 'auto', flex: 1, minHeight: 0 }}>
+            {files.map(f => {
               const { char, color } = fileStatusLabel(f)
               return (
-                <div key={f.path} tabIndex={0} onContextMenu={e => graphMenu.onContextMenu(e, f.path)} style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
+                <div key={f.path} tabIndex={0} onContextMenu={e => graphMenu.onContextMenu(e, f.path)} style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden', minHeight: 20, flexShrink: 0 }}>
                   <span style={{
                     fontFamily: 'var(--lg-font-mono)', fontSize: 9, fontWeight: 700,
                     color, background: `${color}18`, border: `1px solid ${color}33`,
@@ -817,13 +779,6 @@ function LocalStatusCard({ repoPath, sync, files, staged, unstaged, onNavigate }
                 </div>
               )
             })}
-            {files.length > 4 && (
-              <button onClick={() => onNavigate('timeline')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', marginTop: 2 }}>
-                <span style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 11, color: '#344057' }}>
-                  +{files.length - 4} more files…
-                </span>
-              </button>
-            )}
           </div>
         )}
       </div>
@@ -843,10 +798,32 @@ function LocksCard({ locks, currentLogin, repoPath, unlockFile, isAdmin }: {
   const graphMenu = useBlueprintFileMenu(repoPath)
   const [tab, setTab]           = useState<'mine' | 'team'>('mine')
   const [unlocking, setUnlocking] = useState<string | null>(null)
+  const [query, setQuery]       = useState('')
+  const [unlockingAll, setUnlockingAll] = useState(false)
+  const unlockFiles = useLockStore(s => s.unlockFiles)
+  const dialog      = useDialogStore()
 
   const myLocks   = locks.filter(l => currentLogin && l.owner.login === currentLogin)
   const teamLocks = locks.filter(l => !currentLogin || l.owner.login !== currentLogin)
-  const shown     = tab === 'mine' ? myLocks : teamLocks
+  const needle    = query.trim().toLowerCase()
+  const shown     = (tab === 'mine' ? myLocks : teamLocks)
+    .filter(l => !needle || l.path.toLowerCase().includes(needle) || l.owner.login.toLowerCase().includes(needle))
+
+  const doUnlockAll = async () => {
+    if (unlockingAll || myLocks.length === 0) return
+    const confirmed = await dialog.confirm({
+      title: 'Unlock all your files',
+      message: `Release all ${myLocks.length} file${myLocks.length !== 1 ? 's' : ''} you currently have locked?`,
+      detail: 'Other people will be able to lock and edit these files immediately.',
+      confirmLabel: 'Unlock all', danger: true,
+    })
+    if (!confirmed) return
+    setUnlockingAll(true)
+    try {
+      await unlockFiles(repoPath, myLocks.map(l => ({ filePath: l.path, lockId: l.id })))
+    } catch { /* store records the error and restores the locks */ }
+    finally { setUnlockingAll(false) }
+  }
 
   const doUnlock = async (lock: Lock, force: boolean) => {
     setUnlocking(lock.path)
@@ -875,12 +852,38 @@ function LocksCard({ locks, currentLogin, repoPath, unlockFile, isAdmin }: {
         })}
       </div>
 
+      <div style={{ display: 'flex', gap: 8, padding: '10px 14px 0', flexShrink: 0 }}>
+        <input
+          type="text"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Filter locked files…"
+          aria-label="Filter locked files"
+          style={{
+            flex: 1, minWidth: 0, height: 24, padding: '0 8px', borderRadius: 5,
+            background: '#0d1119', border: '1px solid #20283a', color: '#c8d0e8',
+            fontFamily: 'var(--lg-font-mono)', fontSize: 10.5, outline: 'none',
+          }}
+        />
+        {tab === 'mine' && myLocks.length > 1 && (
+          <ActionBtn
+            onClick={doUnlockAll}
+            disabled={unlockingAll}
+            color="#e84545"
+            size="sm"
+            style={{ height: 24, paddingLeft: 8, paddingRight: 8, fontSize: 10, fontWeight: 600 }}
+          >
+            {unlockingAll ? 'Unlocking…' : `Unlock all (${myLocks.length})`}
+          </ActionBtn>
+        )}
+      </div>
+
       <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 6, overflowY: 'auto', flex: 1, minHeight: 0 }}>
         {shown.length === 0 ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ color: '#2dbd6e', fontSize: 12 }}>✓</span>
+            {!needle && <span style={{ color: '#2dbd6e', fontSize: 12 }}>✓</span>}
             <span style={{ fontSize: 11.5, color: '#344057' }}>
-              {tab === 'mine' ? 'No files locked by you' : 'No team locks'}
+              {needle ? 'No locks match the filter' : tab === 'mine' ? 'No files locked by you' : 'No team locks'}
             </span>
           </div>
         ) : (
@@ -1104,15 +1107,6 @@ function SmallBtn({ label, color, disabled, disabledReason, onClick }: {
 }
 
 // ── SVG Icons ─────────────────────────────────────────────────────────────────
-
-function RefreshIcon() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-      <path d="M13.5 8a5.5 5.5 0 1 1-1.1-3.3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      <path d="M12.5 3v3h-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
 
 function SyncIcon() {
   return (

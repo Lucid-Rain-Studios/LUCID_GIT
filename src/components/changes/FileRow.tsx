@@ -170,7 +170,7 @@ export function FileRow({
           width: 18, height: 18, borderRadius: 4, flexShrink: 0,
           background: statusBg, color: statusColor,
           fontFamily: 'var(--lg-font-mono)', fontSize: 11, fontWeight: 700,
-        }}>{effectiveStatus}</span>
+        }}>{effectiveStatus === '?' || effectiveStatus === 'A' ? '+' : effectiveStatus}</span>
 
         {/* Name + dir */}
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -231,6 +231,7 @@ export function FileRow({
       {ctx && (
         <AppRightSelectionOptions x={ctx.x} y={ctx.y} minWidth={200} menuRef={ctxRef}>
           <BlueprintFileAction repoPath={repoPath} filePath={file.path} revision={file.staged ? 'INDEX' : 'WORKING'} onClose={close} />
+          <AppRightSelectionItem label={file.staged ? 'Unstage' : 'Stage'} onClick={() => { close(); toggleStage() }} />
           <AppRightSelectionItem label={isUntracked ? 'Delete file…' : 'Discard changes…'} onClick={doDiscard} danger />
           {canStageHunks && (
             <AppRightSelectionItem

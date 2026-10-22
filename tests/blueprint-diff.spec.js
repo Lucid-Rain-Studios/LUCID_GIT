@@ -272,8 +272,8 @@ test('asset viewer mode resets between graph and normal previews', () => {
 
 test('dashboard graph menus target the clicked status or lock file without navigation or unlocking', () => {
   const clicked=[],unexpected=[]
-  const harness=component('src/components/dashboard/DashboardPanel.tsx',{'@/lib/useBlueprintFileMenu':{useBlueprintFileMenu:repo=>({menu:null,onContextMenu:(_,file)=>clicked.push([repo,file])})}}, {__privateExports:['LocalStatusCard','LocksCard']})
-  let tree=harness.render('LocalStatusCard',{repoPath:'repo',sync:null,files:[{path:'Clicked.uasset',staged:false,status:'M'}],staged:0,unstaged:1,onNavigate:()=>unexpected.push('navigate')})
+  const harness=component('src/components/dashboard/DashboardPanel.tsx',{'@/lib/useBlueprintFileMenu':{useBlueprintFileMenu:repo=>({menu:null,onContextMenu:(_,file)=>clicked.push([repo,file])})},'@/stores/lockStore':{useLockStore:select=>select({unlockFiles:async()=>({unlocked:[],failed:[]})})},'@/stores/dialogStore':{useDialogStore:()=>({confirm:async()=>true})}}, {__privateExports:['LocalChangesCard','LocksCard']})
+  let tree=harness.render('LocalChangesCard',{repoPath:'repo',files:[{path:'Clicked.uasset',staged:false,status:'M'}],staged:0,unstaged:1,onNavigate:()=>unexpected.push('navigate')})
   find(tree,e=>e.props?.onContextMenu).props.onContextMenu({})
   harness.slots[0]='team'
   tree=harness.render('LocksCard',{repoPath:'repo',locks:[{id:'lock',path:'OtherOwner.uasset',owner:{login:'other',name:'Other'},lockedAt:new Date().toISOString()}],currentLogin:'me',isAdmin:false,unlockFile:()=>unexpected.push('unlock')})

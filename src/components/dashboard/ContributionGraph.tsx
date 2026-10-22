@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState, useMemo } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CommitEntry } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { contributionData } from '@/lib/contributionData'
@@ -18,275 +18,236 @@ interface ContributionGraphProps {
   repoPath: string
 }
 
-const DAY_SIZE = 11
-const DAY_GAP = 3
-const MONTH_LABEL_HEIGHT = 24
-const WEEKDAY_LABEL_WIDTH = 28
-
-const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-
+const LEGEND_SIZE = 11
+const WEEKDAY_LABELS = ['Mon', '', 'Wed', '', 'Fri', '', 'Sun']
 const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const MONTHS_SHOWN = 2
+
+interface LoadedMonths {
+  repoPath: string
+  key: string
+  months: Record<number, CommitEntry[]>
+  identity: { name: string; email: string }
+}
+
+const monthIndexOf = (year: number, month: number) => year * 12 + month
 
 export function ContributionGraph({ repoPath }: ContributionGraphProps) {
   const historyTick = useRepoStore(s => s.historyTick)
-  const [commits, setCommits] = useState<CommitEntry[]>([])
-  const [identity, setIdentity] = useState<{ name: string; email: string }>({ name: '', email: '' })
+  const [loaded, setLoaded] = useState<LoadedMonths>({ repoPath: '', key: '', months: {}, identity: { name: '', email: '' } })
   const [view, setView] = useState<'you' | 'team'>('you')
-  const [loading, setLoading] = useState(true)
-  const [shown, setShown] = useState(() => { const now = new Date(); return { year: now.getUTCFullYear(), month: now.getUTCMonth() } })
+  const nowDate = new Date()
+  const thisMonthIndex = monthIndexOf(nowDate.getUTCFullYear(), nowDate.getUTCMonth())
+  // The newest of the two displayed months; the other is always the month before it.
+  const [endIndex, setEndIndex] = useState(thisMonthIndex)
+  const oldestIndex = thisMonthIndex - 60 // computeActivity keeps five years
+  const dataKey = `${repoPath}|${historyTick}`
+  const loadedRef = useRef(loaded)
+  loadedRef.current = loaded
 
-  // Load commits on mount and when repoPath changes
+  // Months load lazily and independently. contributionData caches each month and shares
+  // in-flight requests, so paging back only reads the one month that is not loaded yet.
   useEffect(() => {
     let mounted = true
-    setLoading(true)
-
-    const timer = setTimeout(() => contributionData(repoPath, historyTick, shown.year, shown.month)
-      .then(({ commits: data, identity: gitIdentity }) => {
-        if (mounted) {
-          setCommits(data)
-          setIdentity(gitIdentity)
-        }
-      })
-      .catch((err) => {
-        console.error('[ContributionGraph] Error loading commits:', err)
-        if (mounted) setCommits([])
-      })
-      .finally(() => {
-        if (mounted) setLoading(false)
-      }), 150)
-
+    const timer = setTimeout(() => {
+      for (let offset = MONTHS_SHOWN - 1; offset >= 0; offset--) {
+        const index = endIndex - offset
+        const have = loadedRef.current
+        if (have.key === dataKey && index in have.months) continue
+        contributionData(repoPath, historyTick, Math.floor(index / 12), index % 12)
+          .then(({ commits, identity }) => {
+            if (!mounted) return
+            setLoaded(prev => prev.key === dataKey
+              ? { ...prev, months: { ...prev.months, [index]: commits }, identity }
+              : { repoPath, key: dataKey, months: { [index]: commits }, identity })
+          })
+          .catch(err => {
+            console.error('[ContributionGraph] Error loading commits:', err)
+            if (!mounted) return
+            setLoaded(prev => prev.key === dataKey
+              ? { ...prev, months: { ...prev.months, [index]: [] } }
+              : { repoPath, key: dataKey, months: { [index]: [] }, identity: prev.identity })
+          })
+      }
+    }, 150)
     return () => { mounted = false; clearTimeout(timer) }
-  }, [repoPath, historyTick, shown])
+  }, [repoPath, historyTick, dataKey, endIndex])
+
+  const shownIndexes = useMemo(
+    () => Array.from({ length: MONTHS_SHOWN }, (_, i) => endIndex - (MONTHS_SHOWN - 1 - i)),
+    [endIndex],
+  )
+  // Keep the previous data for this repository visible while a refresh is in flight; never another repository's.
+  const monthData = loaded.repoPath === repoPath ? loaded.months : EMPTY_MONTHS
+  const identity = loaded.identity
 
   const visibleCommits = useMemo(() => {
-    if (view === 'team') return commits
+    // A commit on a month boundary is read by both neighbouring months, so de-duplicate.
+    const byHash = new Map<string, CommitEntry>()
+    for (const index of shownIndexes) for (const commit of monthData[index] ?? []) byHash.set(commit.hash, commit)
+    const all = [...byHash.values()]
+    if (view === 'team') return all
 
     const email = identity.email.trim().toLocaleLowerCase()
     const name = identity.name.trim().toLocaleLowerCase()
-    return commits.filter(commit =>
+    return all.filter(commit =>
       (email && commit.email.trim().toLocaleLowerCase() === email) ||
       (name && commit.author.trim().toLocaleLowerCase() === name)
     )
-  }, [commits, identity, view])
+  }, [monthData, shownIndexes, identity, view])
 
-  // Compute activity data for the last 1825 days
   const activity = useMemo(() => computeActivity(visibleCommits, 1825), [visibleCommits])
   const todayKey = toDateKey(Date.now())
-  const nowDate = new Date()
-  const thisMonthIndex = nowDate.getUTCFullYear() * 12 + nowDate.getUTCMonth()
-  const shownIndex = shown.year * 12 + shown.month
-  const oldestIndex = thisMonthIndex - 60 // computeActivity keeps five years
-  const goToMonth = useCallback((index: number) => {
-    setShown({ year: Math.floor(index / 12), month: index % 12 })
-  }, [])
-  const goToPreviousMonth = useCallback(() => goToMonth(Math.max(oldestIndex, shownIndex - 1)), [goToMonth, oldestIndex, shownIndex])
-  const goToNextMonth     = useCallback(() => goToMonth(Math.min(thisMonthIndex, shownIndex + 1)), [goToMonth, thisMonthIndex, shownIndex])
-  const goToThisMonth     = useCallback(() => goToMonth(thisMonthIndex), [goToMonth, thisMonthIndex])
 
-  const monthActivity = useMemo(() => {
-    const prefix = `${shown.year}-${String(shown.month + 1).padStart(2, '0')}-`
+  const rangeActivity = useMemo(() => {
+    const prefixes = shownIndexes.map(i => `${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}-`)
     const filtered = new Map<string, DayActivity>()
-    for (const [key, val] of activity) {
-      if (key.startsWith(prefix)) filtered.set(key, val)
-    }
+    for (const [key, val] of activity) if (prefixes.some(p => key.startsWith(p))) filtered.set(key, val)
     return filtered
-  }, [activity, shown])
+  }, [activity, shownIndexes])
+  const stats = useMemo(() => calculateStats(rangeActivity), [rangeActivity])
 
-  const stats = useMemo(() => calculateStats(monthActivity), [monthActivity])
+  const pageBack      = useCallback(() => setEndIndex(i => Math.max(oldestIndex + MONTHS_SHOWN - 1, i - 1)), [oldestIndex])
+  const pageForward   = useCallback(() => setEndIndex(i => Math.min(thisMonthIndex, i + 1)), [thisMonthIndex])
+  const goToThisMonth = useCallback(() => setEndIndex(thisMonthIndex), [thisMonthIndex])
 
-  // Weeks covering the shown month, Monday first
-  const { yearWeeks, monthLabels, overflowKeys } = useMemo(() => {
-    const first = new Date(Date.UTC(shown.year, shown.month, 1))
-    const last  = new Date(Date.UTC(shown.year, shown.month + 1, 0))
-    const getMondayFirstDay = (date: Date) => (date.getUTCDay() + 6) % 7
-
-    const gridStart = new Date(first)
-    gridStart.setUTCDate(gridStart.getUTCDate() - getMondayFirstDay(gridStart))
-    const gridEnd = new Date(last)
-    gridEnd.setUTCDate(gridEnd.getUTCDate() + (6 - getMondayFirstDay(gridEnd)))
-
-    const firstKey = toDateKey(first.getTime())
-    const lastKey  = toDateKey(last.getTime())
-
-    const weeks: DayActivity[][] = []
-    const overflow = new Set<string>()
-    const cur = new Date(gridStart)
-
-    while (cur <= gridEnd) {
-      const week: DayActivity[] = []
-      for (let i = 0; i < 7; i++) {
-        const key = toDateKey(cur.getTime())
-        if (key < firstKey || key > lastKey) overflow.add(key)
-        week.push(monthActivity.get(key) ?? {
-          date: key, count: 0, commits: [], authors: new Set(), filesChanged: 0,
-        })
-        cur.setUTCDate(cur.getUTCDate() + 1)
-      }
-      weeks.push(week)
-    }
-
-    return { yearWeeks: weeks, monthLabels: [{ label: `${SHORT_MONTHS[shown.month]} ${shown.year}`, weekIdx: 0 }], overflowKeys: overflow }
-  }, [monthActivity, shown])
-
-  // SVG dimensions
-  const svgWidth  = yearWeeks.length * (DAY_SIZE + DAY_GAP) + WEEKDAY_LABEL_WIDTH + 10
-  const svgHeight = MONTH_LABEL_HEIGHT + 7 * (DAY_SIZE + DAY_GAP) + 10
-
-  if (loading) {
-    return (
-      <Card title="Contribution Graph" icon={<GraphIcon />}>
-        <div style={{ padding: 20, textAlign: 'center', color: '#344057', fontSize: 12 }}>
-          Loading activity data...
-        </div>
-      </Card>
-    )
-  }
+  const first = shownIndexes[0]
+  const last = shownIndexes[shownIndexes.length - 1]
+  const rangeLabel = `${SHORT_MONTHS[first % 12]} – ${SHORT_MONTHS[last % 12]} ${Math.floor(last / 12)}`
 
   return (
-    <Card title="Contribution Graph" icon={<GraphIcon />} actions={<ViewToggle view={view} onChange={setView} />}>
-      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {/* Header with stats and navigation */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-          <div style={{ display: 'flex', gap: 12, fontSize: 10.5, color: '#4a566a' }}>
-            <Stat label="Total" value={stats.totalCommits} />
-            <Stat label="Active days" value={stats.totalActiveDays} />
-            <Stat label="Max streak" value={`${stats.maxStreak}d`} />
-            <Stat label="Current" value={`${stats.currentStreak}d`} />
+    <Card
+      title="Contribution Graph"
+      icon={<GraphIcon />}
+      actions={
+        <>
+          <ViewToggle view={view} onChange={setView} />
+          <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
+            <NavButton onClick={pageBack} title="Load earlier months">‹</NavButton>
+            <NavButton onClick={goToThisMonth} title="Jump to the current month">{rangeLabel}</NavButton>
+            <NavButton onClick={pageForward} title="Later months">›</NavButton>
           </div>
-          <div style={{ display: 'flex', gap: 4 }}>
-            <NavButton onClick={goToPreviousMonth}>‹</NavButton>
-            <NavButton onClick={goToThisMonth}>{SHORT_MONTHS[shown.month]} {shown.year}</NavButton>
-            <NavButton onClick={goToNextMonth}>›</NavButton>
-          </div>
+        </>
+      }
+    >
+      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10, flex: 1, minHeight: 0 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, flexShrink: 0 }}>
+          <Stat label="Commits" value={stats.totalCommits} />
+          <Stat label="Active days" value={stats.totalActiveDays} />
+          <Stat label="Max streak" value={`${stats.maxStreak}d`} />
+          <Stat label="Current" value={`${stats.currentStreak}d`} />
         </div>
 
-        <div style={{ fontSize: 10, color: '#4a566a' }}>
-          {SHORT_MONTHS[shown.month]} {shown.year} · {commits.length.toLocaleString()} commits loaded for this month
-        </div>
-        {/* Graph container */}
-        <div style={{ overflowX: 'auto', paddingTop: 4 }}>
-          <svg
-            width={svgWidth}
-            height={svgHeight}
-            style={{ display: 'block' }}
-          >
-            {/* Month labels */}
-            <g>
-              {monthLabels.map(({ label, weekIdx }) => (
-                <text
-                  key={label}
-                  x={WEEKDAY_LABEL_WIDTH + weekIdx * (DAY_SIZE + DAY_GAP)}
-                  y={13}
-                  fill="#5a6880"
-                  fontSize={9}
-                  fontFamily='var(--lg-font-ui)'
-                >
-                  {label}
-                </text>
-              ))}
-            </g>
-
-            {/* Day of week labels */}
-            <g>
-              {WEEKDAY_LABELS.map((label, idx) => (
-                <text
-                  key={label}
-                  x={WEEKDAY_LABEL_WIDTH - 4}
-                  y={MONTH_LABEL_HEIGHT + (idx * (DAY_SIZE + DAY_GAP)) + (DAY_SIZE / 2)}
-                  fill="#344057"
-                  fontSize={8}
-                  fontFamily='var(--lg-font-ui)'
-                  textAnchor="end"
-                  dominantBaseline="middle"
-                >
-                  {label}
-                </text>
-              ))}
-            </g>
-
-            {/* Contribution squares */}
-            <g transform={`translate(${WEEKDAY_LABEL_WIDTH}, ${MONTH_LABEL_HEIGHT})`}>
-              {yearWeeks.map((week, weekIdx) =>
-                week.map((day, dayIdx) => {
-                  const x = weekIdx * (DAY_SIZE + DAY_GAP)
-                  const y = dayIdx * (DAY_SIZE + DAY_GAP)
-
-                  if (overflowKeys.has(day.date)) {
-                    return (
-                      <rect
-                        key={`${day.date}-${weekIdx}-${dayIdx}`}
-                        x={x}
-                        y={y}
-                        width={DAY_SIZE}
-                        height={DAY_SIZE}
-                        fill="#0e1520"
-                        rx={2}
-                      />
-                    )
-                  }
-
-                  const level   = getContributionLevel(day.count)
-                  const color   = getContributionColor(level, 'dark')
-                  const isToday = day.date === todayKey
-                  const monthEdge = getMonthEdge(day.date)
-                  const stroke = isToday
-                    ? '#4a9eff'
-                    : monthEdge === 'start'
-                      ? 'rgba(220,226,242,0.62)'
-                      : monthEdge === 'end'
-                        ? 'rgba(92,104,128,0.78)'
-                        : 'none'
-                  const strokeWidth = isToday || monthEdge ? 1 : 0
-
-                  return (
-                    <Tooltip
-                      key={`${day.date}-${weekIdx}-${dayIdx}`}
-                      content={<ContributionTooltip day={day} />}
-                      asSvgGroup
-                      side="top"
-                      delay={150}
-                    >
-                      <rect
-                        x={x}
-                        y={y}
-                        width={DAY_SIZE}
-                        height={DAY_SIZE}
-                        fill={color}
-                        rx={2}
-                        stroke={stroke}
-                        strokeWidth={strokeWidth}
-                        style={{ cursor: day.count > 0 ? 'pointer' : 'default' }}
-                      />
-                    </Tooltip>
-                  )
-                })
-              )}
-            </g>
-          </svg>
+        {/* Both months share the card's remaining height; cells stretch to fill it */}
+        <div style={{ display: 'flex', gap: 8, flex: 1, minHeight: 0 }}>
+          <div style={{ display: 'grid', gridTemplateRows: '20px repeat(7, minmax(0, 1fr))', rowGap: 3, flexShrink: 0 }}>
+            <span />
+            {WEEKDAY_LABELS.map((label, i) => (
+              <span key={i} style={{ display: 'flex', alignItems: 'center', fontSize: 8, color: '#344057', fontFamily: 'var(--lg-font-ui)' }}>{label}</span>
+            ))}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14, flex: 1, minWidth: 0 }}>
+            {shownIndexes.map(index => (
+              <MonthGrid
+                key={index}
+                year={Math.floor(index / 12)}
+                month={index % 12}
+                activity={activity}
+                todayKey={todayKey}
+                loading={!(index in monthData)}
+              />
+            ))}
+          </div>
         </div>
 
         {/* Legend */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4, fontSize: 9, color: '#344057', marginTop: 4 }}>
-          <span>Less</span>
-          {[0, 1, 2, 3, 4].map(level => (
-            <div
-              key={level}
-              style={{
-                width: DAY_SIZE,
-                height: DAY_SIZE,
-                borderRadius: 2,
-                background: getContributionColor(level as 0 | 1 | 2 | 3 | 4, 'dark'),
-              }}
-            />
-          ))}
-          <span>More</span>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 4, fontSize: 9, color: '#344057', flexShrink: 0 }}>
+          <span>{rangeLabel}</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span>Less</span>
+            {[0, 1, 2, 3, 4].map(level => (
+              <div
+                key={level}
+                style={{
+                  width: LEGEND_SIZE,
+                  height: LEGEND_SIZE,
+                  borderRadius: 2,
+                  background: getContributionColor(level as 0 | 1 | 2 | 3 | 4, 'dark'),
+                }}
+              />
+            ))}
+            <span>More</span>
+          </span>
         </div>
       </div>
     </Card>
   )
 }
 
+const EMPTY_MONTHS: Record<number, CommitEntry[]> = {}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
+
+function MonthGrid({ year, month, activity, todayKey, loading }: {
+  year: number; month: number
+  activity: Map<string, DayActivity>
+  todayKey: string
+  loading: boolean
+}) {
+  // Monday-first week columns covering the month; the padding cells stay empty.
+  const { cells, weeks, commitCount } = useMemo(() => {
+    const lead = (new Date(Date.UTC(year, month, 1)).getUTCDay() + 6) % 7
+    const dayCount = new Date(Date.UTC(year, month + 1, 0)).getUTCDate()
+    const list: (DayActivity | null)[] = Array(lead).fill(null)
+    let count = 0
+    for (let d = 1; d <= dayCount; d++) {
+      const key = toDateKey(Date.UTC(year, month, d))
+      const day = activity.get(key) ?? { date: key, count: 0, commits: [], authors: new Set<string>(), filesChanged: 0 }
+      count += day.count
+      list.push(day)
+    }
+    while (list.length % 7 !== 0) list.push(null)
+    return { cells: list, weeks: list.length / 7, commitCount: count }
+  }, [activity, year, month])
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
+      <div style={{ height: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', fontSize: 11, flexShrink: 0 }}>
+        <span style={{ fontWeight: 600, color: '#8a94a8', fontFamily: 'var(--lg-font-ui)' }}>{SHORT_MONTHS[month]} {year}</span>
+        <span style={{ fontSize: 10, color: '#344057', fontFamily: 'var(--lg-font-ui)' }}>
+          {loading ? 'loading…' : `${commitCount.toLocaleString()} commit${commitCount !== 1 ? 's' : ''}`}
+        </span>
+      </div>
+      <div style={{
+        display: 'grid', gridAutoFlow: 'column', flex: 1, minHeight: 0,
+        gridTemplateRows: 'repeat(7, minmax(0, 1fr))',
+        gridTemplateColumns: `repeat(${weeks}, minmax(0, 1fr))`,
+        gap: 3,
+      }}>
+        {cells.map((day, i) => {
+          if (!day) return <div key={i} />
+          if (loading) {
+            return <div key={i} style={{ borderRadius: 3, background: '#131c30', opacity: 0.7 }} />
+          }
+          const isFuture = day.date > todayKey
+          const color = getContributionColor(getContributionLevel(day.count), 'dark')
+          return (
+            <Tooltip key={i} content={<ContributionTooltip day={day} />} side="top" delay={150}>
+              <div
+                style={{
+                  borderRadius: 3, background: color, opacity: isFuture ? 0.35 : 1, minWidth: 0, minHeight: 0,
+                  outline: day.date === todayKey ? '1.5px solid #4a9eff' : 'none', outlineOffset: 1,
+                  cursor: day.count > 0 ? 'pointer' : 'default',
+                }}
+              />
+            </Tooltip>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 
 function ContributionTooltip({ day }: { day: DayActivity }) {
   const level = getContributionLevel(day.count)
@@ -339,8 +300,8 @@ function ContributionTooltip({ day }: { day: DayActivity }) {
 
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: '#c8d0e8', lineHeight: 1 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '7px 10px', borderRadius: 7, background: '#0d1119', border: '1px solid #1a2030' }}>
+      <div style={{ fontSize: 17, fontWeight: 700, color: '#c8d0e8', lineHeight: 1 }}>
         {value}
       </div>
       <div style={{ fontSize: 9, color: '#4a566a', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -350,10 +311,11 @@ function Stat({ label, value }: { label: string; value: string | number }) {
   )
 }
 
-function NavButton({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+function NavButton({ children, onClick, title }: { children: React.ReactNode; onClick: () => void; title?: string }) {
   return (
     <ActionBtn
       onClick={onClick}
+      title={title}
       size="sm"
       style={{ height: 22, paddingLeft: 8, paddingRight: 8, fontSize: 11, fontWeight: 600 }}
     >
@@ -404,6 +366,8 @@ function Card({ title, icon, actions, children }: { title: string; icon: React.R
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
+      height: '100%',
+      minHeight: 0,
     }}>
       <div style={{
         display: 'flex',
@@ -456,15 +420,4 @@ function GraphIcon() {
 function truncate(str: string, len: number): string {
   if (str.length <= len) return str
   return str.slice(0, len - 3) + '...'
-}
-
-function getMonthEdge(dateKey: string): 'start' | 'end' | null {
-  const [, month, day] = dateKey.split('-').map(Number)
-  if (day === 1) return 'start'
-
-  const date = new Date(`${dateKey}T00:00:00.000Z`)
-  const nextDay = new Date(date)
-  nextDay.setUTCDate(date.getUTCDate() + 1)
-
-  return nextDay.getUTCMonth() + 1 !== month ? 'end' : null
 }

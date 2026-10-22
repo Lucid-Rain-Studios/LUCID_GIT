@@ -71,7 +71,7 @@ test('LG-073 contributions deduplicate loads and invalidate cache on history upd
   expect((await contributionData('repo', 1, 2026, 8)).commits[0].hash).toBe('3')
 })
 
-test('LG-073 graph refreshes after history ticks, debounces and labels bounded coverage', async () => {
+test('LG-073 graph refreshes after history ticks, debounces, loads two months lazily and bounds coverage', async () => {
   const state = { historyTick: 0 }, requested = []
   const utils = component('src/lib/activityUtils.ts').exports
   let timer
@@ -83,18 +83,21 @@ test('LG-073 graph refreshes after history ticks, debounces and labels bounded c
   graph.render('ContributionGraph', { repoPath: 'repo' })
   graph.effects[0](); await timer(); await flush()
   let tree = graph.render('ContributionGraph', { repoPath: 'repo' })
-  expect(JSON.stringify(tree)).toContain('commits loaded for this month')
+  expect(requested).toEqual([0, 0])
+  // Two adjacent months load together: the shown month and the one before it.
+  expect(JSON.stringify(tree).match(/"month":/g)).toHaveLength(2)
+  expect(JSON.stringify(tree)).not.toContain('"loading":true')
   state.historyTick = 1
   graph.render('ContributionGraph', { repoPath: 'repo' })
   graph.effects[0]()
-  expect(requested).toEqual([0])
+  expect(requested).toEqual([0, 0])
   await timer(); await flush()
-  expect(requested).toEqual([0, 1])
+  expect(requested).toEqual([0, 0, 1, 1])
   tree = graph.render('ContributionGraph', { repoPath: 'repo' })
-  const previous = find(tree, n => n.type?.name === 'NavButton' && n.props.children[0] === '‹').props.onClick
+  const previous = find(tree.props.actions, n => n.type?.name === 'NavButton' && n.props.children[0] === '‹').props.onClick
   for (let i = 0; i < 20; i++) previous()
-  const shown = graph.slots[4]
-  expect(shown.year * 12 + shown.month).toBeGreaterThanOrEqual(new Date().getUTCFullYear() * 12 + new Date().getUTCMonth() - 60)
+  const endIndex = graph.slots[2]
+  expect(endIndex - 1).toBeGreaterThanOrEqual(new Date().getUTCFullYear() * 12 + new Date().getUTCMonth() - 60)
 })
 
 test('LG-080 diff options and theme follow live appearance settings without remounting', () => {
