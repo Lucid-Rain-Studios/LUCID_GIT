@@ -179,8 +179,9 @@ export async function guardedMergeOperation<T>(repo: string, operation: string, 
     try {
       const after = await context(repo)
       const detail = await diagnostics(repo, after, true)
+      // Unmerged index entries only come from a conflicting merge; the CONFLICT
+      // text can be absent when git's stdout was not captured in the error.
       const genuineConflict = !isMergeWriteFailure(error)
-        && /CONFLICT\s*\(|automatic merge failed|cannot merge binary|fix conflicts|unmerged files|merge conflict/i.test(String(error))
         && detail.unresolvedCount !== null && detail.unresolvedCount > 0
       logService.error('git.merge-safety', `Merge failed: ${JSON.stringify({ id: record.id, operation, error: String(error).slice(0, 3000), genuineConflict, ...detail })}`)
       if (after.incoming.length && !genuineConflict) {

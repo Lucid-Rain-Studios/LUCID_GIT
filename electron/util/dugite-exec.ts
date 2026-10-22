@@ -616,9 +616,12 @@ async function execWithProgressInner(
         reject(new Error(`git ${detectGitSubcommand(args)} was interrupted before completing.`))
       } else {
         // LFS writes the blocking paths to stdout and its final error to stderr.
-        const output = /cannot update locked files/i.test(stderr) ? `${stderr}\n${stdout}` : stderr || stdout
-        const errText = output.slice(0, 1000)
         const subCmd  = detectGitSubcommand(args)
+        // `merge --progress` fills stderr with "Updating files" progress while the
+        // CONFLICT lines go to stdout; dropping stdout hid real conflicts.
+        const output = /cannot update locked files/i.test(stderr) || (/^(?:merge|pull)$/.test(subCmd) && stderr && stdout)
+          ? `${stderr}\n${stdout}` : stderr || stdout
+        const errText = output.slice(0, 1000)
         logService.error(`git.${subCmd}`, `git ${subCmd} failed (exit ${code}):\n${errText}`)
         reject(new Error(`git ${subCmd} failed (exit ${code}):\n${output}`))
       }
