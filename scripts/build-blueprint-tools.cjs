@@ -1,8 +1,8 @@
 const fs = require('node:fs'), path = require('node:path'), { execFileSync } = require('node:child_process')
 const root = path.resolve(__dirname, '..'), out = path.join(root, 'public', 'blueprint')
+require('./setup-blueprint-deps.cjs')
 const missing = ['third_party/klee/src/scene.ts', 'third_party/UAssetAPI/UAssetAPI/UAssetAPI.csproj'].filter(p => !fs.existsSync(path.join(root, p)))
 if (missing.length) throw new Error('Clone UAssetAPI and Klee into third_party before building Blueprint tools: ' + missing.join(', '))
-require('./setup-blueprint-deps.cjs')
 async function main() {
   fs.mkdirSync(out, { recursive: true })
   await require('esbuild').build({ entryPoints: [path.join(root, 'tools/blueprint-klee-host.js')], outfile: path.join(out, 'klee.js'), bundle: true, format: 'esm', platform: 'browser', target: 'es2022', minify: true,
