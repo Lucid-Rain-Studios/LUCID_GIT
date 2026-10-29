@@ -1,7 +1,7 @@
 import { watch as fsWatch } from 'node:fs'
 import path from 'node:path'
 import chokidar from 'chokidar'
-import { exec } from '../util/dugite-exec'
+import { exec, gitOpActivity } from '../util/dugite-exec'
 import { logService } from './LogService'
 import { performanceService } from './PerformanceService'
 
@@ -46,6 +46,16 @@ class WatcherService {
       if (file.startsWith('.git/')) return metadataRelevant(file.slice(5))
       return !IGNORED_SEGMENTS.test(file) || tracked.has(file)
     }
+    // Our own `git status` rewrites .git/index to persist the stat refresh. That
+    // write is not a user change: reacting to it re-runs status, which rewrites
+    // the index again — a loop that keeps git at full CPU on a large repository.
+    // Index events during or just after one of our git processes are ignored;
+    // focus refresh and the other working-tree events still catch real changes.
+    const ownIndexWrite = (file: string) => {
+      if (!/(?:^|[\\/])index$/.test(file)) return false
+      const activity = gitOpActivity(repoPath)
+      return activity.inFlight > 0 || activity.ranDuring(Date.now())
+    }
     const fire = (refreshIndex = false) => {
       if (!current()) return
       if (refreshIndex) void refreshTracked().then(refreshDirectories).catch(error => logService.warn('watcher.tracked', String(error)))
@@ -60,6 +70,7 @@ class WatcherService {
       if (process.platform === 'win32' || process.platform === 'darwin') {
         try {
           const watcher = fsWatch(root, { recursive: true }, (_event, filename) => {
+            if (filename !== null && ownIndexWrite(String(filename))) return
             if (filename === null || accepts(String(filename))) fire(filename === null || /(?:^|[\\/])index$/.test(String(filename)))
           })
           watcher.on('error', onError)
@@ -78,7 +89,7 @@ class WatcherService {
           return IGNORED_SEGMENTS.test(file) && !tracked.has(file) && !trackedDirectories.has(file)
         },
       })
-      watcher.on('all', (_event, absolute) => { const file = path.relative(root, absolute); if (accepts(file)) fire(/(?:^|[\\/])index$/.test(file)) }).on('error', onError)
+      watcher.on('all', (_event, absolute) => { const file = path.relative(root, absolute); if (ownIndexWrite(file)) return; if (accepts(file)) fire(/(?:^|[\\/])index$/.test(file)) }).on('error', onError)
       disposers.push(() => { void watcher.close() })
     }
     addWatcher(repoPath, false)
