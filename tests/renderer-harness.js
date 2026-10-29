@@ -36,6 +36,8 @@ function component(file, mocks = {}, globals = {}) {
     module, exports: module.exports,
     require: name => name === 'react' ? React : mocks[name] || (
       name === 'react-dom' ? { createPortal: node => node } :
+      // Scan logging only observes; services under test run without it.
+      name === '../util/status-telemetry' ? { beginStatusScan: () => ({ started() {}, finish() {}, fail() {} }), noteWatcherFire() {}, flushStatusTelemetry() {} } :
       name === './stateTreeReview' ? component('src/lib/stateTreeReview.ts', {}, globals).exports :
       // Performance settings: real defaults (Medium), so components and services behave as shipped.
       name === './PerformanceService' ? component('electron/services/PerformanceService.ts', {}, { ...globals, __privateExports: [] }).exports :

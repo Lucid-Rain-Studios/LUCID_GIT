@@ -197,6 +197,11 @@ function trailLine(channel: string, repoPath: string | null, args: unknown[]): s
   return `${channel}${repoPath ? ` in ${repoPath}` : ''}${detail ? ` ${detail}` : ''}`
 }
 
+// Mirrors electron/cancellation.ts, which the renderer imports. Not imported here:
+// the handler tests substitute every sibling module, and a new import would be replaced too.
+const isCancellation = (error: unknown): boolean =>
+  /\b(?:Blueprint|Scene) review cancelled\.?\s*$/.test(String((error as { message?: unknown } | null)?.message ?? error))
+
 function formatIpcFailure(channel: string, args: unknown[], error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
   const stack = error instanceof Error && error.stack ? `\nStack:\n${error.stack}` : ''
@@ -281,6 +286,12 @@ export function registerHandlers(): void {
         // Read `message` directly: an error from another realm is not `instanceof Error`.
         const reason = (error as { message?: unknown } | null)?.message
         const firstLine = (typeof reason === 'string' ? reason : String(error)).split('\n')[0].slice(0, 200)
+        if (isCancellation(error)) {
+          // Superseded by a newer request: not a failure, so no failure context and no error entry.
+          trail('info', `Cancelled ${channel} after ${((Date.now() - startedWork) / 1000).toFixed(1)}s: ${firstLine}`)
+          logService.info(`ipc.${channel}`, `Cancelled: ${firstLine}`)
+          throw error
+        }
         trail('warn', `Failed ${channel} after ${((Date.now() - startedWork) / 1000).toFixed(1)}s (queued ${((startedWork - calledAt) / 1000).toFixed(1)}s): ${firstLine}`)
         if (trailed && trailRepo) { try { logFailureContext(`ipc.${channel}`, trailRepo, `Context for failed ${channel}`) } catch { /* ignore */ } }
         logService.error(`ipc.${channel}`, formatIpcFailure(channel, args, error))

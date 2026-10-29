@@ -163,19 +163,25 @@ function CommitPicker({ repoPath, value, onChange, placeholder, onCommitSelect, 
   const [loading, setLoading] = useState(false)
   const [showList, setShowList] = useState(false)
   const [query, setQuery] = useState('')
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
     setCommits([])
     setShowList(false)
+    setLoadError('')
   }, [sourceRef])
 
   const load = async () => {
     if (commits.length > 0) { setShowList(true); return }
     setLoading(true)
+    setLoadError('')
     try {
       const result = await ipc.log(repoPath, { limit: 200, refs: sourceRef ? [sourceRef] : undefined })
       setCommits(result)
       setShowList(true)
+    } catch (error) {
+      // Opened from focus and click handlers, so a rejection here has no caller to catch it.
+      setLoadError(error instanceof Error ? error.message : String(error))
     } finally { setLoading(false) }
   }
 
@@ -214,6 +220,12 @@ function CommitPicker({ repoPath, value, onChange, placeholder, onCommitSelect, 
           }}
         >{loading ? '…' : '▾'}</button>
       </div>
+
+      {loadError && (
+        <div role="alert" style={{ marginTop: 4, fontFamily: 'var(--lg-font-ui)', fontSize: 11, color: '#e84545' }}>
+          Could not load commits: {loadError}
+        </div>
+      )}
 
       {showList && filtered.length > 0 && (
         <div style={{

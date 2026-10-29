@@ -339,7 +339,13 @@ class LockService {
         await repairLockCache()
         const refreshedLocks = await this.listLocksUnguarded(repoPath)
         const refreshedLockId = refreshedLocks.find(l => l.path === normalized)?.id ?? resolvedLockId
-        await exec(makeArgs(refreshedLockId), repoPath)
+        try {
+          await exec(makeArgs(refreshedLockId), repoPath)
+        } catch (retryError) {
+          // The first attempt may have released the lock on the server before it
+          // failed on the missing file, so the retry finds nothing left to release.
+          if (!/Lock not found/i.test(String(retryError))) throw retryError
+        }
         resolvedLockId = refreshedLockId
       } else {
         throw error

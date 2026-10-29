@@ -1,6 +1,7 @@
 // Typed wrappers around window.lucidGit.*
 import type { IndexDiagnosis, IndexRepairResult, IndexRecoveryBlockers, IndexLockRecoveryResult, RecoveryGitTask } from '../electron/indexRecoveryTypes'
 import type { BlueprintRequest, BlueprintComparison } from '../electron/blueprintTypes'
+import { isCancellation } from '../electron/cancellation'
 import { createBlueprintClient } from './lib/blueprintClient'
 import { observeRepositoryDiagnostic } from './stores/repositoryIssueStore'
 import type { PushLockCheck, PushLockOverride } from '../electron/pushTypes'
@@ -1048,7 +1049,8 @@ function wrapApi<T extends LucidGitAPI>(api: T): T {
           if (result && typeof result.then === 'function') {
             return result.then((value: unknown) => { observe(value); return value }).catch((error: unknown) => {
               observe(error, true)
-              logRendererEvent(`renderer.ipc.${String(key)}`, `IPC call failed: ${describeUnknown(error)}`, { args, error })
+              // The main process already noted a cancellation at INFO; logging it again here would add an error.
+              if (!isCancellation(error)) logRendererEvent(`renderer.ipc.${String(key)}`, `IPC call failed: ${describeUnknown(error)}`, { args, error })
               throw error
             }).finally(finish)
           }

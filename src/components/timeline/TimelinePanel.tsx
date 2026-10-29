@@ -1587,7 +1587,8 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   const [totalLoaded, setTotalLoaded] = useState(0)
   const [hasMore,     setHasMore]     = useState(false)
   const [histLoading, setHistLoading] = useState(false)
-  const [limitRef]                    = useState({ current: INITIAL_LIMIT })
+  const [histError,   setHistError]   = useState('')
+  const [limitRef]                  = useState({ current: INITIAL_LIMIT })
   const [remoteUrl,   setRemoteUrl]   = useState<string | null>(null)
   const [branches,     setBranches]     = useState<BranchInfo[]>([])
   const [defaultBranch, setDefaultBranch] = useState('main')
@@ -1781,6 +1782,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     allBranchesOverride?: BranchInfo[],
   ) => {
     setHistLoading(true)
+    setHistError('')
     try {
       const active = selectedBranchesOverride ?? selBranches
       const mainBranch = defaultBranchOverride ?? defaultBranch
@@ -1829,6 +1831,10 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
       const pruned = pruneGraphToBranchKeys(graph, allowedKeys)
       setNodes(pruned)
       setTotalLoaded(pruned.length)
+    } catch (error) {
+      // Most callers start a load without awaiting it, so a rejection here has
+      // nothing to catch it. Keep the commits already shown and say why they are stale.
+      setHistError(error instanceof Error ? error.message : String(error))
     } finally {
       setHistLoading(false)
     }
@@ -2163,6 +2169,11 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
 
         {/* Commit list */}
         <div onScroll={handleCommitListScroll} style={{ flex: 1, overflowY: 'auto' }}>
+          {histError && (
+            <p role="alert" style={{ fontFamily: 'var(--lg-font-mono)', fontSize: 11, color: '#e84545', padding: '8px 12px' }}>
+              Could not load history: {histError} Use ↺ to retry.
+            </p>
+          )}
           {histLoading && displayedNodes.length === 0 && (
             <p style={{ fontFamily: 'var(--lg-font-mono)', fontSize: 11, color: '#2a3040', padding: '16px 12px' }}>Loading…</p>
           )}
