@@ -38,6 +38,7 @@
     "firebase": "^12.19.0",
     "keytar": "^7.9.0",
     "lucide-react": "^0.454.0",
+    "monaco-editor": "^0.55.1",
     "p-queue": "^8.0.1",
     "playwright": "^1.59.1",
     "react": "^18.3.0",

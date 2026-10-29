@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef } from 'react'
 import { DiffEditor } from '@monaco-editor/react'
-import type { Monaco } from '@monaco-editor/react'
+import type { Monaco, DiffOnMount } from '@monaco-editor/react'
 import { DiffContent } from '@/ipc'
 import { DiffErrorBoundary } from './DiffErrorBoundary'
 import { useAppearanceStore } from '@/stores/appearanceStore'
@@ -13,6 +13,7 @@ interface TextDiffProps {
 export function TextDiff({ diff }: TextDiffProps) {
   const settings = useAppearanceStore(s => s.settings)
   const monacoRef = useRef<Monaco | null>(null)
+  const editorRef = useRef<Parameters<DiffOnMount>[0] | null>(null)
   const theme = THEMES.find(t => t.id === settings.theme) ?? THEMES[0]
   const applyTheme = useCallback((monaco: Monaco) => {
     monaco.editor.defineTheme('lucid-git', {
@@ -28,6 +29,20 @@ export function TextDiff({ diff }: TextDiffProps) {
   useEffect(() => {
     if (monacoRef.current) applyTheme(monacoRef.current)
   }, [applyTheme])
+  // @monaco-editor/react disposes both models before it disposes the editor, and
+  // Monaco reports a model that goes while still attached as an unexpected error
+  // ("TextModel got disposed before DiffEditorWidget model got reset"), which
+  // lands in the log as an uncaught error on every unmount. A parent's cleanup
+  // runs before its child's, so detaching and disposing here leaves the library
+  // nothing attached to dispose.
+  useEffect(() => () => {
+    const editor = editorRef.current
+    const model = editor?.getModel()
+    if (!editor || !model) return
+    editor.setModel(null)
+    model.original.dispose()
+    model.modified.dispose()
+  }, [])
   // Keyed on what is being shown, so a failure clears when the file changes.
   const resetKey = `${diff.language}:${diff.oldContent.length}:${diff.newContent.length}`
 
@@ -39,6 +54,7 @@ export function TextDiff({ diff }: TextDiffProps) {
       language={diff.language}
       theme="lucid-git"
       beforeMount={monaco => { monacoRef.current = monaco; applyTheme(monaco) }}
+      onMount={editor => { editorRef.current = editor }}
       height="100%"
       options={{
         readOnly: true,
