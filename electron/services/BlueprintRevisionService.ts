@@ -148,6 +148,27 @@ export class BlueprintRevisionService {
     }, req.nativeScene ? 1500_000 : req.nativeGeometry ? 300_000 : 120_000, 'Blueprint revision read')
   }
 
+  /**
+   * Cheap identity of both compared sides: resolves HEAD, the index and the working file
+   * to blob/stat identities without reading or extracting any content. The renderer polls
+   * it on repository ticks and re-compares only when the value changes.
+   */
+  async stamp(repoPath: string, req: Pick<BlueprintRequest, 'filePath' | 'oldPath' | 'leftRef' | 'rightRef'>): Promise<string> {
+    if (this.stopping) throw new Error('Blueprint reader is shutting down.')
+    if (!req || typeof repoPath !== 'string') throw new Error('Invalid Blueprint request.')
+    validatePath(req.filePath); validatePath(req.oldPath ?? req.filePath)
+    validateRef(req.leftRef); validateRef(req.rightRef)
+    const repo = await fs.realpath(repoPath)
+    return withGitTimeout(async () => {
+      const parts: string[] = []
+      for (const [file, ref] of [[req.oldPath ?? req.filePath, req.leftRef], [req.filePath, req.rightRef]] as const) {
+        const side = await withRepoSlot(repo, 'read', () => this.resolveSide(repo, file, ref))
+        parts.push('status' in side ? [side.status, side.reason ?? ''].join(':') : [side.identity, side.companionIdentity].join(':'))
+      }
+      return parts.join('|')
+    }, 30_000, 'Blueprint revision stamp')
+  }
+
   private async side(repo: string, file: string, ref: string, signal?: AbortSignal, refreshKeys?: Set<string>, byteLimit = MAX_BYTES, nativeGeometry = false): Promise<BlueprintSide> {
     const snapshot = await withRepoSlot(repo, 'read', () => this.resolveSide(repo, file, ref, signal))
     if ('status' in snapshot) return snapshot

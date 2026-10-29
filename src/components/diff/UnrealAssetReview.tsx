@@ -27,6 +27,7 @@ import { BlueprintDiff, type BlueprintDiffProps } from './BlueprintDiff'
 import { BlueprintChoice } from './BlueprintChoice'
 import { useAssetViewerStore } from '@/stores/assetViewerStore'
 import { usePerformanceStore } from '@/stores/performanceStore'
+import { useRepoStore } from '@/stores/repoStore'
 import './UnrealAssetReview.css'
 const ScenePreview = React.lazy(() => import('./ScenePreview').then(module => ({ default: module.ScenePreview })))
 const NativeStateTreeBags = React.lazy(() => import('./ScenePreview').then(module => ({ default: module.NativeStateTreeBags })))
@@ -90,6 +91,26 @@ export function UnrealAssetReview(props: BlueprintDiffProps) {
   const [sceneSide, setSceneSide] = useState<'left' | 'right'>('right')
   const sceneProfile = useRef('')
   const sceneRequested = sceneKey === captureKey
+  // HEAD, INDEX and WORKING are moving targets: the same request strings name different content after a commit, stage or save.
+  // A cheap identity probe on repository ticks bumps `revision` only when a compared side really changed, so unchanged content is never re-read.
+  const mutableRefs = [leftRef, rightRef].some(ref => ref === 'HEAD' || ref === 'INDEX' || ref === 'WORKING')
+  const repoTick = useRepoStore(state => mutableRefs && state.repoPath === repoPath ? state.historyTick + ':' + state.statusTick : '')
+  const [revision, setRevision] = useState(0)
+  const stampBaseline = useRef({ key: '', value: '' })
+  useEffect(() => {
+    if (!mutableRefs) return
+    let cancelled = false
+    // Debounce bursts of ticks (watcher storms) into one probe.
+    const timer = setTimeout(() => {
+      Promise.resolve().then(() => ipc.blueprintStamp(repoPath, { filePath, oldPath, leftRef, rightRef })).then(value => {
+        if (cancelled) return
+        const baseline = stampBaseline.current
+        if (baseline.key !== captureKey) stampBaseline.current = { key: captureKey, value }
+        else if (baseline.value !== value) { stampBaseline.current = { key: captureKey, value }; setRevision(count => count + 1) }
+      }).catch(() => {})
+    }, 300)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [mutableRefs, repoTick, captureKey])
   const [sceneLodSelection, setSceneLodSelection] = useState({ key: '', lod: 0 })
   const sceneLod = sceneLodSelection.key === captureKey ? sceneLodSelection.lod : 0
   const [sceneBakeMaterials, setSceneBakeMaterials] = useState(false)
@@ -144,7 +165,7 @@ export function UnrealAssetReview(props: BlueprintDiffProps) {
       if (changedCapture) setView(hasGraphs || nativeRequested || sceneRequested || previewMode === 'auto' && single && present.some(item => item.document?.assetReview?.family === 'map' || surfacePreviewKind(item.document?.assetClass)) ? 'preview' : single ? 'contents' : 'changes')
     }).catch(reason => { if (!cancelled) { setError(String(reason.message ?? reason)); setRefreshing(false) } })
     return () => { cancelled = true; void ipc.blueprintCancel(requestId).catch(() => {}) }
-  }, [repoPath, filePath, oldPath, leftRef, rightRef, single, retry, includeActors, nativeRequested, nativeSide, sceneRequested, sceneSide, sceneBakeMaterials, sceneLod, captureIdentity, captureKey])
+  }, [repoPath, filePath, oldPath, leftRef, rightRef, single, retry, includeActors, nativeRequested, nativeSide, sceneRequested, sceneSide, sceneBakeMaterials, sceneLod, captureIdentity, captureKey, revision])
   const changes = useMemo(() => result && !single ? assetChanges(result) : [], [result, single])
   const selectedSide = result?.[side], assetDocument = selectedSide?.document
   const reviewSides = useMemo(() => result ? (['left', 'right'] as const).map(key => reviewObjects(result, key)) : [[], []], [result])

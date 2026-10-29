@@ -916,6 +916,7 @@ export interface LucidGitAPI {
   assetDiffPreview: (repoPath: string, filePath: string, leftRef: string, rightRef: string, editorBinaryOverride?: string) => Promise<AssetDiffResult>
   blueprintCompare: (repoPath: string, request: BlueprintRequest) => Promise<BlueprintComparison>
   blueprintCancel: (requestId: string) => Promise<void>
+  blueprintStamp: (repoPath: string, request: Pick<BlueprintRequest, 'filePath' | 'oldPath' | 'leftRef' | 'rightRef'>) => Promise<string>
   nativeSceneRead: (key: string) => Promise<Uint8Array>
   assetRenderThumbnail: (repoPath: string, filePath: string, ref: string) => Promise<string | null>
   assetExtractMetadata: (repoPath: string, filePath: string, ref: string) => Promise<Record<string, string>>

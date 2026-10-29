@@ -437,3 +437,33 @@ test('Content Browser previews one read-only graph and shared file actions open 
     expect(errors).toEqual([])
   } finally {server.closeAllConnections();await new Promise(resolve=>server.close(resolve))}
 })
+
+test('revision stamp follows HEAD, the index and the working file without reading content', async () => {
+  const repo = tmpDir('lg-blueprint-stamp-'), cache = tmpDir('lg-blueprint-stamp-cache-')
+  git(repo, 'init', '-q'); git(repo, 'config', 'user.email', 'test@example.com'); git(repo, 'config', 'user.name', 'Test')
+  const file = 'Asset.uasset', asset = path.join(repo, file)
+  fs.writeFileSync(asset, 'one'); git(repo, 'add', '.'); git(repo, 'commit', '-q', '-m', 'one')
+  const reader = new BlueprintRevisionService(helper, cache)
+  const stamp = (leftRef, rightRef) => reader.stamp(repo, { filePath: file, leftRef, rightRef })
+  const committed = await stamp('HEAD', 'WORKING')
+  // A new commit changes what HEAD names, so a preview keyed on the string 'HEAD' must refresh.
+  fs.writeFileSync(asset, 'two'); git(repo, 'add', '.'); git(repo, 'commit', '-q', '-m', 'two')
+  const afterCommit = await stamp('HEAD', 'WORKING')
+  expect(afterCommit).not.toBe(committed)
+  expect(await stamp('HEAD', 'WORKING')).toBe(afterCommit)
+  // Saving the working file changes the right side only.
+  const [leftBefore, rightBefore] = afterCommit.split('|')
+  fs.writeFileSync(asset, 'three')
+  const [leftAfter, rightAfter] = (await stamp('HEAD', 'WORKING')).split('|')
+  expect(leftAfter).toBe(leftBefore)
+  expect(rightAfter).not.toBe(rightBefore)
+  // Staging moves the index side without touching HEAD.
+  const unstaged = await stamp('INDEX', 'WORKING')
+  git(repo, 'add', '.')
+  const staged = await stamp('INDEX', 'WORKING')
+  expect(staged.split('|')[0]).not.toBe(unstaged.split('|')[0])
+  // Unresolvable and absent sides produce a stable, distinct stamp instead of throwing.
+  expect(await stamp('ABSENT', 'HEAD')).toMatch(/^absent:/)
+  await expect(reader.stamp(repo, { filePath: file, leftRef: 'main', rightRef: 'HEAD' })).rejects.toThrow('Invalid Blueprint revision.')
+  reader.stop()
+})

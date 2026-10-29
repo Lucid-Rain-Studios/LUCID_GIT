@@ -21,6 +21,7 @@ const api = {
   },
   blueprintCompare: (repoPath: string, request: BlueprintRequest) => ipcRenderer.invoke(CHANNELS.BLUEPRINT_COMPARE, repoPath, request),
   blueprintCancel: (requestId: string) => ipcRenderer.invoke(CHANNELS.BLUEPRINT_CANCEL, requestId),
+  blueprintStamp: (repoPath: string, request: Pick<BlueprintRequest, 'filePath' | 'oldPath' | 'leftRef' | 'rightRef'>) => ipcRenderer.invoke(CHANNELS.BLUEPRINT_STAMP, repoPath, request),
   nativeSceneRead: (key: string) => ipcRenderer.invoke(CHANNELS.NATIVE_SCENE_READ, key),
   diagnoseIndex: (repoPath: string) => ipcRenderer.invoke(CHANNELS.GIT_INDEX_DIAGNOSE, repoPath),
   repairIndex: (repoPath: string, token: string) => ipcRenderer.invoke(CHANNELS.GIT_INDEX_REPAIR, repoPath, token),

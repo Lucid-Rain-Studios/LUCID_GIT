@@ -1,7 +1,7 @@
 import { RevisionFileActions } from '@/components/shared/RevisionFileActions'
 import { timelineBranches } from '@/lib/timelineBranches'
 import { isBinaryPath } from '@/lib/binaryFormats'
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ipc, CommitEntry, CommitFileChange, BranchInfo, BlameEntry, FileStatus, DiffContent } from '@/ipc'
 import { useOperationStore } from '@/stores/operationStore'
@@ -1556,7 +1556,16 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
 
   // ── Selection ──────────────────────────────────────────────────────────────
   const [leftSel,    setLeftSel]    = useState<LeftSel>({ kind: 'working-tree' })
-  const [centerFile, setCenterFile] = useState<CenterFile | null>(null)
+  const [pickedCenterFile, setCenterFile] = useState<CenterFile | null>(null)
+  // A picked working row is a snapshot of the status at click time; follow the live status so
+  // staging, unstaging or editing re-targets the preview request instead of keeping stale refs.
+  const centerFile = useMemo<CenterFile | null>(() => {
+    if (pickedCenterFile?.kind !== 'working') return pickedCenterFile
+    const live = fileStatus.find(file => file.path === pickedCenterFile.file.path)
+    if (!live) return pickedCenterFile
+    const file = pickedCenterFile.file.staged && live.staged ? live : { ...live, staged: false }
+    return { kind: 'working', file }
+  }, [pickedCenterFile, fileStatus])
   const [timelineStagePaths, setTimelineStagePaths] = useState<Set<string>>(new Set())
   const knownTimelineStagePaths = useRef<Set<string>>(new Set())
 

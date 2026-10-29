@@ -1214,6 +1214,7 @@ export function registerHandlers(): void {
     finally { event.sender.removeListener('destroyed', destroyed); blueprintReads.delete(key) }
   })
   handle(CHANNELS.BLUEPRINT_CANCEL, (event, requestId: string) => { blueprintReads.get(event.sender.id + ':' + requestId)?.abort() })
+  handle(CHANNELS.BLUEPRINT_STAMP, (_event, repoPath: string, request: Pick<BlueprintRequest, 'filePath' | 'oldPath' | 'leftRef' | 'rightRef'>) => blueprintRevisionService.stamp(repoPath, request))
   handle(CHANNELS.NATIVE_SCENE_READ, (_event, key: string) => nativeSceneService.read(key))
 
   handle(CHANNELS.ASSET_DIFF_PREVIEW, (_event, repoPath: string, filePath: string, leftRef: string, rightRef: string, editorBinaryOverride?: string) =>
