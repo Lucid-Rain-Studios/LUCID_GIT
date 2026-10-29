@@ -4,6 +4,7 @@ import chokidar from 'chokidar'
 import { exec, gitOpActivity } from '../util/dugite-exec'
 import { logService } from './LogService'
 import { performanceService } from './PerformanceService'
+import { noteWatcherFire } from '../util/status-telemetry'
 
 const TRANSIENT_WATCH_ERRORS = /^(EPERM|ENOENT|EBUSY|EACCES)\b/
 const IGNORED_SEGMENTS = /(?:^|\/)(?:node_modules|\.vs|Binaries|Intermediate|DerivedDataCache|Saved)(?:\/|$)/
@@ -56,22 +57,35 @@ class WatcherService {
       const activity = gitOpActivity(repoPath)
       return activity.inFlight > 0 || activity.ranDuring(Date.now())
     }
-    const fire = (refreshIndex = false) => {
+    // What the debounce window collected, so the status log can say which change
+    // led to a refresh and how many events one refresh stood in for.
+    let firstFile = '', pendingEvents = 0
+    const fire = (refreshIndex = false, file = '') => {
       if (!current()) return
       if (refreshIndex) void refreshTracked().then(refreshDirectories).catch(error => logService.warn('watcher.tracked', String(error)))
+      if (pendingEvents++ === 0) firstFile = file
       const previous = this.timers.get(repoPath)
       if (previous) clearTimeout(previous)
-      this.timers.set(repoPath, setTimeout(() => { this.timers.delete(repoPath); if (current()) onChange() }, performanceService.get().watcherDelayMs))
+      this.timers.set(repoPath, setTimeout(() => {
+        this.timers.delete(repoPath)
+        if (!current()) return
+        noteWatcherFire(repoPath, firstFile, pendingEvents)
+        firstFile = ''
+        pendingEvents = 0
+        onChange()
+      }, performanceService.get().watcherDelayMs))
     }
     const disposers: Array<() => void> = []
     const onError = (error: Error) => { if (!TRANSIENT_WATCH_ERRORS.test(error.message)) logService.warn('watcher', error.message) }
     const addWatcher = (root: string, metadata: boolean) => {
       const accepts = (file: string) => metadata ? metadataRelevant(file.replace(/\\/g, '/')) : relevant(file)
+      // A separate git directory (worktree) is reported relative to itself.
+      const label = (file: string) => file && metadata ? `[git dir] ${file}` : file
       if (process.platform === 'win32' || process.platform === 'darwin') {
         try {
           const watcher = fsWatch(root, { recursive: true }, (_event, filename) => {
             if (filename !== null && ownIndexWrite(String(filename))) return
-            if (filename === null || accepts(String(filename))) fire(filename === null || /(?:^|[\\/])index$/.test(String(filename)))
+            if (filename === null || accepts(String(filename))) fire(filename === null || /(?:^|[\\/])index$/.test(String(filename)), label(filename === null ? '' : String(filename)))
           })
           watcher.on('error', onError)
           disposers.push(() => watcher.close())
@@ -89,7 +103,7 @@ class WatcherService {
           return IGNORED_SEGMENTS.test(file) && !tracked.has(file) && !trackedDirectories.has(file)
         },
       })
-      watcher.on('all', (_event, absolute) => { const file = path.relative(root, absolute); if (ownIndexWrite(file)) return; if (accepts(file)) fire(/(?:^|[\\/])index$/.test(file)) }).on('error', onError)
+      watcher.on('all', (_event, absolute) => { const file = path.relative(root, absolute); if (ownIndexWrite(file)) return; if (accepts(file)) fire(/(?:^|[\\/])index$/.test(file), label(file)) }).on('error', onError)
       disposers.push(() => { void watcher.close() })
     }
     addWatcher(repoPath, false)

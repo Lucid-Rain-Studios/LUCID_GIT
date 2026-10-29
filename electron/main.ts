@@ -5,6 +5,7 @@ import { autoUpdater } from 'electron-updater'
 import { registerHandlers, describeInFlightIpc, stopPresenceForQuit } from './ipc/handlers'
 import { CHANNELS } from './ipc/channels'
 import { watcherService } from './services/WatcherService'
+import { flushStatusTelemetry } from './util/status-telemetry'
 import { logService } from './services/LogService'
 import { desktopNotificationService } from './services/DesktopNotificationService'
 import { settingsService } from './services/SettingsService'
@@ -394,6 +395,7 @@ app.on('before-quit', event => {
   quitting = true
   shutdownRepoGate()
   watcherService.unwatchAll()
+  flushStatusTelemetry()
   // One owner waits for Git children and the existing bounded Offline write.
   // Repeated close/update requests cannot start another sweep or end the
   // session early. Interrupted writes may still leave a recoverable lock.

@@ -481,7 +481,7 @@ export function registerHandlers(): void {
           const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login
           if (currentLogin) {
             const locks = await lockService.listLocks(repoPath)
-            const dirty = new Set((await gitService.status(repoPath)).map(file => file.path))
+            const dirty = new Set((await gitService.status(repoPath, 'push-unlock')).map(file => file.path))
             const pushedFiles = new Set(filesAhead)
             const result = await lockService.unlockFiles(
               repoPath,

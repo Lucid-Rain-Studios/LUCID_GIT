@@ -7,6 +7,7 @@ import { performance } from 'node:perf_hooks'
 import { exec, execSafe, execWithProgress, execWithStdin, gitAuthArgs, withGitTimeout, gitOpActivity, waitForGitOpsToDrain, ProgressCallback } from '../util/dugite-exec'
 import { nulPaths, parseNameStatus, parseNumstat } from '../util/git-paths'
 import { withRepoSlot } from '../util/repo-gate'
+import { beginStatusScan } from '../util/status-telemetry'
 import { assertSafeMergeCommit, clearMergeGuardAfterAbort, guardedMergeCommit, guardedMergeOperation, isMergeWriteFailure, logLeftoverBlockedMerge, mergeBlockedOperation, mergeBlockingReason } from '../util/merge-safety'
 import { authService } from './AuthService'
 import { logService } from './LogService'
@@ -249,7 +250,7 @@ class GitService {
    */
   async mergeOverlapFiles(repoPath: string, mergeRef: string): Promise<string[]> {
     const [localFiles, incoming] = await Promise.all([
-      this.status(repoPath).then(s => s.map(f => f.path)).catch(() => [] as string[]),
+      this.status(repoPath, 'merge-overlap').then(s => s.map(f => f.path)).catch(() => [] as string[]),
       execSafe(['diff', '--name-only', '-z', 'HEAD', mergeRef], repoPath),
     ])
     if (incoming.exitCode !== 0 || localFiles.length === 0) return []
@@ -398,7 +399,7 @@ class GitService {
   }
 
   /** git status --porcelain=v1 */
-  async status(repoPath: string): Promise<FileStatus[]> {
+  async status(repoPath: string, source = 'ipc'): Promise<FileStatus[]> {
     // No `--no-optional-locks` here, deliberately. It stops git writing back
     // the index it just refreshed, so after a merge changes every file's stat
     // data each status re-hashes all of them through the LFS clean filter and
@@ -415,12 +416,23 @@ class GitService {
     // That writeback takes index.lock, so a status from any caller — the IPC
     // handler, PR monitor, forecast — holds a read slot and never overlaps a
     // write. Inside a write it passes straight through.
-    const { exitCode, stdout, stderr } = await withRepoSlot(repoPath, 'read', () => execSafe(
-      ['status', '--porcelain=v1', '-z', '--untracked-files=all'],
-      repoPath
-    ))
-    if (exitCode !== 0) throw new Error(stderr || `git status failed (exit ${exitCode})`)
-    return parseStatus(stdout)
+    //
+    // `source` and the scan record only feed the log (see status-telemetry):
+    // what asked for this scan, how long it queued and how long it ran.
+    const scan = beginStatusScan(repoPath, source)
+    try {
+      const { exitCode, stdout, stderr } = await withRepoSlot(repoPath, 'read', () => {
+        scan.started()
+        return execSafe(['status', '--porcelain=v1', '-z', '--untracked-files=all'], repoPath)
+      })
+      if (exitCode !== 0) throw new Error(stderr || `git status failed (exit ${exitCode})`)
+      const files = parseStatus(stdout)
+      scan.finish(files)
+      return files
+    } catch (error) {
+      scan.fail(error)
+      throw error
+    }
   }
 
   /**
@@ -440,7 +452,7 @@ class GitService {
     const pending = this._statusInFlight.get(key)
     if (pending && pending.generation === generation) return (await pending.request).slice()
 
-    const request = this.status(repoPath).then(value => {
+    const request = this.status(repoPath, 'monitor').then(value => {
       // A write finished while this scan ran, so its answer may predate that write.
       if ((this._statusGeneration.get(key) ?? 0) === generation) this._statusCache.set(key, { ts: Date.now(), value })
       return value
@@ -1186,7 +1198,7 @@ class GitService {
 
   private async workingChangePaths(repoPath: string): Promise<string[]> {
     const [status, ahead] = await Promise.all([
-      this.status(repoPath).catch(() => [] as FileStatus[]),
+      this.status(repoPath, 'working-changes').catch(() => [] as FileStatus[]),
       this.aheadFilePaths(repoPath).catch(() => [] as string[]),
     ])
 
@@ -2314,7 +2326,7 @@ ${lastError}` : '')
       args.push('--pathspec-from-file=-', '--pathspec-file-nul')
       const input = paths.map(p => ':(literal)' + p).join('\0') + '\0'
       const selected = new Set(paths)
-      const untracked = (await this.status(repoPath)).filter(file => selected.has(file.path) && file.indexStatus === '?').map(file => file.path)
+      const untracked = (await this.status(repoPath, 'stage')).filter(file => selected.has(file.path) && file.indexStatus === '?').map(file => file.path)
       try {
         await save(() => execWithStdin(args, repoPath, input))
       } catch (error) {
@@ -2912,7 +2924,7 @@ ${lastError}` : '')
   ): Promise<ConflictPreviewFile[]> {
     const UE_EXTS = new Set(['.uasset', '.umap', '.udk', '.ubulk', '.uexp', '.ucas'])
     const currentBranch = await this.currentBranch(repoPath)
-    const status = await this.status(repoPath)
+    const status = await this.status(repoPath, 'conflict-preview')
     const statusByPath = new Map(status.map(f => [f.path, f]))
 
     const out: ConflictPreviewFile[] = []
