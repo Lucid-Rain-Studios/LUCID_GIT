@@ -230,11 +230,6 @@ export interface PRMonitorStatus {
   mergedToMain: { availableToUnlock: string[]; containsLocalChanges: string[] } | null
 }
 
-export interface UndoInfo {
-  op: 'pull' | 'merge' | 'update-from-main' | 'reset' | 'checkout' | 'revert' | 'cherry-pick'
-  label: string
-}
-
 export interface RepoSearchResult {
   commits:  { hash: string; subject: string; author: string }[]
   branches: string[]
@@ -968,11 +963,6 @@ export interface LucidGitAPI {
   prMonitorCheck:  (repoPath: string) => Promise<void>
   prMonitorStatus: (repoPath: string) => Promise<PRMonitorStatus>
   prMonitorResolve:(repoPath: string, prNumber: number) => Promise<void>
-
-  // Undo / checkpoint
-  undoGet:  (repoPath: string) => Promise<UndoInfo | null>
-  undoLast: (repoPath: string) => Promise<{ ok: boolean; label: string; message: string }>
-  onUndoAvailable: (cb: (info: { repoPath: string; label: string }) => void) => () => void
 
   // Global search
   searchRepo: (repoPath: string, query: string) => Promise<RepoSearchResult>

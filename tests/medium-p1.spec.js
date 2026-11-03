@@ -18,12 +18,6 @@ function repo() {
   git(dir, 'commit', '-qm', 'initial')
   return dir
 }
-function undo(mockRunner = runner) {
-  return component('electron/services/UndoService.ts', {
-    electron: { BrowserWindow: { getAllWindows: () => [] } },
-    '../util/dugite-exec': mockRunner, '../ipc/channels': { CHANNELS: {} },
-  }).exports.undoService
-}
 function asset(mockRunner = runner, auth = { getCurrentToken: async () => null }) {
   return component('electron/services/AssetDiffService.ts', {
     fs, path, os: require('os'), crypto: require('crypto'), sharp: () => {},
@@ -67,37 +61,6 @@ test('LG-003 accepted tradeoff: old locks clear automatically; manual removal st
   expect(await gitService.clearStaleIndexLock(dir)).toBe(true)
 })
 
-test('LG-005 Undo refuses a different branch and retains the checkpoint', async () => {
-  const dir = repo(), service = undo()
-  await service.recordCheckpoint(dir, 'reset', 'Reset')
-  git(dir, 'checkout', '-qb', 'other')
-  fs.writeFileSync(path.join(dir, 'file.txt'), 'other\n')
-  git(dir, 'commit', '-qam', 'other tip')
-  const tip = git(dir, 'rev-parse', 'HEAD')
-  expect((await service.undo(dir)).ok).toBe(false)
-  expect(git(dir, 'rev-parse', 'HEAD')).toBe(tip)
-  expect(service.peek(dir)).not.toBeNull()
-  git(dir, 'checkout', '-q', 'main')
-  expect((await service.undo(dir)).ok).toBe(true)
-})
-
-test('LG-005 Undo checks the expected post-operation HEAD on the same branch', async () => {
-  const dir = repo(), service = undo(), original = git(dir, 'rev-parse', 'HEAD').trim()
-  await service.recordCheckpoint(dir, 'pull', 'Pull')
-  fs.writeFileSync(path.join(dir, 'file.txt'), 'pulled\n')
-  git(dir, 'commit', '-qam', 'pulled tip')
-  await service.markAvailable(dir)
-  const expected = git(dir, 'rev-parse', 'HEAD').trim()
-  fs.writeFileSync(path.join(dir, 'file.txt'), 'later\n')
-  git(dir, 'commit', '-qam', 'later tip')
-  const later = git(dir, 'rev-parse', 'HEAD').trim()
-  expect((await service.undo(dir)).ok).toBe(false)
-  expect(git(dir, 'rev-parse', 'HEAD').trim()).toBe(later)
-  git(dir, 'reset', '--hard', expected)
-  expect((await service.undo(dir)).ok).toBe(true)
-  expect(git(dir, 'rev-parse', 'HEAD').trim()).toBe(original)
-})
-
 test('LG-002 bulk LFS unlock scopes credentials once for the entire batch', async () => {
   const dir = repo(), calls = []
   let remoteReads = 0, tokenReads = 0
@@ -117,29 +80,12 @@ test('LG-002 bulk LFS unlock scopes credentials once for the entire batch', asyn
   for (const args of calls) expect(args.some(arg => arg.startsWith('http.https://github.com/.extraheader='))).toBe(true)
 })
 
-test('LG-006 checkpoint failures stop the operation and failed restore stays recoverable', async () => {
-  const dir = repo()
-  fs.writeFileSync(path.join(dir, 'file.txt'), 'dirty\n')
-  const service = undo({ execSafe: async (args, cwd) => args[0] === 'stash'
-    ? { exitCode: 1, stdout: '', stderr: 'snapshot failed' } : runner.execSafe(args, cwd) })
-  await expect(service.recordCheckpoint(dir, 'reset', 'Reset')).rejects.toThrow('Could not save')
-  expect(service.peek(dir)).toBeNull()
-  expect(fs.readFileSync(path.join(dir, 'file.txt'), 'utf8')).toBe('dirty\n')
-  const restore = undo({ execSafe: async (args, cwd) => args[0] === 'stash' && args[1] === 'apply'
-    ? { exitCode: 1, stdout: '', stderr: 'restore failed' } : runner.execSafe(args, cwd) })
-  await restore.recordCheckpoint(dir, 'reset', 'Reset')
-  git(dir, 'reset', '--hard', 'HEAD')
-  const result = await restore.undo(dir)
-  expect(result.ok).toBe(false)
-  expect(result.message).toContain('retained for recovery')
-  expect(restore.peek(dir)).not.toBeNull()
-})
-
 function gate(globals = {}) {
   return component('electron/util/repo-gate.ts', {
     path, 'node:async_hooks': require('node:async_hooks'), '../services/LogService': { logService: { warn() {} } },
   }, globals).exports
 }
+
 test('LG-007 queued read ahead of writer drains without deadlock or overlap', async () => {
   const { withRepoSlot, repoSlotState } = gate(), hold = deferred(), events = []
   const first = withRepoSlot('repo', 'write', () => hold.promise)

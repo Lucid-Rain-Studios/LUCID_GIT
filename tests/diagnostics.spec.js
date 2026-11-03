@@ -152,7 +152,6 @@ function handlerHarness(mocks = {}, logger = null) {
       error: (source, message) => logs.push({ level: 'error', source, message }),
     } },
     '../services/GitService': { gitService: { status: async () => [], resetTo: async () => {}, push: async () => { throw new Error('remote rejected\nsecond line') }, ...mocks } },
-    '../services/UndoService': { undoService: { recordCheckpoint: async () => {}, markAvailable() {}, discard() {} } },
   })
   api.exports.registerHandlers()
   return { handlers, slots, logs, contexts, CHANNELS, event: { sender: { isDestroyed: () => false, send() {} } } }

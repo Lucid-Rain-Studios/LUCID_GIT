@@ -226,10 +226,6 @@ export const CHANNELS = {
   PR_MONITOR_STATUS: 'pr-monitor:status',
   PR_MONITOR_RESOLVE:'pr-monitor:resolve',
 
-  // Undo / checkpoint
-  UNDO_GET:           'undo:get',
-  UNDO_LAST:          'undo:last',
-
   // Global search
   SEARCH_REPO:        'search:repo',
 
@@ -263,7 +259,6 @@ export const CHANNELS = {
   EVT_NOTIFICATION:       'evt:notification',
   EVT_UPDATE_AVAILABLE:   'evt:update-available',
   EVT_STATUS_CHANGED:     'evt:status-changed',
-  EVT_UNDO_AVAILABLE:     'evt:undo-available',
 
   // Window controls (frameless)
   WIN_MINIMIZE:          'win:minimize',

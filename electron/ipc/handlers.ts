@@ -35,7 +35,6 @@ import { teamConfigService } from '../services/TeamConfigService'
 import { gitHubService } from '../services/GitHubService'
 import type { PRCreateArgs, PRListArgs, PRActionArgs, PRCompareArgs } from '../services/GitHubService'
 import { prMonitorService } from '../services/PRMonitorService'
-import { undoService, UndoableOp } from '../services/UndoService'
 import type { WebhookConfig, AppSettings, TeamConfig } from '../types'
 
 type IpcHandler<TArgs extends unknown[]> = (event: IpcMainInvokeEvent, ...args: TArgs) => unknown
@@ -96,7 +95,7 @@ const EXCLUSIVE_CHANNELS = new Set<string>([
   CHANNELS.GIT_MERGE_RESOLVE_TEXT, CHANNELS.GIT_MERGE_CONTINUE, CHANNELS.GIT_MERGE_ABORT,
   CHANNELS.GIT_MERGE_ABORT_RETRY_UPDATE,
   CHANNELS.GIT_CHERRY_PICK, CHANNELS.GIT_CHERRY_PICK_CONTINUE, CHANNELS.GIT_CHERRY_PICK_ABORT,
-  CHANNELS.GIT_REVERT, CHANNELS.GIT_REBASE_ABORT, CHANNELS.GIT_RESTORE_FILE, CHANNELS.UNDO_LAST,
+  CHANNELS.GIT_REVERT, CHANNELS.GIT_REBASE_ABORT, CHANNELS.GIT_RESTORE_FILE,
   CHANNELS.GIT_STASH_SAVE, CHANNELS.GIT_STASH_POP, CHANNELS.GIT_STASH_APPLY, CHANNELS.GIT_STASH_DROP,
   CHANNELS.GIT_COMMIT_AMEND, CHANNELS.GIT_APPLY_PATCH,
   CHANNELS.GIT_BRANCH_RENAME, CHANNELS.GIT_BRANCH_DELETE, CHANNELS.GIT_BRANCH_DELETE_REMOTE,
@@ -363,20 +362,6 @@ export function registerHandlers(): void {
     }
   }
 
-  // Wrap a HEAD-moving operation with an undo checkpoint: snapshot state before,
-  // offer Undo on success, drop the checkpoint on failure.
-  const withUndo = async <T>(repoPath: string, op: UndoableOp, label: string, fn: () => Promise<T>): Promise<T> => {
-    await undoService.recordCheckpoint(repoPath, op, label)
-    try {
-      const result = await fn()
-      await undoService.markAvailable(repoPath)
-      return result
-    } catch (error) {
-      undoService.discard(repoPath)
-      throw error
-    }
-  }
-
   // ── Shell ──────────────────────────────────────────────────────────────────
   handle(CHANNELS.SHELL_OPEN_EXTERNAL, async (_event, url: string) => {
     await shell.openExternal(url)
@@ -519,9 +504,9 @@ export function registerHandlers(): void {
 
   handle(CHANNELS.GIT_PULL, async (event, repoPath: string) => {
     if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, { id: 'pull-checkpoint', label: 'Preparing pull', status: 'running', progress: 3 })
-    const result = await withUndo(repoPath, 'pull', 'Pull', () => gitService.pull(repoPath, (step) => {
+    const result = await gitService.pull(repoPath, (step) => {
       if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
-    }))
+    })
     // After pulling, locked files whose work just landed in main can be unlocked.
     prMonitorService.checkMainMerges(repoPath).catch(() => {})
     if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, { id: 'pull-complete', label: 'Pull complete', status: 'done', progress: 100, overallProgress: 100 })
@@ -583,20 +568,19 @@ export function registerHandlers(): void {
     return gitService.getSyncStatus(repoPath)
   })
 
-  const updateFromMainWithUndo = (event: IpcMainInvokeEvent, repoPath: string) =>
-    withUndo(repoPath, 'update-from-main', 'Update from main', () =>
-      gitService.updateFromMain(repoPath, (step) => {
-        if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
-      }))
+  const updateFromMain = (event: IpcMainInvokeEvent, repoPath: string) =>
+    gitService.updateFromMain(repoPath, (step) => {
+      if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
+    })
 
-  handle(CHANNELS.GIT_UPDATE_FROM_MAIN, async (event, repoPath: string) => updateFromMainWithUndo(event, repoPath))
+  handle(CHANNELS.GIT_UPDATE_FROM_MAIN, async (event, repoPath: string) => updateFromMain(event, repoPath))
 
   // One click for a blocked Update from main: abort, then run the update once.
   // The abort runs outside the undo checkpoint so it never snapshots mid-merge
   // state. A second failure leaves the guard in place; there is no retry loop.
   handle(CHANNELS.GIT_MERGE_ABORT_RETRY_UPDATE, async (event, repoPath: string) => {
     await runGitOp('Abort merge', () => gitService.abortMergeForRetry(repoPath))
-    return updateFromMainWithUndo(event, repoPath)
+    return updateFromMain(event, repoPath)
   })
 
   handle(CHANNELS.GIT_MERGE_OVERLAP, async (_event, repoPath: string, mergeRef: string) => {
@@ -720,7 +704,7 @@ export function registerHandlers(): void {
   })
 
   handle(CHANNELS.GIT_CHECKOUT, async (_event, repoPath: string, branch: string) => {
-    return withUndo(repoPath, 'checkout', 'Checkout', () => runGitOp('Checkout', () => gitService.checkout(repoPath, branch)))
+    return runGitOp('Checkout', () => gitService.checkout(repoPath, branch))
   })
 
   handle(CHANNELS.GIT_MERGE_PREVIEW, async (_event, repoPath: string, targetBranch: string, baseBranch?: string) => {
@@ -733,7 +717,7 @@ export function registerHandlers(): void {
 
   handle(CHANNELS.GIT_MERGE, async (_event, repoPath: string, targetBranch: string) => {
     try {
-      await withUndo(repoPath, 'merge', 'Merge', () => runGitOp('Merge', () => gitService.merge(repoPath, targetBranch)))
+      await runGitOp('Merge', () => gitService.merge(repoPath, targetBranch))
     } catch (error) {
       // Predictions never write history. Record only verified unmerged files
       // after Git reports a conflict from an actual merge attempt.
@@ -1145,11 +1129,11 @@ export function registerHandlers(): void {
   )
 
   handle(CHANNELS.GIT_REVERT, (_event, repoPath: string, hash: string, noCommit: boolean) =>
-    withUndo(repoPath, 'revert', 'Revert', () => runGitOp('Revert', () => gitService.revert(repoPath, hash, noCommit)))
+    runGitOp('Revert', () => gitService.revert(repoPath, hash, noCommit))
   )
 
   handle(CHANNELS.GIT_CHERRY_PICK, (_event, repoPath: string, hash: string, noCommit?: boolean) =>
-    withUndo(repoPath, 'cherry-pick', 'Cherry-pick', () => runGitOp('Cherry-pick', () => gitService.cherryPick(repoPath, hash, noCommit)))
+    runGitOp('Cherry-pick', () => gitService.cherryPick(repoPath, hash, noCommit))
   )
 
   handle(CHANNELS.GIT_CHERRY_PICK_IN_PROGRESS, async (_event, repoPath: string) => {
@@ -1183,7 +1167,7 @@ export function registerHandlers(): void {
 
   handle(CHANNELS.GIT_RESET_TO, async (_event, repoPath: string, hash: string, mode: 'soft' | 'mixed' | 'hard', expectedHead?: string) => {
     if (mode === 'hard') await requireAdmin(repoPath)
-    return withUndo(repoPath, 'reset', 'Reset', () => runGitOp('Reset', () => gitService.resetTo(repoPath, hash, mode, expectedHead)))
+    return runGitOp('Reset', () => gitService.resetTo(repoPath, hash, mode, expectedHead))
   })
 
   handleRead(CHANNELS.GIT_FILE_LOG, (_event, repoPath: string, filePath: string, limit?: number) =>
@@ -1522,14 +1506,6 @@ export function registerHandlers(): void {
 
   handle(CHANNELS.PR_MONITOR_RESOLVE, (_event, repoPath: string, prNumber: number) => {
     prMonitorService.markResolved(repoPath, prNumber)
-  })
-
-  handle(CHANNELS.UNDO_GET, (_event, repoPath: string) => {
-    return undoService.peek(repoPath)
-  })
-
-  handle(CHANNELS.UNDO_LAST, async (_event, repoPath: string) => {
-    return undoService.undo(repoPath)
   })
 
   handle(CHANNELS.SEARCH_REPO, async (_event, repoPath: string, query: string) => {

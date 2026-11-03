@@ -45,33 +45,6 @@ test('LG-020 local and remote branch selections retain their identities', async 
   expect(fs.existsSync(path.join(dir, 'local.txt'))).toBe(true)
 })
 
-test('LG-023 undo restores both index and working tree and keeps failed snapshots', async () => {
-  const dir = repo()
-  const { undoService } = component('electron/services/UndoService.ts', {
-    electron: { BrowserWindow: { getAllWindows: () => [] } },
-    '../util/dugite-exec': runner,
-    '../ipc/channels': { CHANNELS: {} },
-  }).exports
-  fs.writeFileSync(path.join(dir, 'file.txt'), 'B\n')
-  git(dir, 'add', '.')
-  fs.writeFileSync(path.join(dir, 'file.txt'), 'C\n')
-  await undoService.recordCheckpoint(dir, 'reset', 'Reset')
-  git(dir, 'reset', '--hard', 'HEAD')
-  expect((await undoService.undo(dir)).ok).toBe(true)
-  expect(git(dir, 'show', ':file.txt')).toBe('B\n')
-  expect(fs.readFileSync(path.join(dir, 'file.txt'), 'utf8')).toBe('C\n')
-  await undoService.recordCheckpoint(dir, 'reset', 'Reset')
-  const real = runner.execSafe
-  runner.execSafe = async (args, cwd) => args[0] === 'stash' && args[1] === 'apply'
-    ? { exitCode: 1, stdout: '', stderr: 'index conflict' } : real(args, cwd)
-  try {
-    const result = await undoService.undo(dir)
-    expect(result.ok).toBe(false)
-    expect(result.message).toContain('retained for recovery')
-    expect(undoService.peek(dir)).not.toBeNull()
-  } finally { runner.execSafe = real }
-})
-
 test('LG-024 stash all includes untracked files and restores them', async () => {
   const dir = repo()
   fs.writeFileSync(path.join(dir, 'new.txt'), 'new')

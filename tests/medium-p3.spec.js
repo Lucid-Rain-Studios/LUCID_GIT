@@ -81,7 +81,6 @@ test('LG-081 repeated previews never create history while a real conflicting mer
   component('electron/ipc/handlers.ts', {
     electron: { ipcMain: { handle: (channel, fn) => handlers.set(channel, fn) } }, './channels': { CHANNELS },
     '../services/GitService': { gitService }, '../services/HeatmapService': { heatmapService: service },
-    '../services/UndoService': { undoService: { recordCheckpoint: noop, markAvailable: noop, discard: noop } },
     '../services/LogService': { logService: { error: noop, warn: noop } },
     '../util/repo-gate': { withRepoSlot: (_, __, fn) => fn() },
   }).exports.registerHandlers()

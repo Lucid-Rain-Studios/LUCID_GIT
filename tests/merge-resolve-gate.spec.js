@@ -82,7 +82,7 @@ test('merge continue and abort wait for an in-flight status read', async () => {
 const MUTATIONS = [
   ['GIT_CHERRY_PICK', 'abc'], ['GIT_CHERRY_PICK_CONTINUE'], ['GIT_CHERRY_PICK_ABORT'],
   ['GIT_REVERT', 'abc', false], ['GIT_REBASE_ABORT'], ['GIT_RESTORE_FILE', 'Map.umap', 'abc'],
-  ['UNDO_LAST'], ['GIT_STASH_SAVE', 'wip'], ['GIT_STASH_POP', 'stash@{0}'],
+  ['GIT_STASH_SAVE', 'wip'], ['GIT_STASH_POP', 'stash@{0}'],
   ['GIT_STASH_APPLY', 'stash@{0}'], ['GIT_STASH_DROP', 'stash@{0}'], ['GIT_COMMIT_AMEND', 'msg'],
   ['GIT_APPLY_PATCH', 'patch', true], ['GIT_BRANCH_RENAME', 'a', 'b'], ['GIT_BRANCH_DELETE', 'a', false],
   ['GIT_BRANCH_DELETE_REMOTE', 'origin', 'a'], ['GIT_SET_UPSTREAM', 'a'], ['GIT_SET_CONFIG', 'k', 'v'],
@@ -108,7 +108,6 @@ test('every repository mutation waits for an in-flight status and holds the repo
       '../util/dugite-exec': { withGitTimeout: fn => fn(), preemptRepoReads() {} },
       '../services/LogService': { logService: { error() {}, warn() {} } },
       '../services/GitService': { gitService: stub('git') },
-      '../services/UndoService': { undoService: stub('undo') },
       '../services/PermissionService': { permissionService: { getCachedPermission: () => 'admin' } },
       '../services/HeatmapService': { heatmapService: { markConflictsResolved() {}, recordConflictEvent() {} } },
     }).exports.registerHandlers()

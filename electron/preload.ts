@@ -446,15 +446,6 @@ const api = {
   prMonitorResolve:(repoPath: string, prNumber: number) =>
     ipcRenderer.invoke(CHANNELS.PR_MONITOR_RESOLVE, repoPath, prNumber),
 
-  // Undo / checkpoint
-  undoGet:  (repoPath: string) => ipcRenderer.invoke(CHANNELS.UNDO_GET, repoPath),
-  undoLast: (repoPath: string) => ipcRenderer.invoke(CHANNELS.UNDO_LAST, repoPath),
-  onUndoAvailable: (cb: (info: unknown) => void) => {
-    const handler = (_e: unknown, info: unknown) => cb(info)
-    ipcRenderer.on(CHANNELS.EVT_UNDO_AVAILABLE, handler)
-    return () => ipcRenderer.removeListener(CHANNELS.EVT_UNDO_AVAILABLE, handler)
-  },
-
   // Global search
   searchRepo: (repoPath: string, query: string) =>
     ipcRenderer.invoke(CHANNELS.SEARCH_REPO, repoPath, query),
