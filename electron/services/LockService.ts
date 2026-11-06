@@ -85,6 +85,31 @@ class LockService {
     return this.lfsQueues.has(repoPath)
   }
 
+  /** Hold the cache queue through a local restore and its permission repair.
+   * The caller reads after checkout hooks finish, so hook-created locks are
+   * included. Both CLI queries are cache-only. Verification can put foreign
+   * locks in lockcache.db too; remove those exact IDs using cached ownership,
+   * without excluding a newly acquired local lock with a different ID.
+   * Never re-enter listLocks from this callback. */
+  async withCachedLockPaths<T>(repoPath: string, action: (readPaths: () => Promise<Set<string>>) => Promise<T>): Promise<T> {
+    return this.withLfsLock(repoPath, () => action(async () => {
+      const { stdout } = await exec(['lfs', 'locks', '--local', '--json'], repoPath)
+      const locks: unknown = JSON.parse(stdout)
+      if (!Array.isArray(locks) || locks.some(lock => !lock || typeof lock.id !== 'string' || typeof lock.path !== 'string')) {
+        throw new Error('Cannot read local LFS ownership for restored file permissions')
+      }
+      if (!locks.length) return new Set<string>()
+      const cached = JSON.parse((await exec(['lfs', 'locks', '--verify', '--cached', '--json'], repoPath)).stdout)
+      // A repository that has never verified returns null for both lists.
+      if (!cached || typeof cached !== 'object' || !('theirs' in cached) || (cached.theirs !== null &&
+        (!Array.isArray(cached.theirs) || cached.theirs.some((lock: { id?: unknown } | null) => !lock || typeof lock.id !== 'string')))) {
+        throw new Error('Cannot read cached foreign LFS ownership for restored file permissions')
+      }
+      const foreign = new Set<string>((cached.theirs ?? []).map((lock: { id: string }) => lock.id))
+      return new Set(locks.filter(lock => !foreign.has(lock.id)).map(lock => lock.path.replace(/\\/g, '/')))
+    }))
+  }
+
   // ── Core LFS commands ───────────────────────────────────────────────────────
 
   private authoritative = new Map<string, { locks: Lock[]; at: number; accountId: string | null }>()

@@ -10,6 +10,8 @@ import { withRepoSlot } from '../util/repo-gate'
 import { beginStatusScan } from '../util/status-telemetry'
 import { assertSafeMergeCommit, clearMergeGuardAfterAbort, guardedMergeCommit, guardedMergeOperation, isMergeWriteFailure, logLeftoverBlockedMerge, mergeBlockedOperation, mergeBlockingReason } from '../util/merge-safety'
 import { authService } from './AuthService'
+import { lockService } from './LockService'
+import { prepareUnlockPermissions } from '../util/unlock-permissions'
 import { logService } from './LogService'
 import { logFailureContext } from '../util/diagnostics'
 import { parseGitLog, GIT_LOG_FORMAT } from '../util/git-log-parse'
@@ -2082,12 +2084,51 @@ class GitService {
       // Two passes — each pass covers `total` files, so the bar fills in halves.
       // Even index-only restore invokes post-checkout. Git LFS's hook scans
       // the entire working tree for read-only flags, despite no working file
-      // changing here. Suppress only that LFS sweep on the index-only pass;
-      // custom hooks and the working-tree pass retain their normal behavior.
-      await runInPathChunks(paths, c => restore([...auth, '-c', 'lfs.setlockablereadonly=false', 'restore', '--staged', '--', ...c]), (p) => report(Math.floor(p / 2)))
-      await runInPathChunks(paths, c => restore([...auth, 'restore', '--', ...c]), (p) => report(Math.floor(total / 2) + Math.floor(p / 2)))
+      // changing here. Custom hooks still execute on both passes.
+      await runInPathChunks(paths, c => restore([...auth, '--literal-pathspecs', '-c', 'lfs.setlockablereadonly=false', 'restore', '--staged', '--', ...c]), (p) => report(Math.floor(p / 2)))
+      const restoreWorkingFiles = (config: string[] = []) => runInPathChunks(paths,
+        c => restore([...auth, '--literal-pathspecs', ...config, 'restore', '--', ...c]),
+        p => report(Math.floor(total / 2) + Math.floor(p / 2)))
+      if (await this.canScopeDiscardPermissions(repoPath, paths)) {
+        await lockService.withCachedLockPaths(repoPath, async readLockedPaths => {
+          let restoreError: unknown
+          try { await restoreWorkingFiles(['-c', 'lfs.setlockablereadonly=false']) }
+          catch (error) { restoreError = error }
+          // Read policy/attributes and ownership AFTER custom hooks. Repair
+          // even a partially failed restore, but never publish success for it.
+          try {
+            const permissions = await prepareUnlockPermissions(repoPath, paths)
+            const owned = permissions.hasLockableFiles ? await readLockedPaths() : new Set<string>()
+            for (const p of paths) await permissions.apply(p, owned.has(p.replace(/\\/g, '/')))
+          } catch (error) {
+            throw new Error(`${restoreError ? String(restoreError) + '\n' : ''}Could not reconcile restored file permissions: ${String(error)}`)
+          }
+          if (restoreError) throw restoreError
+        })
+      } else {
+        // Attribute/config changes, directory selections, symlinks and
+        // submodules can affect paths outside the selection: retain LFS's hook.
+        await restoreWorkingFiles()
+      }
     }
     report(total, 'done')
+  }
+
+  private async canScopeDiscardPermissions(repoPath: string, paths: string[]): Promise<boolean> {
+    if (!paths.length || paths.some(p => ['.gitattributes', '.lfsconfig'].includes(path.basename(p.replace(/\\/g, '/')).toLowerCase()))) return false
+    let exactFiles = true
+    await runInPathChunks(paths, async chunk => {
+      const wanted = new Set(chunk.map(p => p.replace(/\\/g, '/')))
+      const { stdout } = await exec(['--literal-pathspecs', 'ls-files', '--stage', '-z', '--', ...chunk], repoPath)
+      const entries = stdout.split('\0').filter(Boolean)
+      if (entries.length !== wanted.size) { exactFiles = false; return }
+      for (const entry of entries) {
+        const match = /^(100644|100755) [a-f0-9]+ 0\t([\s\S]+)$/.exec(entry)
+        if (!match || !wanted.delete(match[2])) exactFiles = false
+      }
+      if (wanted.size) exactFiles = false
+    })
+    return exactFiles
   }
 
   /**

@@ -49,3 +49,14 @@ test('outside paths are refused before any permission change', async () => {
   const repo = fixture()
   await expect(prepareUnlockPermissions(repo, ['../outside.uasset'])).rejects.toThrow('inside the repository')
 })
+
+test('a selected path through a directory symlink cannot chmod an outside file', async () => {
+  const repo = fixture(), outside = tmpDir('unlock-outside-')
+  const file = path.join(outside, 'asset.uasset')
+  fs.writeFileSync(file, 'outside stays unchanged')
+  fs.symlinkSync(outside, path.join(repo, 'escape'), 'junction')
+  const permissions = await prepareUnlockPermissions(repo, ['escape/asset.uasset'])
+  await expect(permissions.apply('escape/asset.uasset')).rejects.toThrow('outside the repository')
+  expect(fs.statSync(file).mode & 0o222).not.toBe(0)
+  expect(fs.readFileSync(file, 'utf8')).toBe('outside stays unchanged')
+})

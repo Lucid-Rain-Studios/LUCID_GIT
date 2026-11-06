@@ -7,13 +7,14 @@ import { execSafe, execWithStdin } from './dugite-exec'
  * only after the server accepts each unlock. No persistent Git config changes. */
 export async function prepareUnlockPermissions(repoPath: string, paths: string[]): Promise<{
   gitArgs: string[]
-  apply: (filePath: string) => Promise<void>
+  hasLockableFiles: boolean
+  apply: (filePath: string, writable?: boolean) => Promise<void>
 }> {
   const gitArgs = ['-c', 'lfs.setlockablereadonly=false']
   const disabledByEnv = /^(0|false|no|off)$/i.test(process.env.GIT_LFS_SET_LOCKABLE_READONLY ?? '')
   const config = await execSafe(['config', '--bool', '--get', 'lfs.setlockablereadonly'], repoPath)
   if (config.exitCode !== 0 && config.exitCode !== 1) throw new Error(config.stderr || 'Cannot read LFS permission policy')
-  if (disabledByEnv || config.stdout.trim() === 'false') return { gitArgs, apply: async () => {} }
+  if (disabledByEnv || config.stdout.trim() === 'false') return { gitArgs, hasLockableFiles: false, apply: async () => {} }
 
   const root = path.resolve(repoPath)
   const selected = new Set(paths.map(p => p.replace(/\\/g, '/')))
@@ -30,7 +31,8 @@ export async function prepareUnlockPermissions(repoPath: string, paths: string[]
   }
   return {
     gitArgs,
-    apply: async filePath => {
+    hasLockableFiles: lockable.size > 0,
+    apply: async (filePath, writable = false) => {
       const normalized = filePath.replace(/\\/g, '/')
       if (!selected.has(normalized) || !lockable.has(normalized)) return
       const fullPath = path.join(root, normalized)
@@ -42,7 +44,8 @@ export async function prepareUnlockPermissions(repoPath: string, paths: string[]
         const real = await fs.promises.realpath(fullPath)
         const relative = path.relative(root, real)
         if (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) throw new Error('Unlock path resolves outside the repository')
-        if (stat.mode & 0o222) await fs.promises.chmod(fullPath, stat.mode & ~0o222)
+        const mode = writable ? stat.mode | 0o200 : stat.mode & ~0o222
+        if (mode !== stat.mode) await fs.promises.chmod(fullPath, mode)
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       }

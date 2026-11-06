@@ -24,6 +24,9 @@ function fixture(overrides = {}) {
     } },
   }, { Buffer }).exports.gitService
   service.getRemoteUrl = async () => 'https://github.com/test/repo'
+  // These cases exercise the existing full-hook fallback's recovery contract.
+  // Selected permission reconciliation has its own real-LFS/recovery suite.
+  service.canScopeDiscardPermissions = async () => false
   const discard = () => service.discard(repo, ['asset.txt'], false, step => progress.push(step))
   return { repo, lock, calls, warnings, progress, discard, service }
 }
