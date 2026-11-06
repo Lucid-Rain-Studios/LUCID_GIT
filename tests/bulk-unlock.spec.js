@@ -16,6 +16,7 @@ function service(runnerMock, remote = 'https://github.com/owner/repo.git', maint
     './GitService': { gitService: { getRemoteUrl: async () => { remotes++; return remote }, lfsLocksMaintenance: maintenance } },
     './HeatmapService': { heatmapService: { recordLockEvent: event => heat.push(event) } },
     '../util/dugite-exec': runnerMock,
+    ...(runnerMock === runner ? { '../util/unlock-permissions': require(path.join(DIST, 'util/unlock-permissions')) } : {}),
   }).exports
   return { lockService, events, heat, reads: () => ({ tokens, remotes }) }
 }
@@ -82,6 +83,8 @@ test('real Git LFS unlocks 40 locks concurrently without corrupting cache or cha
   const dir = tmpDir('unlock-real-'), items = targets(40)
   git(dir, 'init', '-qb', 'main'); git(dir, 'config', 'user.name', 'me'); git(dir, 'config', 'user.email', 'me@test.local')
   git(dir, 'config', 'lfs.repositoryformatversion', '0')
+  fs.writeFileSync(path.join(dir, '.gitattributes'), '*.txt lockable\n')
+  fs.writeFileSync(path.join(dir, 'untouched.txt'), 'keep writable')
   for (const item of items.slice(0, -1)) fs.writeFileSync(path.join(dir, item.filePath), item.filePath)
   git(dir, 'add', '.'); git(dir, 'commit', '-qm', 'files')
   const locks = new Map(items.map(item => [item.lockId, { id: item.lockId, path: item.filePath, owner: { name: 'me' }, locked_at: new Date().toISOString() }]))
@@ -108,13 +111,27 @@ test('real Git LFS unlocks 40 locks concurrently without corrupting cache or cha
   try {
     await runner.exec(['lfs', 'locks', '--verify', '--json'], dir)
     verifies = 0
-    const result = await svc.lockService.unlockFiles(dir, items)
+    const trace = path.join(dir, '.git/unlock-trace.jsonl'), previousTrace = process.env.GIT_TRACE2_EVENT
+    let result
+    process.env.GIT_TRACE2_EVENT = trace
+    try { result = await svc.lockService.unlockFiles(dir, items) }
+    finally {
+      if (previousTrace === undefined) delete process.env.GIT_TRACE2_EVENT
+      else process.env.GIT_TRACE2_EVENT = previousTrace
+    }
+    const commands = fs.readFileSync(trace, 'utf8').trim().split('\n').map(JSON.parse).filter(event => event.event === 'start')
+    expect(commands.filter(event => event.argv.includes('check-attr'))).toHaveLength(1)
+    expect(commands.filter(event => event.argv.includes('ls-files'))).toHaveLength(0)
     expect(result.failed).toEqual([]); expect(result.refreshError).toBeUndefined()
     expect(result.unlocked).toHaveLength(40); expect(result.locks).toEqual([])
     expect(peak).toBeGreaterThan(1); expect(peak).toBeLessThanOrEqual(4); expect(verifies).toBe(1)
     expect(JSON.parse((await runner.exec(['lfs', 'locks', '--local', '--json'], dir)).stdout)).toEqual([])
     expect(git(dir, 'status', '--porcelain')).toBe('')
-    for (const item of items.slice(0, -1)) expect(fs.readFileSync(path.join(dir, item.filePath), 'utf8')).toBe(item.filePath)
+    for (const item of items.slice(0, -1)) {
+      expect(fs.readFileSync(path.join(dir, item.filePath), 'utf8')).toBe(item.filePath)
+      expect(fs.statSync(path.join(dir, item.filePath)).mode & 0o222).toBe(0)
+    }
+    expect(fs.statSync(path.join(dir, 'untouched.txt')).mode & 0o222).not.toBe(0)
     expect(fs.existsSync(path.join(dir, items.at(-1).filePath))).toBe(false)
   } finally { await new Promise(resolve => server.close(resolve)) }
 })

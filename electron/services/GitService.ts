@@ -2080,7 +2080,11 @@ class GitService {
       }
       // Unstage first (no-op if not staged), then restore working tree.
       // Two passes — each pass covers `total` files, so the bar fills in halves.
-      await runInPathChunks(paths, c => restore([...auth, 'restore', '--staged', '--', ...c]), (p) => report(Math.floor(p / 2)))
+      // Even index-only restore invokes post-checkout. Git LFS's hook scans
+      // the entire working tree for read-only flags, despite no working file
+      // changing here. Suppress only that LFS sweep on the index-only pass;
+      // custom hooks and the working-tree pass retain their normal behavior.
+      await runInPathChunks(paths, c => restore([...auth, '-c', 'lfs.setlockablereadonly=false', 'restore', '--staged', '--', ...c]), (p) => report(Math.floor(p / 2)))
       await runInPathChunks(paths, c => restore([...auth, 'restore', '--', ...c]), (p) => report(Math.floor(total / 2) + Math.floor(p / 2)))
     }
     report(total, 'done')

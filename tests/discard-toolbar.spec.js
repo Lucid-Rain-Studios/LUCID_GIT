@@ -7,18 +7,21 @@ const { gitService } = require(path.join(DIST, 'services/GitService'))
 const flush = () => new Promise(resolve => setImmediate(resolve))
 
 function harness(files, ipc, options = {}) {
-  const confirmations = [], unlocked = [], errors = []
+  const confirmations = [], unlocked = [], errors = [], batches = []
   const c = component('src/components/changes/FileTree.tsx', {
     '@/ipc': { ipc: { mergeInProgress: async () => null, ...ipc } },
     '@/stores/operationStore': { useOperationStore: store({ run: (_, fn) => fn() }) },
     '@/stores/dialogStore': { useDialogStore: store({ confirm: async args => { confirmations.push(args); return options.confirm !== false } }) },
     '@/stores/authStore': { useAuthStore: store({ accounts: [{ userId: 'me', login: 'me' }], currentAccountId: 'me' }) },
-    '@/stores/lockStore': { useLockStore: store({ unlockFile: async (_, file) => unlocked.push(file) }) },
+    '@/stores/lockStore': { useLockStore: store({ unlockFiles: async (_, targets) => {
+      batches.push(targets); unlocked.push(...targets.map(target => target.filePath))
+      return options.unlockResult || { unlocked: targets.map(target => target.filePath), failed: [] }
+    } }) },
     '@/stores/repoStore': { useRepoStore: store({ error: null }) },
   }, { alert: error => errors.push(error) })
   const props = { files, repoPath: options.repo || 'repo', locks: files.map(file => ({ path: file.path, owner: { login: 'me' } })), currentUserName: null, onRefresh() {} }
   const render = () => c.render('FileTree', props)
-  return { c, render, confirmations, unlocked, errors }
+  return { c, render, confirmations, unlocked, errors, batches }
 }
 const changed = { path: 'changed.txt', indexStatus: 'M', workingStatus: 'M', staged: true }
 const staged = { path: 'staged.txt', indexStatus: 'A', workingStatus: ' ', staged: true }
@@ -39,6 +42,18 @@ test('default Discard restores tracked changes and deletes never-staged addition
   expect(calls).toEqual([['all', 'repo'], ['discard', 'repo', ['added.txt'], true]])
   expect(h.confirmations[0].detail).toContain('deleted from disk')
   expect(h.unlocked).toEqual(files.map(file => file.path))
+  expect(h.batches).toHaveLength(1)
+})
+
+test('discard reports partial bulk-unlock failures without retrying the successful discard', async () => {
+  let discards = 0
+  const h = harness(files, { discardAll: async () => { discards++ }, discard: async () => {} }, {
+    unlockResult: { unlocked: ['changed.txt'], failed: [{ filePath: 'staged.txt', error: 'offline' }] },
+  })
+  discardButton(h.render()).props.onClick(); await flush()
+  expect(discards).toBe(1); expect(h.batches).toHaveLength(1)
+  expect(h.errors[0]).toContain('Changes were discarded, but unlocking needs attention')
+  expect(h.errors[0]).toContain('staged.txt: offline')
 })
 
 test('dropdown Changed and Added keep the opposite group intact, and cancellation performs no mutation', async () => {

@@ -196,7 +196,7 @@ export function FileTree({
     // A merge starting or ending moves the changed-file count or the
     // unmerged state.
   }, [repoPath, mergeKey])
-  const unlockFile = useLockStore(s => s.unlockFile)
+  const unlockFiles = useLockStore(s => s.unlockFiles)
   const { accounts, currentAccountId } = useAuthStore()
   const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login ?? null
   const canSelectAllDeferredStagePaths = isDeferredStaging
@@ -269,6 +269,19 @@ export function FileTree({
   }, [locks])
 
   const lockFor = (file: FileStatus): Lock | null => lockMap.get(file.path.replace(/\\/g, '/')) ?? null
+  const unlockDiscarded = async (discarded: FileStatus[]) => {
+    if (!currentLogin) return
+    const targets = discarded.flatMap(file => {
+      const lock = lockFor(file)
+      return lock?.owner.login === currentLogin ? [{ filePath: file.path, lockId: lock.id }] : []
+    })
+    if (!targets.length) return
+    const result = await unlockFiles(repoPath, targets)
+    if (result.failed.length || result.refreshError) {
+      throw new Error('Changes were discarded, but unlocking needs attention: ' +
+        [result.refreshError, ...result.failed.map(item => `${item.filePath}: ${item.error}`)].filter(Boolean).join('\n'))
+    }
+  }
   const treeRows = useMemo(() => {
     if (!treeMode) return [] as FlatRow[]
     const tree = buildTree(isDeferredStaging ? staged : files)
@@ -332,12 +345,7 @@ export function FileTree({
       if (trackedPaths.length > 0) await ipc.discard(repoPath, trackedPaths, false)
       if (untrackedPaths.length > 0) await ipc.discard(repoPath, untrackedPaths, true)
       // Release my locks for files explicitly discarded from multi-select.
-      if (currentLogin) {
-        for (const f of multiUnstaged) {
-          const lk = lockFor(f)
-          if (lk && lk.owner.login === currentLogin) unlockFile(repoPath, f.path).catch(() => {})
-        }
-      }
+      await unlockDiscarded(multiUnstaged)
     })
     setMultiPaths(new Set())
   }
@@ -378,10 +386,7 @@ export function FileTree({
       }
       // A rejected discard must retain locks, including when only part of a
       // batch completed. Never release them from a finally block.
-      if (currentLogin) for (const file of candidates) {
-        if (abort && file.indexStatus === '?') continue
-        if (lockFor(file)?.owner.login === currentLogin) await unlockFile(repoPath, file.path).catch(() => {})
-      }
+      await unlockDiscarded(candidates.filter(file => !abort || file.indexStatus !== '?'))
     })
   }
 

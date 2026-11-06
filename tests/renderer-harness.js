@@ -38,6 +38,9 @@ function component(file, mocks = {}, globals = {}) {
       name === 'react-dom' ? { createPortal: node => node } :
       // Scan logging only observes; services under test run without it.
       name === '../util/status-telemetry' ? { beginStatusScan: () => ({ started() {}, finish() {}, fail() {} }), noteWatcherFire() {}, flushStatusTelemetry() {} } :
+      // Permission behavior has real Git/LFS coverage in unlock-permissions;
+      // other isolated service fixtures focus on cache recovery and routing.
+      name === '../util/unlock-permissions' ? { prepareUnlockPermissions: async () => ({ gitArgs: [], apply: async () => {} }) } :
       name === './stateTreeReview' ? component('src/lib/stateTreeReview.ts', {}, globals).exports :
       // Performance settings: real defaults (Medium), so components and services behave as shipped.
       name === './PerformanceService' ? component('electron/services/PerformanceService.ts', {}, { ...globals, __privateExports: [] }).exports :

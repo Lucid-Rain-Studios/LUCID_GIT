@@ -91,7 +91,18 @@ test('an ordinary discard still performs exactly two restore commands without a 
   f.service.clearStaleIndexLock = async () => { throw Error('unexpected recovery scan') }
   await f.discard()
   expect(f.calls).toHaveLength(2)
+  expect(f.calls[0]).toContain('lfs.setlockablereadonly=false')
+  expect(f.calls[1]).not.toContain('lfs.setlockablereadonly=false')
   expect(fs.readFileSync(path.join(f.repo, 'asset.txt'), 'utf8')).toBe('base')
+})
+
+test('index-only discard skips the LFS sweep while custom hooks and working-tree LFS policy remain enabled', async () => {
+  const f = fixture()
+  const hook = require('path').join(f.repo, '.git/hooks/post-checkout')
+  fs.writeFileSync(hook, '#!/bin/sh\ngit config --get lfs.setlockablereadonly >> hook-policy.txt || echo default >> hook-policy.txt\n')
+  await f.discard()
+  expect(fs.readFileSync(require('path').join(f.repo, 'hook-policy.txt'), 'utf8').trim().split(/\r?\n/)).toEqual(['false', 'default'])
+  expect(fs.readFileSync(require('path').join(f.repo, 'asset.txt'), 'utf8')).toBe('base')
 })
 
 test('a lock on the working-tree pass retries that pass without repeating the successful unstage', async () => {

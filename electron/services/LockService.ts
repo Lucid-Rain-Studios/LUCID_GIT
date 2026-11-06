@@ -12,6 +12,7 @@ import { webhookService } from './WebhookService'
 import { heatmapService } from './HeatmapService'
 import { gitService } from './GitService'
 import { performanceService } from './PerformanceService'
+import { prepareUnlockPermissions } from '../util/unlock-permissions'
 
 // Window after a self-unlock during which a poll-detected lock removal is
 // attributed to that unlock rather than to an external force-unlock. Generous
@@ -207,6 +208,7 @@ class LockService {
       const result: BulkUnlockResult = { unlocked: [], failed: [] }
       let next = 0, completed = 0
       try {
+        const permissions = await prepareUnlockPermissions(repoPath, targets.map(target => target.filePath))
         const locks = targets.some(target => !target.lockId)
           ? await this.listLocksUnguarded(repoPath) : []
         const work = targets.map(target => ({ ...target, filePath: target.filePath.replace(/\\/g, '/'),
@@ -219,7 +221,7 @@ class LockService {
             const id = `unlock-batch-file-${index}`
             onProgress?.({ id, label: 'Unlocking file', status: 'running', detail: target.filePath })
             try {
-              const args = [...gitAuthArgs(token, remoteUrl), '-c', `lfs.storage=${storage}`,
+              const args = [...gitAuthArgs(token, remoteUrl), ...permissions.gitArgs, '-c', `lfs.storage=${storage}`,
                 'lfs', 'unlock', ...(target.force ? ['--force'] : []),
                 ...(target.lockId ? [`--id=${target.lockId}`] : [target.filePath])]
               try {
@@ -228,6 +230,7 @@ class LockService {
               } catch (error) {
                 if (!/Lock not found/i.test(String(error))) throw error
               }
+              await permissions.apply(target.filePath)
               this.recordUnlock(repoPath, target.filePath, target.force ?? false, target.lockId, actorLogin, actorName)
               result.unlocked.push(target.filePath)
               onProgress?.({ id, label: 'File unlocked', status: 'done', detail: target.filePath })
@@ -297,6 +300,7 @@ class LockService {
     }
     const normalized = filePath.replace(/\\/g, '/')
     const fullPath = path.join(repoPath, normalized)
+    const permissions = await prepareUnlockPermissions(repoPath, [normalized])
     // Prefer --id when available: works even when the file no longer exists on disk (ghost file).
     // If the caller did not provide a lockId, resolve one from current LFS locks.
     let resolvedLockId = lockId
@@ -319,6 +323,7 @@ class LockService {
     if (force) unlockOpts.push('--force')
     const makeArgs = (id?: string) => [
       ...gitAuthArgs(token, remoteUrl),
+      ...permissions.gitArgs,
       'lfs',
       'unlock',
       ...unlockOpts,
@@ -351,6 +356,7 @@ class LockService {
         throw error
       }
     }
+    await permissions.apply(normalized)
     this.recordUnlock(repoPath, normalized, force, resolvedLockId, actorLogin, actorName)
   }
 
