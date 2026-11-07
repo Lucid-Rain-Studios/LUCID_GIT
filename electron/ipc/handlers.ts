@@ -477,12 +477,14 @@ export function registerHandlers(): void {
           const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login
           if (currentLogin) {
             const locks = await lockService.listLocks(repoPath)
-            const dirty = new Set((await gitService.status(repoPath, 'push-unlock')).map(file => file.path))
             const pushedFiles = new Set(filesAhead)
+            const candidates = locks.filter(lock => lock.owner.login === currentLogin && pushedFiles.has(lock.path))
+            const dirty = new Set((await gitService.statusPaths(repoPath, candidates.map(lock => lock.path)))
+              .flatMap(file => file.originalPath ? [file.path, file.originalPath] : [file.path]))
             const result = await lockService.unlockFiles(
               repoPath,
-              locks
-                .filter(lock => lock.owner.login === currentLogin && pushedFiles.has(lock.path) && !dirty.has(lock.path))
+              candidates
+                .filter(lock => !dirty.has(lock.path))
                 .map(lock => ({ filePath: lock.path, lockId: lock.id })),
               currentLogin,
               currentLogin,

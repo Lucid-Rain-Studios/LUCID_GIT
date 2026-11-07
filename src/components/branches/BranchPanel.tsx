@@ -249,11 +249,11 @@ export function BranchPanel({ onMergePreview, onRefresh }: BranchPanelProps) {
       // incoming changes. The merge runs only once that is clear — otherwise
       // the user is prompted to stash the overlapping files first.
       await opRun('Checking main for conflicts…', () => ipc.fetch(repoPath))
-      const overlap = await ipc.updateFromMainConflicts(repoPath).catch(() => [] as string[])
+      const overlap = await ipc.updateFromMainConflicts(repoPath)
       if (overlap.length > 0) {
         const ok = await dialog.confirm({
           title: 'Stash changes before updating from main',
-          message: `You have uncommitted changes to ${overlap.length} file${overlap.length === 1 ? '' : 's'} that also changed in main. Merging now would overwrite them.`,
+          message: `${overlap.length} local file${overlap.length === 1 ? '' : 's'} must be committed or stashed before this merge. Staged changes can block a merge even when incoming commits touch different files.`,
           detail: 'Stash your changes to update safely — restore them anytime from the Stash panel.',
           confirmLabel: 'Stash & Update',
           cancelLabel: 'Cancel',

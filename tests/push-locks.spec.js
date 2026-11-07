@@ -138,7 +138,7 @@ test('override requires explicit confirmation, keeps normal retry separate and s
   component('electron/ipc/handlers.ts', {
     electron: { ipcMain: { handle: (name, fn) => handlers.set(name, fn) } }, './channels': { CHANNELS },
     '../util/repo-gate': { withRepoSlot: (_, __, fn) => fn() },
-    '../services/GitService': { gitService: { push: async (...args) => { calls.push(args); return { branch: 'topic', filesAhead: ['asset.uasset'] } } } },
+    '../services/GitService': { gitService: { invalidateStatusCache() {}, push: async (...args) => { calls.push(args); return { branch: 'topic', filesAhead: ['asset.uasset'] } } } },
     '../services/LockService': { lockService: { listLocks: () => { throw Error('must retain locks') }, unlockFiles: () => { throw Error('must not unlock') } } },
   }).exports.registerHandlers()
   await handlers.get(CHANNELS.GIT_PUSH)({ sender: { isDestroyed: () => false, send() {} } }, 'repo', false, override)

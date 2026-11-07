@@ -245,19 +245,32 @@ class GitService {
   private _fetchInFlight = new Map<string, Promise<void>>()
 
   /**
-   * Uncommitted local files that an incoming merge of `mergeRef` into HEAD
-   * would also modify. Git refuses a merge / pull only for this overlap set —
-   * an empty result means a dirty working tree is still safe to merge into,
-   * because the local edits and the incoming changes touch different files.
+   * Local paths that should be committed or stashed before merging `mergeRef`.
+   * A divergent merge also requires a clean index, even for staged files that
+   * the incoming side does not touch. Unrelated unstaged edits can remain.
    */
   async mergeOverlapFiles(repoPath: string, mergeRef: string): Promise<string[]> {
     const [localFiles, incoming] = await Promise.all([
-      this.status(repoPath, 'merge-overlap').then(s => s.map(f => f.path)).catch(() => [] as string[]),
+      this.status(repoPath, 'merge-overlap'),
       execSafe(['diff', '--name-only', '-z', 'HEAD', mergeRef], repoPath),
     ])
-    if (incoming.exitCode !== 0 || localFiles.length === 0) return []
+    if (incoming.exitCode !== 0) throw new Error(incoming.stderr || 'Unable to check incoming merge changes')
+    if (localFiles.length === 0) return []
+    const staged = localFiles.filter(file => file.staged)
+    let divergent = false
+    if (staged.length) {
+      const [forward, integrated] = await Promise.all([
+        execSafe(['merge-base', '--is-ancestor', 'HEAD', mergeRef], repoPath),
+        execSafe(['merge-base', '--is-ancestor', mergeRef, 'HEAD'], repoPath),
+      ])
+      for (const result of [forward, integrated]) {
+        if (result.exitCode !== 0 && result.exitCode !== 1) throw new Error(result.stderr || 'Unable to check merge ancestry')
+      }
+      divergent = forward.exitCode === 1 && integrated.exitCode === 1
+    }
     const incomingSet = new Set(incoming.stdout.split('\0').filter(Boolean))
-    return localFiles.filter(p => incomingSet.has(p))
+    return localFiles.filter(file => (divergent && file.staged) || incomingSet.has(file.path)
+      || (file.originalPath && incomingSet.has(file.originalPath))).map(file => file.path)
   }
 
   /**
@@ -435,6 +448,22 @@ class GitService {
       scan.fail(error)
       throw error
     }
+  }
+
+  /** Fresh status for selected safety checks; never reuse a monitor's cached result. */
+  async statusPaths(repoPath: string, paths: string[]): Promise<FileStatus[]> {
+    if (!paths.length) return []
+    return withRepoSlot(repoPath, 'read', async () => {
+      const files = new Map<string, FileStatus>()
+      await runInPathChunks([...new Set(paths)], async chunk => {
+        const { exitCode, stdout, stderr } = await execSafe([
+          '--literal-pathspecs', 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--', ...chunk,
+        ], repoPath)
+        if (exitCode !== 0) throw new Error(stderr || `git status failed (exit ${exitCode})`)
+        for (const file of parseStatus(stdout)) files.set(file.path, file)
+      })
+      return [...files.values()]
+    })
   }
 
   /**

@@ -7,6 +7,9 @@ on:
     branches: [main]
 
 jobs:
+  git-safety:
+    uses: ./.github/workflows/git-safety.yml
+
   lint-typecheck:
     runs-on: ubuntu-latest
     steps:

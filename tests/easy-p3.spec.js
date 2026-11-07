@@ -14,7 +14,7 @@ test('LG-042 push unlocks on the resolved default branch and still finishes othe
     electron: { ipcMain: { handle: (name, fn) => handlers.set(name, fn) } },
     './channels': { CHANNELS },
     '../util/repo-gate': { withRepoSlot: (repo, mode, fn) => { slots.push([repo, mode]); return fn() } },
-    '../services/GitService': { gitService: { status: async () => [], invalidateStatusCache() {}, push: async () => ({ branch, filesAhead: ['asset.uasset'] }), defaultBranch: async () => 'develop', resetTo: async (...args) => resets.push(args) } },
+    '../services/GitService': { gitService: { statusPaths: async () => [], invalidateStatusCache() {}, push: async () => ({ branch, filesAhead: ['asset.uasset'] }), defaultBranch: async () => 'develop', resetTo: async (...args) => resets.push(args) } },
     '../services/AuthService': { authService: { listAccounts: () => ({ accounts: [{ userId: 1, login: 'test' }], currentAccountId: 1 }) } },
     '../services/LockService': { lockService: { listLocks: async () => [{ id: 'lock', path: 'asset.uasset', owner: { login: 'test' } }], unlockFiles: async (...args) => { unlocks.push(args); return { unlocked: [], failed: [] } } } },
   })

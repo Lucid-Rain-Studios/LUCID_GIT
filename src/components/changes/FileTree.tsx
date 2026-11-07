@@ -1,6 +1,6 @@
 import { isModalOpen } from '@/lib/useDialogOverlayDismiss'
 import { useRepoStore } from '@/stores/repoStore'
-import { canStagePath } from '@/lib/staging'
+import { createStageGuard } from '@/lib/staging'
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { FileStatus, Lock, ipc } from '@/ipc'
 import { useOperationStore } from '@/stores/operationStore'
@@ -17,7 +17,8 @@ import { HunkStagingDialog } from './HunkStagingDialog'
 interface FolderNode {
   name: string
   fullPath: string
-  children: FolderNode[]
+  children: Map<string, FolderNode>
+  count: number
   files: FileStatus[]
 }
 
@@ -26,38 +27,33 @@ type FlatRow =
   | { type: 'file'; file: FileStatus; depth: number }
 
 function buildTree(files: FileStatus[]): FolderNode {
-  const root: FolderNode = { name: '', fullPath: '', children: [], files: [] }
+  const root: FolderNode = { name: '', fullPath: '', children: new Map(), count: 0, files: [] }
   for (const file of files) {
     const parts = file.path.replace(/\\/g, '/').split('/')
     let node = root
+    node.count++
     for (let i = 0; i < parts.length - 1; i++) {
       const seg = parts[i]
-      let child = node.children.find(c => c.name === seg)
+      let child = node.children.get(seg)
       if (!child) {
-        child = { name: seg, fullPath: parts.slice(0, i + 1).join('/'), children: [], files: [] }
-        node.children.push(child)
+        child = { name: seg, fullPath: node.fullPath ? `${node.fullPath}/${seg}` : seg, children: new Map(), count: 0, files: [] }
+        node.children.set(seg, child)
       }
       node = child
+      node.count++
     }
     node.files.push(file)
   }
   return root
 }
 
-function countFiles(node: FolderNode): number {
-  return node.files.length + node.children.reduce((sum, c) => sum + countFiles(c), 0)
-}
-
-function flattenTree(node: FolderNode, depth: number, collapsed: Set<string>): FlatRow[] {
-  const rows: FlatRow[] = []
-  for (const child of node.children) {
+function flattenTree(node: FolderNode, depth: number, collapsed: Set<string>, rows: FlatRow[] = []): FlatRow[] {
+  for (const child of node.children.values()) {
     const isCollapsed = collapsed.has(child.fullPath)
-    rows.push({ type: 'folder', name: child.name, depth, fullPath: child.fullPath, count: countFiles(child), collapsed: isCollapsed })
-    if (!isCollapsed) rows.push(...flattenTree(child, depth + 1, collapsed))
+    rows.push({ type: 'folder', name: child.name, depth, fullPath: child.fullPath, count: child.count, collapsed: isCollapsed })
+    if (!isCollapsed) flattenTree(child, depth + 1, collapsed, rows)
   }
-  for (const file of node.files) {
-    rows.push({ type: 'file', file, depth })
-  }
+  for (const file of node.files) rows.push({ type: 'file', file, depth })
   return rows
 }
 
@@ -199,8 +195,9 @@ export function FileTree({
   const unlockFiles = useLockStore(s => s.unlockFiles)
   const { accounts, currentAccountId } = useAuthStore()
   const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login ?? null
+  const canStage = useMemo(() => createStageGuard(locks, currentLogin), [locks, currentLogin])
   const canSelectAllDeferredStagePaths = isDeferredStaging
-    && files.some(file => canStagePath(file.path, locks, currentLogin) && !deferredStagePaths?.has(file.path))
+    && files.some(file => canStage(file.path) && !deferredStagePaths?.has(file.path))
   // Added includes staged additions and files never added to the index.
   const isAddedFile = (file: FileStatus) => file.indexStatus === 'A' || file.indexStatus === 'C' || file.indexStatus === '?' || file.workingStatus === '?'
   const addedFiles = files.filter(isAddedFile)
@@ -282,15 +279,13 @@ export function FileTree({
         [result.refreshError, ...result.failed.map(item => `${item.filePath}: ${item.error}`)].filter(Boolean).join('\n'))
     }
   }
-  const treeRows = useMemo(() => {
-    if (!treeMode) return [] as FlatRow[]
-    const tree = buildTree(isDeferredStaging ? staged : files)
-    return flattenTree(tree, 0, collapsedFolders)
-  }, [treeMode, files, staged, collapsedFolders, isDeferredStaging])
+  const tree = useMemo(() => treeMode ? buildTree(isDeferredStaging ? staged : files) : null,
+    [treeMode, files, staged, isDeferredStaging])
+  const treeRows = useMemo(() => tree ? flattenTree(tree, 0, collapsedFolders) : [], [tree, collapsedFolders])
 
   const isCommitSelected = (file: FileStatus) => deferredStagePaths?.has(file.path) ?? file.staged
   const toggleCommitSelected = (file: FileStatus) => {
-    if (isDeferredStaging && canStagePath(file.path, locks, currentLogin)) onToggleDeferredStagePath?.(file.path)
+    if (isDeferredStaging && canStage(file.path)) onToggleDeferredStagePath?.(file.path)
   }
 
   const toggleFolder = (path: string) =>
@@ -309,8 +304,8 @@ export function FileTree({
   // Bulk action helpers
   const multiSelected = allFlatFiles.filter(f => multiPaths.has(pathKey(f)))
   const multiUnstaged = multiSelected.filter(f => !f.staged)
-  const stageable = unstaged.filter(f => canStagePath(f.path, locks, currentLogin))
-  const multiStageable = multiUnstaged.filter(f => canStagePath(f.path, locks, currentLogin))
+  const stageable = unstaged.filter(f => canStage(f.path))
+  const multiStageable = multiUnstaged.filter(f => canStage(f.path))
   const multiStaged   = multiSelected.filter(f => f.staged)
   const multiUntrackedPaths = multiUnstaged.filter(f => f.workingStatus === '?').map(f => f.path)
   const multiTrackedUnstagedPaths = multiUnstaged.filter(f => f.workingStatus !== '?').map(f => f.path)
@@ -432,7 +427,7 @@ export function FileTree({
           disabled={busy || (isDeferredStaging ? !canSelectAllDeferredStagePaths : stageable.length === 0)}
           onClick={() => {
             if (isDeferredStaging) {
-              onSetDeferredStagePaths?.(files.filter(f => canStagePath(f.path, locks, currentLogin)).map(f => f.path))
+              onSetDeferredStagePaths?.(files.filter(f => canStage(f.path)).map(f => f.path))
               return
             }
             run('Staging all…', () => ipc.stage(repoPath, stageable.map(f => f.path)))

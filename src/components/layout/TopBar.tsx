@@ -34,7 +34,7 @@ interface TopBarProps {
   onOpen:           () => void
   onClone:          () => void
   onAddAccount:     () => void
-  onSynced?:        () => void
+  onSynced?:        (repoPath: string) => void
   onMergeConflict?: (branch: string) => void
   /** Called when a push is rejected by GitHub LFS strict locking. */
   onPushBlockedByLocks?: (errorMessage: string) => void
@@ -54,7 +54,7 @@ function parseGitHubSlug(url: string): string | null {
 
 export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflict, onPushBlockedByLocks, onOpenIndexRecovery }: TopBarProps) {
   const panelPollMs = usePerformanceStore(s => s.settings.panelPollSeconds) * 1000
-  const { repoPath, currentBranch, refreshStatus, recentRepos, openRepo, removeRecentRepo, clearRepo, branches, checkout, fileStatus, syncTick, bumpSyncTick } = useRepoStore()
+  const { repoPath, currentBranch, refreshStatus, loadBranches, recentRepos, openRepo, removeRecentRepo, clearRepo, branches, checkout, fileStatus, syncTick, bumpSyncTick } = useRepoStore()
   const { accounts, currentAccountId, permissionErrors, fetchRepoPermission, viewAsRole, setViewAsRole } = useAuthStore()
   const opRun   = useOperationStore(s => s.run)
   const pushErr = useErrorStore(s => s.pushRaw)
@@ -107,10 +107,13 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
     }
   }, [repoPath])
 
-  const refreshRevisionState = async () => {
-    await Promise.all([loadSync(), refreshStatus()])
+  const refreshRevisionState = async (workingTree = true) => {
+    if (!repoPath || useRepoStore.getState().repoPath !== repoPath) return
+    // Fetch only updates refs. Pull/push/merge still refresh working-file state.
+    await Promise.all([loadSync(), workingTree ? refreshStatus() : loadBranches()])
+    if (useRepoStore.getState().repoPath !== repoPath) return
     bumpSyncTick()
-    onSynced?.()
+    onSynced?.(repoPath)
   }
 
   useEffect(() => {
@@ -264,12 +267,12 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
       // that also changed upstream. No merge starts until this is clear —
       // if it isn't, the user is prompted to stash the overlapping files.
       await opRun(`Checking ${defaultBranch} for conflicts…`, () => ipc.fetch(repoPath))
-      const overlap = await ipc.updateFromMainConflicts(repoPath).catch(() => [] as string[])
+      const overlap = await ipc.updateFromMainConflicts(repoPath)
       let stashed = false
       if (overlap.length > 0) {
         const stashAndUpdate = await useDialogStore.getState().confirm({
           title: `Stash changes before updating from ${defaultBranch}`,
-          message: `You have uncommitted changes to ${overlap.length} file${overlap.length === 1 ? '' : 's'} that also changed in ${defaultBranch}. Merging now would overwrite them.`,
+          message: `${overlap.length} local file${overlap.length === 1 ? '' : 's'} must be committed or stashed before this merge. Staged changes can block a merge even when incoming commits touch different files.`,
           detail: 'Stash your changes to update safely — restore them anytime from the Stash panel.',
           confirmLabel: 'Stash & Update',
           cancelLabel: 'Cancel',
@@ -340,7 +343,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
       markFetchPerformed(repoPath)
       sessionTopBarFetched.add(repoPath)
       setHasFetched(true)
-      await refreshRevisionState()
+      await refreshRevisionState(false)
       showStatusToast('Fetch successful.')
     } catch (e) {
       const s = String(e)
@@ -364,11 +367,11 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
       let willStash = false
       if (hasChanges) {
         await opRun('Checking for conflicts…', () => ipc.fetch(repoPath))
-        const overlap = await ipc.mergeOverlapFiles(repoPath, '@{u}').catch(() => [] as string[])
+        const overlap = await ipc.mergeOverlapFiles(repoPath, '@{u}')
         if (overlap.length > 0) {
           const stashAndPull = await useDialogStore.getState().confirm({
             title: 'Commit or stash before pulling',
-            message: `You have uncommitted changes to ${overlap.length} file${overlap.length === 1 ? '' : 's'} that also changed on the remote. Pulling now would overwrite them.`,
+            message: `${overlap.length} local file${overlap.length === 1 ? '' : 's'} must be committed or stashed before this pull. Staged changes can block a merge even when incoming commits touch different files.`,
             detail: 'Commit your changes in the Changes panel, or stash them and pull now.',
             confirmLabel: 'Stash & Pull',
             cancelLabel: 'Cancel',

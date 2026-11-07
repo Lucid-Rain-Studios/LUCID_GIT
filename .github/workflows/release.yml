@@ -9,7 +9,11 @@ permissions:
   contents: write   # needed to create GitHub Releases and upload assets
 
 jobs:
+  git-safety:
+    uses: ./.github/workflows/git-safety.yml
+
   release:
+    needs: git-safety
     strategy:
       fail-fast: false
       matrix:

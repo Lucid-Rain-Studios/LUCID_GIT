@@ -1,0 +1,32 @@
+name: Git and LFS Pull safety
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  pull-safety:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Require Git LFS
+        run: git lfs version
+      - name: Pull safety against disposable Git and LFS remotes
+        run: npm run test:pull-safety
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pull-safety-results
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7

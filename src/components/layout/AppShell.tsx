@@ -518,7 +518,10 @@ export function AppShell() {
         onOpen={handleOpenRepo}
         onClone={handleCloneRepo}
         onAddAccount={() => setShowLoginDialog(true)}
-        onSynced={handleRefresh}
+        onSynced={syncedRepo => {
+          // TopBar already refreshed Git state; only refresh the lock panel here.
+          if (useRepoStore.getState().repoPath === syncedRepo) loadLocks(syncedRepo)
+        }}
         onMergeConflict={branch => setMergeTarget(branch)}
         onPushBlockedByLocks={msg => setPushBlockedError(msg)}
         onOpenIndexRecovery={() => { setIndexRecoveryRequest(n => n + 1); setLeftTab('tools') }}

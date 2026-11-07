@@ -91,7 +91,7 @@ test('LG-041 post-push unlock keeps dirty paths and reports partial failures', a
   const handlers=new Map(), events=[], targets=[]; const {CHANNELS}=require(path.join(DIST,'ipc/channels'))
   component('electron/ipc/handlers.ts', {
     electron:{ipcMain:{handle:(channel,fn)=>handlers.set(channel,fn)}}, './channels':{CHANNELS}, '../util/repo-gate':{withRepoSlot:(_,__,fn)=>fn()},
-    '../services/GitService':{gitService:{push:async()=>({branch:'main',filesAhead:['dirty','clean']}),defaultBranch:async()=> 'main',status:async()=>[{path:'dirty'}]}},
+    '../services/GitService':{gitService:{invalidateStatusCache(){},push:async()=>({branch:'main',filesAhead:['dirty','clean']}),defaultBranch:async()=> 'main',statusPaths:async()=>[{path:'dirty'}]}},
     '../services/AuthService':{authService:{listAccounts:()=>({currentAccountId:'1',accounts:[{userId:'1',login:'me'}]})}},
     '../services/LockService':{lockService:{listLocks:async()=>['dirty','clean'].map(p=>({id:p,path:p,owner:{login:'me'}})),unlockFiles:async(_,list)=>{targets.push(...list);return {unlocked:[],failed:[{filePath:'clean',error:'offline'}]}}}},
     '../services/LogService':{logService:{error:noop}},
