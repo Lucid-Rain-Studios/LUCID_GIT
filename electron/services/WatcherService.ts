@@ -1,14 +1,14 @@
 import { watch as fsWatch } from 'node:fs'
 import path from 'node:path'
 import chokidar from 'chokidar'
-import { exec, gitOpActivity } from '../util/dugite-exec'
+import { exec } from '../util/dugite-exec'
 import { logService } from './LogService'
 import { performanceService } from './PerformanceService'
 import { noteWatcherFire } from '../util/status-telemetry'
 
 const TRANSIENT_WATCH_ERRORS = /^(EPERM|ENOENT|EBUSY|EACCES)\b/
 const IGNORED_SEGMENTS = /(?:^|\/)(?:node_modules|\.vs|Binaries|Intermediate|DerivedDataCache|Saved)(?:\/|$)/
-const metadataRelevant = (file: string) => /^(HEAD|index|MERGE_HEAD|ORIG_HEAD|CHERRY_PICK_HEAD|REBASE_HEAD|packed-refs|config)$/.test(file) || file.startsWith('refs/')
+const metadataRelevant = (file: string) => /^(HEAD|index|MERGE_HEAD|ORIG_HEAD|CHERRY_PICK_HEAD|REBASE_HEAD|packed-refs|config)$/.test(file) || (file.startsWith('refs/') && !file.endsWith('.lock'))
 
 class WatcherService {
   private disposers = new Map<string, () => void>()
@@ -20,14 +20,23 @@ class WatcherService {
     const session = {}
     this.sessions.set(repoPath, session)
     const current = () => this.sessions.get(repoPath) === session
-    let tracked = new Set<string>(), loadingTracked = false
-    const refreshTracked = async () => {
-      if (loadingTracked) return
-      loadingTracked = true
-      try {
-        const { stdout } = await exec(['ls-files', '-z'], repoPath)
-        if (current()) tracked = new Set(stdout.split('\0').filter(Boolean))
-      } finally { loadingTracked = false }
+    let tracked = new Set<string>(), indexSnapshot: string | undefined
+    let loadingTracked: Promise<boolean> | null = null
+    const refreshTracked = (): Promise<boolean> => {
+      if (loadingTracked) return loadingTracked
+      loadingTracked = (async () => {
+        // Include object IDs, modes, stages and assume-unchanged/skip-worktree
+        // flags, but exclude stat-cache fields that status routinely rewrites.
+        const { stdout } = await exec(['ls-files', '--stage', '-v', '-z'], repoPath)
+        if (!current()) return false
+        const changed = indexSnapshot !== undefined && indexSnapshot !== stdout
+        if (indexSnapshot !== stdout) {
+          indexSnapshot = stdout
+          tracked = new Set(stdout.split('\0').filter(Boolean).map(entry => entry.slice(entry.indexOf('\t') + 1)))
+        }
+        return changed
+      })().finally(() => { loadingTracked = null })
+      return loadingTracked
     }
     const [gitDirResult, commonResult] = await Promise.all([
       exec(['rev-parse', '--absolute-git-dir'], repoPath), exec(['rev-parse', '--git-common-dir'], repoPath), refreshTracked(),
@@ -43,19 +52,10 @@ class WatcherService {
     refreshDirectories()
     const relevant = (relative: string) => {
       const file = relative.replace(/\\/g, '/')
-      if (file === '.git') return true
-      if (file.startsWith('.git/')) return metadataRelevant(file.slice(5))
+      // A dedicated metadata watcher owns these events, including linked worktrees.
+      if (file === '.git') return gitDir !== path.join(repoPath, '.git') // linked-worktree pointer file
+      if (file.startsWith('.git/')) return false
       return !IGNORED_SEGMENTS.test(file) || tracked.has(file)
-    }
-    // Our own `git status` rewrites .git/index to persist the stat refresh. That
-    // write is not a user change: reacting to it re-runs status, which rewrites
-    // the index again — a loop that keeps git at full CPU on a large repository.
-    // Index events during or just after one of our git processes are ignored;
-    // focus refresh and the other working-tree events still catch real changes.
-    const ownIndexWrite = (file: string) => {
-      if (!/(?:^|[\\/])index$/.test(file)) return false
-      const activity = gitOpActivity(repoPath)
-      return activity.inFlight > 0 || activity.ranDuring(Date.now())
     }
     // What the debounce window collected, so the status log can say which change
     // led to a refresh and how many events one refresh stood in for.
@@ -75,6 +75,25 @@ class WatcherService {
         onChange()
       }, performanceService.get().watcherDelayMs))
     }
+    let indexTimer: ReturnType<typeof setTimeout> | undefined
+    const verifyIndex = () => {
+      if (!current()) return
+      if (indexTimer) clearTimeout(indexTimer)
+      indexTimer = setTimeout(() => {
+        indexTimer = undefined
+        if (!current()) return
+        // A later index event must get a new snapshot, not join a read that
+        // may already have observed the previous index.
+        if (loadingTracked) { void loadingTracked.then(verifyIndex, verifyIndex); return }
+        void refreshTracked().then(changed => {
+          if (changed) { refreshDirectories(); fire(false, '[index content]') }
+        }).catch(error => {
+          logService.warn('watcher.index', String(error))
+          // An uncertain index is never treated as unchanged.
+          fire(false, '[index check failed]')
+        })
+      }, performanceService.get().watcherDelayMs)
+    }
     const disposers: Array<() => void> = []
     const onError = (error: Error) => { if (!TRANSIENT_WATCH_ERRORS.test(error.message)) logService.warn('watcher', error.message) }
     const addWatcher = (root: string, metadata: boolean) => {
@@ -84,7 +103,10 @@ class WatcherService {
       if (process.platform === 'win32' || process.platform === 'darwin') {
         try {
           const watcher = fsWatch(root, { recursive: true }, (_event, filename) => {
-            if (filename !== null && ownIndexWrite(String(filename))) return
+            // Directory mtime changes (e.g. LFS cache/index.lock) are not edits.
+            // A rename of .git itself may mean metadata was replaced or removed.
+            if (!metadata && filename === '.git' && _event === 'rename') { fire(true, '.git'); return }
+            if (metadata && filename === 'index') { verifyIndex(); return }
             if (filename === null || accepts(String(filename))) fire(filename === null || /(?:^|[\\/])index$/.test(String(filename)), label(filename === null ? '' : String(filename)))
           })
           watcher.on('error', onError)
@@ -98,17 +120,17 @@ class WatcherService {
           const file = path.relative(root, absolute).replace(/\\/g, '/')
           if (!file) return false
           if (metadata) return !metadataRelevant(file) && file !== 'refs'
-          if (file === '.git') return false
-          if (file.startsWith('.git/')) return !metadataRelevant(file.slice(5)) && file !== '.git/refs'
+          if (file === '.git') return gitDir === path.join(repoPath, '.git')
+          if (file.startsWith('.git/')) return true
           return IGNORED_SEGMENTS.test(file) && !tracked.has(file) && !trackedDirectories.has(file)
         },
       })
-      watcher.on('all', (_event, absolute) => { const file = path.relative(root, absolute); if (ownIndexWrite(file)) return; if (accepts(file)) fire(/(?:^|[\\/])index$/.test(file), label(file)) }).on('error', onError)
+      watcher.on('all', (_event, absolute) => { const file = path.relative(root, absolute); if (metadata && file === 'index') { verifyIndex(); return }; if (accepts(file)) fire(/(?:^|[\\/])index$/.test(file), label(file)) }).on('error', onError)
       disposers.push(() => { void watcher.close() })
     }
     addWatcher(repoPath, false)
-    for (const dir of new Set([gitDir, commonDir])) if (dir !== path.join(repoPath, '.git')) addWatcher(dir, true)
-    this.disposers.set(repoPath, () => disposers.forEach(dispose => dispose()))
+    for (const dir of new Set([gitDir, commonDir])) addWatcher(dir, true)
+    this.disposers.set(repoPath, () => { if (indexTimer) clearTimeout(indexTimer); disposers.forEach(dispose => dispose()) })
   }
 
   unwatch(repoPath: string): void {

@@ -47,8 +47,8 @@ function component(file, mocks = {}, globals = {}) {
       name === '../util/performance' || name.endsWith('electron/util/performance') ? component('electron/util/performance.ts', {}, { ...globals, __privateExports: [] }).exports :
       name === '@/stores/performanceStore' ? { usePerformanceStore: store({ settings: component('electron/util/performance.ts', {}, { ...globals, __privateExports: [] }).exports.DEFAULT_PERFORMANCE }) } :
       name === '@/lib/visiblePolling' ? component('src/lib/visiblePolling.ts', {}, { ...globals, __privateExports: [] }).exports :
-      ['../util/network', '../util/git-paths', '../util/json-store', '../util/external-actors', '@/lib/staging'].includes(name)
-        ? component(name === '@/lib/staging' ? 'src/lib/staging.ts' : 'electron/util/' + name.split('/').pop() + '.ts', {}, globals).exports
+      ['../util/network', '../util/git-paths', '../util/json-store', '../util/external-actors', '@/lib/staging', '@/lib/branchTips'].includes(name)
+        ? component(name === '@/lib/branchTips' ? 'src/lib/branchTips.ts' : name === '@/lib/staging' ? 'src/lib/staging.ts' : 'electron/util/' + name.split('/').pop() + '.ts', {}, globals).exports
         : name.startsWith('node:') || ['fs', 'path', 'crypto'].includes(name) ? require(name)
         : name === '@/lib/utils' ? { cn: (...args) => args.filter(Boolean).join(' ') } : new Proxy({}, { get: (_, key) => key })),
     console, setTimeout, clearTimeout, setInterval, clearInterval,

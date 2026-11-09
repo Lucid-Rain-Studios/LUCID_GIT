@@ -110,7 +110,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
   const refreshRevisionState = async (workingTree = true) => {
     if (!repoPath || useRepoStore.getState().repoPath !== repoPath) return
     // Fetch only updates refs. Pull/push/merge still refresh working-file state.
-    await Promise.all([loadSync(), workingTree ? refreshStatus() : loadBranches()])
+    await (workingTree ? refreshStatus() : loadBranches())
     if (useRepoStore.getState().repoPath !== repoPath) return
     bumpSyncTick()
     onSynced?.(repoPath)

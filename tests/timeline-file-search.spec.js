@@ -12,7 +12,7 @@ test('Timeline file search filters loaded paths, old names and resets between co
   const server = http.createServer((req,res) => {
     if (req.url === '/') {
       res.setHeader('Content-Type','text/html')
-      return res.end(`<html><link rel="stylesheet" href="/app.css"><style>html,body,#root{margin:0;width:100%;height:100%;display:flex}</style><div id="root"></div><script>window.reads=[];window.lucidGit={mergeInProgress:async()=>null,forecastPause:async()=>{},forecastResume:async()=>{},logRendererEvent:async()=>{},branchList:async()=>[{name:'main',displayName:'main',current:true,ahead:0,behind:0,isRemote:false}],gitDefaultBranch:async()=>'main',getRemoteUrl:async()=>null,getSyncStatus:async()=>({ahead:0,behind:0,hasUpstream:false}),log:async(_,args)=>args.refs?.some(r=>r.includes('..'))?[]:args.limit===1?[${JSON.stringify(commits[0])}]:${JSON.stringify(commits)},commitMessage:async()=>'',commitFiles:async(_,hash)=>{window.reads.push(hash);return ${JSON.stringify(files)}},gitBlame:async()=>[],gitCommitFileDiff:async()=>null};</script><script type="module" src="/app.js"></script></html>`)
+      return res.end(`<html><link rel="stylesheet" href="/app.css"><style>html,body,#root{margin:0;width:100%;height:100%;display:flex}</style><div id="root"></div><script>window.reads=[];window.logReads=[];window.lucidGit={mergeInProgress:async()=>null,forecastPause:async()=>{},forecastResume:async()=>{},logRendererEvent:async()=>{},branchList:async()=>[{name:'main',displayName:'main',tipHash:'${commits[0].hash}',current:true,ahead:0,behind:0,isRemote:false}],gitDefaultBranch:async()=>'main',getRemoteUrl:async()=>null,getSyncStatus:async()=>({ahead:0,behind:0,hasUpstream:false}),log:async(_,args)=>{window.logReads.push(args);return args.refs?.some(r=>r.includes('..'))?[]:args.limit===1?[${JSON.stringify(commits[0])}]:${JSON.stringify(commits)}},commitMessage:async()=>'',commitFiles:async(_,hash)=>{window.reads.push(hash);return ${JSON.stringify(files)}},gitBlame:async()=>[],gitCommitFileDiff:async()=>null};</script><script type="module" src="/app.js"></script></html>`)
     }
     res.setHeader('Content-Type',req.url.endsWith('.css')?'text/css':'text/javascript')
     res.end(fs.readFileSync(path.join(dir,req.url.slice(1))))
@@ -43,6 +43,7 @@ test('Timeline file search filters loaded paths, old names and resets between co
     await page.getByText('Initial files',{exact:true}).click()
     await expect(search).toHaveValue('')
     await expect(page.getByText(/OldHub\.umap.*Facility\.umap/)).toBeVisible()
+    expect(await page.evaluate(()=>window.logReads.filter(args=>args.limit===1))).toEqual([])
     expect(errors).toEqual([])
   } finally { await page.close(); server.closeAllConnections(); await new Promise(resolve=>server.close(resolve)) }
 })

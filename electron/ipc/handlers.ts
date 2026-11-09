@@ -567,7 +567,7 @@ export function registerHandlers(): void {
   })
 
   handleRead(CHANNELS.GIT_SYNC_STATUS, async (_event, repoPath: string) => {
-    return gitService.getSyncStatus(repoPath)
+    return gitService.sharedSyncStatus(repoPath)
   })
 
   const updateFromMain = (event: IpcMainInvokeEvent, repoPath: string) =>

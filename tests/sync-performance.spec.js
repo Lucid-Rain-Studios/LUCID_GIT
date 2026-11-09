@@ -121,8 +121,12 @@ for (const operation of ['Fetch', 'Pull']) test(`${operation} refreshes only the
   const button = find(tree, n => typeof n.props?.onFetch === 'function' && typeof n.props?.onPull === 'function')
   const click = () => button.props[operation === 'Fetch' ? 'onFetch' : 'onPull']()
   expect(button).toBeTruthy(); await click()
-  expect(calls).toEqual([operation.toLowerCase(), 'sync', operation === 'Fetch' ? 'branches' : 'status', 'tick'])
+  expect(calls).toEqual([operation.toLowerCase(), operation === 'Fetch' ? 'branches' : 'status', 'tick'])
   expect(synced).toEqual(['repo'])
+  // The refresh tick's effect owns the single sync request.
+  h.effects[0]()
+  await new Promise(resolve => setImmediate(resolve))
+  expect(calls.filter(call => call === 'sync')).toHaveLength(1)
   repo.repoPath = 'other'
   calls.length = 0; synced.length = 0
   await click()

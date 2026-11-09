@@ -98,6 +98,10 @@ test('Push prompts after fetched incoming updates and allows retry without a pri
   await button().props.onClick()
   expect(alerts).toHaveLength(1)
   expect(alerts[0].message).toMatch(/Pull.*Update from main.*try Push again/)
+  // React runs the refresh-tick effect after the operation completes.
+  h.render('TopBar', {})
+  h.effects[0]()
+  await new Promise(resolve => setImmediate(resolve))
   expect(h.slots[0].behind).toBe(1)
   expect(button().props.disabled).toBe(false)
   expect(notices).not.toContain('Push successful.')

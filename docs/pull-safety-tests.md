@@ -39,6 +39,13 @@ protection settings are separate.
   callers, with exact content and index preservation.
 - The earlier staged-Pull, stale-lock, scoped-status and refresh regressions
   remain part of the gate.
+- Watcher metadata noise, logical-index verification (including changes during
+  a pending check), linked worktrees, and native Windows stage/commit/save
+  notifications. Index checks include staged entries and flags, not stat-cache
+  fields, so external staging is detected even during application Git reads.
+- Branch-tip hashes batched into branch-list results and fresh after commits;
+  combined ahead/behind counts; concurrent UI sync requests, invalidation and
+  failure retries. Push safety queries bypass UI request sharing.
 
 ## What a new regression should prove
 

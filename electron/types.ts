@@ -35,6 +35,7 @@ export interface BranchInfo {
   name: string          // full short name: "main" or "origin/main"
   displayName: string   // name without remote prefix: always "main"
   current: boolean      // true only for the checked-out local branch
+  tipHash?: string     // commit ID from the same for-each-ref snapshot
   upstream?: string     // tracking remote ref, e.g. "origin/main"
   ahead: number
   behind: number

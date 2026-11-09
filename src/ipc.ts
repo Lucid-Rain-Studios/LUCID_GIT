@@ -83,6 +83,7 @@ export interface BranchInfo {
   name: string          // full short name: "main" or "origin/main"
   displayName: string   // name without remote prefix: always "main"
   current: boolean
+  tipHash?: string     // commit ID from the same for-each-ref snapshot
   upstream?: string
   ahead: number
   behind: number

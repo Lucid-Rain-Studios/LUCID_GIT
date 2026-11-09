@@ -1,3 +1,4 @@
+import { groupBranchTips, selectedBranchTips } from '@/lib/branchTips'
 import { RevisionFileActions } from '@/components/shared/RevisionFileActions'
 import { timelineBranches } from '@/lib/timelineBranches'
 import { isBinaryPath } from '@/lib/binaryFormats'
@@ -1675,21 +1676,9 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     [filterBranches]
   )
   const fetchBranchTips = useCallback(async (branchList: BranchInfo[]) => {
-    const tips = new Map<string, BranchInfo[]>()
-    await Promise.all(branchList.map(async b => {
-      try {
-        const [tip] = await ipc.log(repoPath, { limit: 1, refs: [b.name] })
-        if (tip) {
-          const arr = tips.get(tip.hash) ?? []
-          if (!arr.some(existing => existing.name === b.name)) arr.push(b)
-          tips.set(tip.hash, arr)
-        }
-      } catch {
-        return
-      }
-    }))
+    const tips = groupBranchTips(branchList)
     setBranchTips(new Map(tips))
-  }, [repoPath])
+  }, [])
   const [stashOpen,   setStashOpen]   = useState(() => {
     try { return localStorage.getItem(STASH_KEY) === '1' } catch { return false }
   })
@@ -1786,8 +1775,12 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     try {
       const active = selectedBranchesOverride ?? selBranches
       const mainBranch = defaultBranchOverride ?? defaultBranch
-      const remoteBranchPool = filterBranchesOverride ?? filterBranches
-      const allBranchPool = allBranchesOverride ?? branches
+      const allBranchPool = allBranchesOverride ?? await ipc.branchList(repoPath)
+      const remoteBranchPool = filterBranchesOverride ?? timelineBranches(allBranchPool)
+      if (!allBranchesOverride) {
+        setBranches(allBranchPool)
+        fetchBranchTips(selectedGraphBranches(active, allBranchPool, remoteBranchPool))
+      }
       const branchPool = mergeBranchLists(remoteBranchPool, selectedGraphBranches(active, allBranchPool, remoteBranchPool))
       const refs = selectedGraphBranches(active, branchPool, remoteBranchPool).map(branch => branch.name).filter(Boolean)
       if (refs.length === 0) {
@@ -1805,15 +1798,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
         ? await ipc.log(repoPath, { limit, all: false, refs: [defaultRef] }).catch(() => [])
         : []
       const defaultHashes = firstParentHashes(commits, defaultCommits[0]?.hash)
-      const tipCommits = await Promise.all(refs.map(async ref => {
-        try {
-          const [tip] = await ipc.log(repoPath, { limit: 1, all: false, refs: [ref] })
-          return tip ? { ref, hash: tip.hash } : null
-        } catch {
-          return null
-        }
-      }))
-      const selectedTipRefs = new Map(tipCommits.filter(tip => !!tip).map(tip => [tip!.hash, tip!.ref]))
+      const selectedTipRefs = selectedBranchTips(branchPool, refs)
       // Key each lane by the branch name where we know one, so a branch keeps
       // its identity — and therefore its colour — as new commits move its tip.
       const graph = remapGraphWithMainLeft(
@@ -1838,7 +1823,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     } finally {
       setHistLoading(false)
     }
-  }, [repoPath, opRun, selBranches, defaultBranch, filterBranches])
+  }, [repoPath, opRun, selBranches, defaultBranch, filterBranches, fetchBranchTips])
 
   const handleCommitListScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget

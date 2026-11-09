@@ -497,6 +497,7 @@ class GitService {
   /** Forget cached status after anything that can change the working tree or index. */
   invalidateStatusCache(repoPath: string): void {
     const key = path.resolve(repoPath).toLowerCase()
+    this._syncInFlight.delete(key)
     this._statusCache.delete(key)
     this._statusGeneration.set(key, (this._statusGeneration.get(key) ?? 0) + 1)
   }
@@ -1137,7 +1138,10 @@ class GitService {
   private withRemote<T>(repoPath: string, fn: () => Promise<T>): Promise<T> {
     const key = path.resolve(repoPath).toLowerCase()
     const previous = this._remoteQueue.get(key) ?? Promise.resolve()
-    const run = previous.then(fn)
+    const run = previous.then(async () => {
+      this._syncInFlight.delete(key)
+      try { return await fn() } finally { this._syncInFlight.delete(key) }
+    })
     const tail = run.then(() => undefined, () => undefined)
     this._remoteQueue.set(key, tail)
     void tail.then(() => { if (this._remoteQueue.get(key) === tail) this._remoteQueue.delete(key) })
@@ -1150,7 +1154,7 @@ class GitService {
       execSafe(
         [
           'for-each-ref',
-          '--format=%(refname)\t%(refname:short)\t%(upstream:short)\t%(upstream:track)',
+          '--format=%(refname)\t%(refname:short)\t%(upstream:short)\t%(upstream:track)\t%(objectname)',
           'refs/heads/',
           'refs/remotes/origin/',
         ],
@@ -1165,7 +1169,7 @@ class GitService {
     const results: BranchInfo[] = []
 
     for (const line of refRes.stdout.trim().split('\n').filter(Boolean)) {
-      const [refname, shortName, upstream, track] = line.split('\t')
+      const [refname, shortName, upstream, track, tipHash] = line.split('\t')
 
       // Skip the symbolic remote HEAD pointer. Match on the full refname:
       // git abbreviates refs/remotes/origin/HEAD to plain "origin", so a
@@ -1187,6 +1191,7 @@ class GitService {
 
       results.push({
         name:        shortName,
+        tipHash:     tipHash || undefined,
         displayName,
         current:     false,   // resolved below against HEAD
         upstream:    upstream || undefined,
@@ -1455,6 +1460,21 @@ class GitService {
   }
 
   /** Return ahead/behind counts for HEAD vs its upstream. */
+  private _syncInFlight = new Map<string, Promise<SyncStatus>>()
+
+  /** UI callers share only concurrent work. Safety checks always call getSyncStatus directly. */
+  async sharedSyncStatus(repoPath: string): Promise<SyncStatus> {
+    const key = path.resolve(repoPath).toLowerCase()
+    let request = this._syncInFlight.get(key)
+    if (!request) {
+      request = this.getSyncStatus(repoPath).finally(() => {
+        if (this._syncInFlight.get(key) === request) this._syncInFlight.delete(key)
+      })
+      this._syncInFlight.set(key, request)
+    }
+    return { ...await request }
+  }
+
   async getSyncStatus(repoPath: string): Promise<SyncStatus> {
     const branch = await this.currentBranch(repoPath)
     if (!branch || branch === 'HEAD' || branch === 'unknown') throw new Error('Switch to a branch to check its push status.')
@@ -1469,18 +1489,15 @@ class GitService {
     const remoteBranch = upRes.stdout.trim()
     const remoteName   = remoteBranch.split('/')[0]
 
-    const [aRes, bRes] = await Promise.all([
-      execSafe(['rev-list', '--count', `${remoteBranch}..HEAD`], repoPath),
-      execSafe(['rev-list', '--count', `HEAD..${remoteBranch}`], repoPath),
-    ])
-
-    if (aRes.exitCode !== 0 || bRes.exitCode !== 0 || !/^\d+$/.test(aRes.stdout.trim()) || !/^\d+$/.test(bRes.stdout.trim())) {
-      throw new Error(aRes.stderr || bRes.stderr || 'Unable to check incoming and outgoing commits. Try again before pushing.')
+    const counts = await execSafe(['rev-list', '--left-right', '--count', `HEAD...${remoteBranch}`], repoPath)
+    const match = /^(\d+)\s+(\d+)$/.exec(counts.stdout.trim())
+    if (counts.exitCode !== 0 || !match) {
+      throw new Error(counts.stderr || 'Unable to check incoming and outgoing commits. Try again before pushing.')
     }
 
     return {
-      ahead:        parseInt(aRes.stdout.trim())  || 0,
-      behind:       parseInt(bRes.stdout.trim())  || 0,
+      ahead:        Number(match[1]),
+      behind:       Number(match[2]),
       remoteName,
       remoteBranch,
       hasUpstream:  true,

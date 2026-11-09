@@ -1,3 +1,4 @@
+import { groupBranchTips } from '@/lib/branchTips'
 import { BlueprintFileAction } from '@/components/shared/BlueprintFileAction'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { ipc, CommitEntry, CommitFileChange, BranchInfo, BlameEntry, StashEntry } from '@/ipc'
@@ -1004,18 +1005,7 @@ export function HistoryPanel({ repoPath }: HistoryPanelProps) {
   const isCollapsed = selectedBranches.size > 0
 
   const fetchBranchTips = useCallback(async (branchList: BranchInfo[]) => {
-    const tips = new Map<string, BranchInfo[]>()
-    const locals = branchList.filter(b => !b.isRemote)
-    await Promise.all(locals.map(async b => {
-      try {
-        const [tip] = await ipc.log(repoPath, { limit: 1, refs: [b.name] })
-        if (tip) {
-          const arr = tips.get(tip.hash) ?? []
-          arr.push(b)
-          tips.set(tip.hash, arr)
-        }
-      } catch {}
-    }))
+    const tips = groupBranchTips(branchList.filter(branch => !branch.isRemote))
     if (activeRepo.current === repoPath) setBranchTips(new Map(tips))
   }, [repoPath])
 
