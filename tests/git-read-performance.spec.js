@@ -89,14 +89,22 @@ function repoFixture() {
   return repo
 }
 
-test('Windows native watcher catches external stage/commit/save without refreshing for LFS cache churn', async () => {
+for (const topology of ['direct', 'junction']) test(`Windows native watcher (${topology}) catches external stage/commit/save without refreshing for LFS cache churn`, async () => {
   test.skip(process.platform !== 'win32', 'Native Windows notification regression')
   const repo = repoFixture()
+  const alias = topology === 'junction' ? path.join(tmpDir('lg-read-alias-'), 'repo') : null
+  if (alias) fs.symlinkSync(repo, alias, 'junction')
   const service = require(path.join(DIST, 'services/WatcherService')).watcherService
   const performance = require(path.join(DIST, 'services/PerformanceService')).performanceService
   const get = performance.get.bind(performance)
   performance.get = () => ({ ...get(), watcherDelayMs: 30 })
   let changes = 0
+  const events = [], nativeWatch = fs.watch
+  fs.watch = (root, options, callback) => nativeWatch(root, options, (event, filename) => {
+    events.push({ root, event, filename })
+    if (events.length > 100) events.shift()
+    callback(event, filename)
+  })
   const pause = ms => new Promise(r => setTimeout(r, ms))
   const changed = async previous => {
     const until = Date.now() + 5000
@@ -106,12 +114,12 @@ test('Windows native watcher catches external stage/commit/save without refreshi
   }
   try {
     // Git canonicalizes casing; this must still be treated as a normal .git directory.
-    await service.watch(repo.toUpperCase(), () => changes++)
+    await service.watch((alias || repo).toUpperCase(), () => changes++)
     await pause(400)
     const start = changes
     fs.mkdirSync(path.join(repo, '.git/lfs/tmp'), { recursive: true })
     for (let i = 0; i < 25; i++) fs.writeFileSync(path.join(repo, '.git/lfs/tmp', String(i)), 'cache')
-    await pause(400); expect(changes).toBe(start)
+    await pause(400); expect(changes, JSON.stringify(events)).toBe(start)
     fs.writeFileSync(path.join(repo, 'file.txt'), 'edited'); await changed(start)
     let previous = changes; git(repo, 'add', 'file.txt'); await changed(previous)
     previous = changes; git(repo, 'commit', '-qm', 'external commit'); await changed(previous)
@@ -120,7 +128,7 @@ test('Windows native watcher catches external stage/commit/save without refreshi
     for (let i = 0; i < 3; i++) await gitService.status(repo)
     await pause(300); expect(changes).toBe(previous)
     previous = changes; fs.writeFileSync(path.join(repo, 'Asset.uasset'), 'Unreal save'); await changed(previous)
-  } finally { service.unwatchAll(); performance.get = get }
+  } finally { service.unwatchAll(); performance.get = get; fs.watch = nativeWatch; if (alias) fs.unlinkSync(alias) }
 })
 
 test('one branch-list query returns exact tips for many local/remote branches and updates after a commit', async () => {

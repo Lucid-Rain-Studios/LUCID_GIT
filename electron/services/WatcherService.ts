@@ -1,4 +1,4 @@
-import { watch as fsWatch } from 'node:fs'
+import { watch as fsWatch, realpathSync } from 'node:fs'
 import path from 'node:path'
 import chokidar from 'chokidar'
 import { exec } from '../util/dugite-exec'
@@ -44,8 +44,12 @@ class WatcherService {
     if (!current()) return
     const gitDir = path.resolve(repoPath, gitDirResult.stdout.trim())
     const commonDir = path.resolve(repoPath, commonResult.stdout.trim())
-    // Git may canonicalize path casing differently on Windows.
-    const localGitDir = path.relative(gitDir, path.join(repoPath, '.git')) === ''
+    // Git canonicalizes casing and directory aliases (junctions/short paths).
+    let localGitDir = path.relative(gitDir, path.join(repoPath, '.git')) === ''
+    if (!localGitDir) {
+      try { localGitDir = path.relative(realpathSync.native(gitDir), realpathSync.native(path.join(repoPath, '.git'))) === '' }
+      catch { /* Uncertain paths retain conservative worktree-pointer handling. */ }
+    }
     const trackedDirectories = new Set<string>()
     const refreshDirectories = () => {
       trackedDirectories.clear()
