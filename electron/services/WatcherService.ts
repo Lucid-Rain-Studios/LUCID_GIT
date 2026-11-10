@@ -44,6 +44,8 @@ class WatcherService {
     if (!current()) return
     const gitDir = path.resolve(repoPath, gitDirResult.stdout.trim())
     const commonDir = path.resolve(repoPath, commonResult.stdout.trim())
+    // Git may canonicalize path casing differently on Windows.
+    const localGitDir = path.relative(gitDir, path.join(repoPath, '.git')) === ''
     const trackedDirectories = new Set<string>()
     const refreshDirectories = () => {
       trackedDirectories.clear()
@@ -53,7 +55,7 @@ class WatcherService {
     const relevant = (relative: string) => {
       const file = relative.replace(/\\/g, '/')
       // A dedicated metadata watcher owns these events, including linked worktrees.
-      if (file === '.git') return gitDir !== path.join(repoPath, '.git') // linked-worktree pointer file
+      if (file === '.git') return !localGitDir // linked-worktree pointer file
       if (file.startsWith('.git/')) return false
       return !IGNORED_SEGMENTS.test(file) || tracked.has(file)
     }
@@ -120,7 +122,7 @@ class WatcherService {
           const file = path.relative(root, absolute).replace(/\\/g, '/')
           if (!file) return false
           if (metadata) return !metadataRelevant(file) && file !== 'refs'
-          if (file === '.git') return gitDir === path.join(repoPath, '.git')
+          if (file === '.git') return localGitDir
           if (file.startsWith('.git/')) return true
           return IGNORED_SEGMENTS.test(file) && !tracked.has(file) && !trackedDirectories.has(file)
         },

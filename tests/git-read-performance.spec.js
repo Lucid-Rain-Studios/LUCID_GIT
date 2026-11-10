@@ -73,6 +73,15 @@ test('linked worktrees retain separate metadata, common refs, unknown events and
   h.service.unwatchAll()
 })
 
+test('normal .git directory changes skip refresh but replacement still refreshes', async () => {
+  const h = watcherHarness(); await h.start()
+  for (let i = 0; i < 25; i++) h.emit(0, '.git', 'change')
+  expect(await h.flush()).toBe(0)
+  expect(h.indexReads()).toBe(1)
+  h.emit(0, '.git', 'rename'); expect(await h.flush()).toBe(1)
+  h.service.unwatchAll()
+})
+
 function repoFixture() {
   const repo = tmpDir('lg-read-performance-')
   git(repo, 'init', '-qb', 'main'); git(repo, 'config', 'user.name', 'Test'); git(repo, 'config', 'user.email', 'test@example.com')
@@ -96,7 +105,8 @@ test('Windows native watcher catches external stage/commit/save without refreshi
     await pause(150)
   }
   try {
-    await service.watch(repo, () => changes++)
+    // Git canonicalizes casing; this must still be treated as a normal .git directory.
+    await service.watch(repo.toUpperCase(), () => changes++)
     await pause(400)
     const start = changes
     fs.mkdirSync(path.join(repo, '.git/lfs/tmp'), { recursive: true })
