@@ -2417,7 +2417,7 @@ ${lastError}` : '')
       args.push('--pathspec-from-file=-', '--pathspec-file-nul')
       const input = paths.map(p => ':(literal)' + p).join('\0') + '\0'
       const selected = new Set(paths)
-      const untracked = (await this.status(repoPath, 'stage')).filter(file => selected.has(file.path) && file.indexStatus === '?').map(file => file.path)
+      const untracked = (await this.statusPaths(repoPath, paths)).filter(file => selected.has(file.path) && file.indexStatus === '?').map(file => file.path)
       try {
         await save(() => execWithStdin(args, repoPath, input))
       } catch (error) {

@@ -23,20 +23,56 @@ function canonical(value: unknown): string {
   if (value && typeof value === 'object') return '{' + Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, v]) => JSON.stringify(key) + ':' + canonical(v)).join(',') + '}'
   return JSON.stringify(value) ?? 'null'
 }
-function semantic(node: BlueprintNode) {
-  const properties = Object.fromEntries(Object.entries(node.properties).filter(([key]) => !['NodePosX', 'NodePosY', 'NodeWidth', 'NodeHeight', 'NodeGuid', 'NodeComment'].includes(key)))
-  const referenced = new Set(node.pins.flatMap(pin => [pin.parent, pin.passThrough, ...(Array.isArray(pin.subPins) ? pin.subPins : []), ...pin.links.filter(link => link.node === node.id).map(link => link.pin)]).filter(value => typeof value === 'string'))
+const presentationProperties = new Set(['NodePosX', 'NodePosY', 'NodeWidth', 'NodeHeight', 'NodeGuid', 'NodeComment',
+  'AdvancedPinDisplay', 'bCommentBubblePinned', 'bCommentBubbleVisible', 'bCommentBubbleMakeVisible'])
+
+// Parent/sub-pin/pass-through references retain package export indices in the
+// reader response. Export ordering can change on save; compare proven targets
+// by node GUID + pin GUID instead. Keep unresolved/ambiguous references intact.
+function pinReferences(graph?: BlueprintGraph) {
+  const exports = new Map<number, BlueprintNode>(), duplicates = new Set<number>()
+  const pinIds = new Map<BlueprintNode, Set<string>>()
+  for (const node of graph?.nodes ?? []) {
+    if (exports.has(node.exportIndex)) duplicates.add(node.exportIndex)
+    exports.set(node.exportIndex, node)
+    pinIds.set(node, new Set(node.pins.map(pin => pin.id)))
+  }
+  return (value: unknown): unknown => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+    const reference = value as Record<string, unknown>
+    if (typeof reference.export !== 'number' || typeof reference.pin !== 'string' || duplicates.has(reference.export)) return value
+    const target = exports.get(reference.export)
+    if (!target?.id || !target.complete || !pinIds.get(target)?.has(reference.pin)) return value
+    const { export: _export, nodeName: _name, ...rest } = reference
+    return { ...rest, node: target.id }
+  }
+}
+
+function semantic(node: BlueprintNode, reference: (value: unknown) => unknown) {
+  const properties = Object.fromEntries(Object.entries(node.properties).filter(([key]) => {
+    if (presentationProperties.has(key)) return false
+    // Stale compiler text/severity has no effect while its banner is inactive.
+    if (key === 'ErrorType' || key === 'ErrorMsg') return node.properties.bHasCompilerMessage === true
+    if (key === 'bHasCompilerMessage') return node.properties[key] === true
+    return true
+  }))
+  const referenced = new Set(node.pins.flatMap(pin => [pin.parent, pin.passThrough, ...(Array.isArray(pin.subPins) ? pin.subPins : []), ...pin.links.filter(link => link.node === node.id).map(link => link.pin)])
+    .map(value => typeof value === 'string' ? value : value && typeof value === 'object' ? (value as { pin?: string }).pin : undefined).filter(Boolean))
   const pins = node.pins.map(pin => {
     const { links, ...rest } = pin
     // Reconstructing a Blueprint can regenerate an unused hidden pin's GUID.
     // Its type/default/flags still matter; a connected or referenced ID does too.
     const unusedHidden = !!(pin.flags & 1) && !links.length && !(Array.isArray(pin.subPins) && pin.subPins.length) && !pin.parent && !pin.passThrough && !referenced.has(pin.id)
-    return { ...rest, id: unusedHidden ? undefined : pin.id, tooltip: undefined, links: links.map(link => ({ node: link.node, pin: link.pin })).sort((a, b) => canonical(a).localeCompare(canonical(b))) }
+    return { ...rest, id: unusedHidden ? undefined : pin.id, tooltip: undefined,
+      parent: reference(pin.parent), passThrough: reference(pin.passThrough),
+      subPins: Array.isArray(pin.subPins) ? pin.subPins.map(reference) : pin.subPins,
+      links: links.map(link => ({ node: link.node, pin: link.pin })).sort((a, b) => canonical(a).localeCompare(canonical(b))) }
   }).sort((a, b) => canonical(a).localeCompare(canonical(b)))
   return canonical({ class: node.classPath, properties, pins })
 }
 export function graphChanges(pair: GraphPair): GraphChange[] {
   const result: GraphChange[] = [], right = new Map(pair.right?.nodes.map(n => [n.id, n]) ?? [])
+  const leftReference = pinReferences(pair.left), rightReference = pinReferences(pair.right)
   for (const l of pair.left?.nodes ?? []) {
     if (!l.id) continue
     const r = l.id ? right.get(l.id) : undefined
@@ -46,7 +82,7 @@ export function graphChanges(pair: GraphPair): GraphChange[] {
     else {
       const commentChanged = l.comment !== r.comment
       const layoutChanged = l.x !== r.x || l.y !== r.y || l.width !== r.width || l.height !== r.height
-      const kind = semantic(l) !== semantic(r) ? 'modified' : commentChanged ? 'commented' : layoutChanged ? 'moved' : undefined
+      const kind = semantic(l, leftReference) !== semantic(r, rightReference) ? 'modified' : commentChanged ? 'commented' : layoutChanged ? 'moved' : undefined
       if (kind) result.push({ id: l.id, kind, title: r.title, left: l, right: r, commentChanged, layoutChanged })
     }
   }

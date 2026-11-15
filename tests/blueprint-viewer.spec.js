@@ -151,6 +151,30 @@ test('LFS pointers resolve exact local content without modifying pointer, index 
   expect(git(repo, 'status', '--porcelain')).toBe(before); expect(git(repo, 'write-tree')).toBe(index)
 })
 
+test('comparison overlaps distinct revision extractions and preserves side identities', async () => {
+  const repo = tmpDir('lg-blueprint-overlap-')
+  git(repo, 'init', '-q'); git(repo, 'config', 'user.name', 'Test'); git(repo, 'config', 'user.email', 'test@example.com')
+  fs.copyFileSync(fixture, path.join(repo, 'BP_Test.uasset'))
+  git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'base')
+  fs.copyFileSync(path.join(root, 'third_party/UAssetAPI/UAssetAPI.Tests/TestAssets/TestEditorUE5_7/Blueprints/BP_FirstPersonCharacter.uasset'), path.join(repo, 'BP_Test.uasset'))
+  const service = new BlueprintRevisionService(helper, tmpDir('lg-blueprint-overlap-cache-'))
+  const original = service.extract.bind(service)
+  let release, started = 0
+  const paused = new Promise(resolve => { release = resolve })
+  service.extract = async (...args) => { started++; await paused; return original(...args) }
+  const reading = service.compare(repo, { filePath: 'BP_Test.uasset', leftRef: 'HEAD', rightRef: 'WORKING', requestId: 'overlap' })
+  try {
+    // Neither extraction may finish before the other starts: this detects
+    // sequential loading without a machine-dependent timing threshold.
+    await expect.poll(() => started).toBe(2)
+    release()
+    const result = await reading
+    expect(result.left.ref).toBe('HEAD'); expect(result.right.ref).toBe('WORKING')
+    expect(result.left.document.status).toBe('complete'); expect(result.right.document.status).toBe('complete')
+    expect(result.left.contentHash).not.toBe(result.right.contentHash)
+  } finally { release(); await reading; service.stop() }
+})
+
 test('CPU extraction releases the repository slot before a write needs it', async () => {
   const repo = tmpDir('lg-blueprint-gate-')
   git(repo, 'init', '-q'); git(repo, 'config', 'user.name', 'Test'); git(repo, 'config', 'user.email', 'test@example.com')
@@ -177,8 +201,10 @@ test('real Klee canvas renders, pans, inspects and expands read-only without bro
   modified.graphs.find(g => g.name === 'EventGraph').nodes[0].x += 160
   const result = { left: { ref: 'HEAD', path: 'BP_Test.uasset', status: 'ready', document: baseDocument }, right: { ref: 'WORKING', path: 'BP_Test.uasset', status: 'ready', document: modified } }
   await require('esbuild').build({ stdin: { contents: `import React from 'react'; import {createRoot} from 'react-dom/client'; import {BlueprintDiff} from './src/components/diff/BlueprintDiff'; import './src/index.css'; createRoot(document.getElementById('root')).render(<BlueprintDiff files={[{path:"Content/OGS/Items/BP_Pickup.uasset",stage:"Unstaged",selected:true,onSelect:()=>{}},{path:"Other.uasset",onSelect:()=>{window.chosenFile="Other.uasset"}}]} project={{name:"Test Project",engineVersion:"5.7",uprojectPath:"test/Game.uproject"}} repoPath="test" request={{filePath:'BP_Test.uasset',leftRef:'HEAD',rightRef:'WORKING'}} onFallback={()=>{window.fallback=true}}/>);`, resolveDir: root, loader: 'tsx' }, alias: { '@': path.join(root, 'src') }, outfile: path.join(dir, 'app.js'), bundle: true, format: 'esm' })
+  let rendererRequests = 0
   const server = http.createServer((req, res) => {
-    if (req.url === '/') { res.setHeader('Content-Type', 'text/html'); res.end(`<html><link rel="stylesheet" href="/app.css"><style>html,body,#root{margin:0;width:100%;height:100%;display:flex}</style><div id="root"></div><script>window.lucidGit=new Proxy({blueprintCompare:async()=>(${JSON.stringify(result)}),blueprintCancel:async()=>{}},{get:(o,k)=>o[k]||(()=>{})})</script><script type="module" src="/app.js"></script></html>`); return }
+    if (req.url === '/blueprint/klee.js') rendererRequests++
+    if (req.url === '/') { res.setHeader('Content-Type', 'text/html'); res.end(`<html><link rel="stylesheet" href="/app.css"><style>html,body,#root{margin:0;width:100%;height:100%;display:flex}</style><div id="root"></div><script>window.lucidGit=new Proxy({blueprintCompare:()=>new Promise(resolve=>{window.finishBlueprintRead=()=>resolve(${JSON.stringify(result)})}),blueprintCancel:async()=>{}},{get:(o,k)=>o[k]||(()=>{})})</script><script type="module" src="/app.js"></script></html>`); return }
     const target = req.url === '/blueprint/klee.js' ? path.join(root, 'public/blueprint/klee.js') : path.join(dir, req.url.slice(1))
     if (!fs.existsSync(target)) { res.writeHead(404); res.end(); return }
     res.setHeader('Content-Type', req.url.endsWith('.css') ? 'text/css' : 'text/javascript'); res.end(fs.readFileSync(target))
@@ -203,6 +229,9 @@ test('real Klee canvas renders, pans, inspects and expands read-only without bro
     await page.goto(`http://127.0.0.1:${server.address().port}`)
     await expect(page.getByText('Test Project · UE 5.7 · Read-only revision review')).toBeVisible()
   await expect(page.getByText('Test Project · UE 5.7 · Read-only revision review')).toHaveAttribute('title', /test\/Game\.uproject/)
+    await expect(page.getByText('Reading Blueprint revisions…')).toBeVisible()
+    await expect.poll(() => rendererRequests).toBe(1)
+    await page.evaluate(() => window.finishBlueprintRead())
     await expect(page.getByText('Views synchronized')).toBeVisible()
     await expect(page.locator('.bp-empty')).toHaveCount(0)
     await page.waitForTimeout(500)
@@ -308,6 +337,9 @@ test('changed wires have text and stroke indicators; mutation shortcuts and node
     await page.goto(`http://127.0.0.1:${server.address().port}`)
     await page.evaluate(async ({ text, id }) => {
       window.wireLabels = []; window.wireStrokes = []
+      window.themeReads = 0
+      const computedStyle = window.getComputedStyle
+      window.getComputedStyle = (...args) => { window.themeReads++; return computedStyle(...args) }
       const fill = CanvasRenderingContext2D.prototype.fillText, stroke = CanvasRenderingContext2D.prototype.stroke
       CanvasRenderingContext2D.prototype.fillText = function(label, ...args) { if (String(label).endsWith(' Wire')) window.wireLabels.push(label); return fill.call(this,label,...args) }
       CanvasRenderingContext2D.prototype.stroke = function(...args) { window.wireStrokes.push({ color:this.strokeStyle, dash:this.getLineDash() }); return stroke.apply(this,args) }
@@ -321,6 +353,23 @@ test('changed wires have text and stroke indicators; mutation shortcuts and node
     expect(await page.evaluate(() => window.wireStrokes.some(s => s.color === '#00bb66' && s.dash.length === 0))).toBe(true)
     await page.evaluate(id => { window.wireLabels=[]; window.review.setWireChanges({[id]:'modified'}) },id)
     await expect.poll(() => page.evaluate(() => window.wireLabels.includes('~ Wire'))).toBe(true)
+    const readsBeforePan = await page.evaluate(() => window.themeReads)
+    await page.evaluate(async () => {
+      const camera = window.review.getCamera()
+      for (let i = 0; i < 5; i++) {
+        window.review.setCamera({ ...camera, x: camera.x + i * 10 })
+        await new Promise(requestAnimationFrame)
+      }
+      window.review.setCamera(camera)
+      await new Promise(requestAnimationFrame)
+    })
+    expect(await page.evaluate(() => window.themeReads)).toBe(readsBeforePan)
+    await page.evaluate(() => {
+      window.wireStrokes = []
+      document.documentElement.style.setProperty('--lg-warning', '#123456')
+    })
+    await expect.poll(() => page.evaluate(() => window.wireStrokes.some(s => s.color === '#123456'))).toBe(true)
+
     await page.evaluate(() => { window.wireLabels=[]; window.review.setWireChanges({}) })
     await page.waitForTimeout(60)
     expect(await page.evaluate(() => window.wireLabels)).toEqual([])
@@ -466,4 +515,45 @@ test('revision stamp follows HEAD, the index and the working file without readin
   expect(await stamp('ABSENT', 'HEAD')).toMatch(/^absent:/)
   await expect(reader.stamp(repo, { filePath: file, leftRef: 'main', rightRef: 'HEAD' })).rejects.toThrow('Invalid Blueprint revision.')
   reader.stop()
+})
+
+test('embedded graph review keeps one header and maximizes usable canvas space', async ({ page }, testInfo) => {
+  const dir = tmpDir('lg-blueprint-compact-')
+  const document = read(path.join(root, 'third_party/UAssetAPI/UAssetAPI.Tests/TestAssets/TestEditorUE5_7/Blueprints/BP_FirstPersonCharacter.uasset'))
+  const result = { left: { status:'ready', ref:'a'.repeat(40), path:'Content/BP_Player.uasset', document }, right:{ status:'ready', ref:'b'.repeat(40), path:'Content/BP_Player.uasset', document } }
+  await require('esbuild').build({ stdin:{contents:`import React from 'react';import {createRoot} from 'react-dom/client';import {UnrealAssetReview} from './src/components/diff/UnrealAssetReview';import './src/index.css';createRoot(document.getElementById('root')).render(<UnrealAssetReview repoPath="test" files={[{path:'Content/BP_Player.uasset',selected:true,onSelect(){}},{path:'Other.uasset',onSelect(){window.picked=true}}]} request={{filePath:'Content/BP_Player.uasset',leftRef:'a'.repeat(40),rightRef:'b'.repeat(40)}} onFallback={()=>window.fallback=true}/>);`,resolveDir:root,loader:'tsx'},alias:{'@':path.join(root,'src')},outfile:path.join(dir,'app.js'),bundle:true,format:'esm' })
+  const server=http.createServer((req,res)=>{
+    if(req.url==='/'){res.setHeader('Content-Type','text/html');res.end(`<html><link rel="stylesheet" href="/app.css"><style>html,body,#root{margin:0;width:100%;height:100%;display:flex}</style><div id="root"></div><script>window.lucidGit=new Proxy({settingsGet:async()=>({performance:{previews:'auto'}}),blueprintCompare:async()=>(${JSON.stringify(result)}),blueprintCancel:async()=>{}},{get:(o,k)=>o[k]||(()=>Promise.resolve(null))})</script><script type="module" src="/app.js"></script></html>`);return}
+    const file=req.url==='/blueprint/klee.js'?path.join(root,'public/blueprint/klee.js'):path.join(dir,req.url.slice(1))
+    if(!fs.existsSync(file)){res.writeHead(404);res.end();return}
+    res.setHeader('Content-Type',req.url.endsWith('.css')?'text/css':'text/javascript');res.end(fs.readFileSync(file))
+  })
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
+  const errors=[];page.on('pageerror',e=>errors.push(e.message))
+  try {
+    await page.setViewportSize({width:1280,height:900});await page.goto(`http://127.0.0.1:${server.address().port}`)
+    await page.getByRole('button',{name:'Preview',exact:true}).click()
+    await expect(page.locator('.uar-graph-preview')).toBeVisible()
+    await expect(page.locator('.bp-pane')).toHaveCount(2)
+    await expect(page.getByRole('button',{name:'Binary details',exact:true})).toHaveCount(1)
+    await expect(page.getByRole('button',{name:'Full screen',exact:true})).toHaveCount(1)
+    await expect(page.locator('.uar-revisions,.uar-view-tools,.bp-info,.bp-canvas-hint')).toHaveCount(0)
+    await expect(page.locator('.bp-pane header').first()).toContainText('Base · aaaaaaa')
+    await expect(page.locator('.bp-pane header').last()).toContainText('Selected · bbbbbbb')
+    await expect(page.getByRole('combobox',{name:'Unreal asset',exact:true})).toHaveCount(1)
+    await expect.poll(()=>page.locator('.bp-pane canvas').first().evaluate(c=>c.height)).toBeGreaterThan(500)
+    await page.screenshot({path:testInfo.outputPath('compact-blueprint.png')})
+    await page.getByRole('button',{name:'Toggle node inspector'}).click()
+    await expect(page.locator('.bp-sidebar')).toBeVisible()
+    await page.getByRole('button',{name:'Full screen',exact:true}).click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('button',{name:'Full screen',exact:true})).toBeFocused()
+    await page.setViewportSize({width:560,height:800})
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true)
+    await page.getByRole('combobox',{name:'Unreal asset',exact:true}).click()
+    await page.getByRole('option').filter({hasText:'Other.uasset'}).click()
+    expect(await page.evaluate(()=>window.picked)).toBe(true)
+    expect(errors).toEqual([])
+  } finally {await page.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve))}
 })

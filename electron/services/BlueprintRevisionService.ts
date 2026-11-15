@@ -80,9 +80,13 @@ export class BlueprintRevisionService {
           stamp = await mutableActorStamp(repo, maps, manifest.packages.flatMap(p => [p.leftPath, p.rightPath]), refs)
         })
       } catch (error) { discoveryError = error instanceof Error ? error.message : String(error) }
-      const left = await this.side(repo, maps[0], refs[0], signal, refreshKeys, MAX_BYTES, req.nativeGeometry && req.nativeGeometrySide !== 'right')
-      if (signal?.aborted) throw new Error('Blueprint review cancelled.')
-      const right = await this.side(repo, maps[1], refs[1], signal, refreshKeys, MAX_BYTES, req.nativeGeometry && req.nativeGeometrySide !== 'left')
+      // Overlap ordinary revision capture/extraction using the existing bounded
+      // reader pool. Keep heavyweight native exports sequential to bound memory.
+      const readLeft = () => this.side(repo, maps[0], refs[0], signal, refreshKeys, MAX_BYTES, req.nativeGeometry && req.nativeGeometrySide !== 'right')
+      const readRight = () => this.side(repo, maps[1], refs[1], signal, refreshKeys, MAX_BYTES, req.nativeGeometry && req.nativeGeometrySide !== 'left')
+      const [left, right] = req.nativeGeometry || req.nativeScene
+        ? [await readLeft(), await readRight()]
+        : await Promise.all([readLeft(), readRight()])
       if (signal?.aborted) throw new Error('Blueprint review cancelled.')
       if (req.nativeScene) for (const side of req.nativeSceneSide ? [req.nativeSceneSide === 'left' ? left : right] : [left, right]) {
         if (side.status === 'ready') side.scene = await this.scene(repo, side, signal, refreshKeys, req.sceneBakeMaterials, req.sceneLod, req.sceneRenderOnly)

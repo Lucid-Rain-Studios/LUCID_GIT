@@ -40,6 +40,9 @@ asarUnpack:
 # Versioned filenames make GitHub Releases clean
 artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
 
+# Reject packaging when the target's self-contained Blueprint reader is missing.
+beforePack: scripts/check-blueprint-package.cjs
+
 # Re-signs mac builds ad-hoc when no Developer ID identity is configured —
 # electron-builder otherwise leaves a stale signature that won't launch.
 afterSign: scripts/afterSign.js

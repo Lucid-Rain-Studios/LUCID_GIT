@@ -5,19 +5,19 @@ import { createPortal } from 'react-dom'
 import { Maximize2, Minimize2, Link2, Focus, PanelRightClose, PanelRightOpen, Minus, Plus, RotateCcw, ChevronLeft, ChevronRight, Menu } from 'lucide-react'
 import { ipc, type UEProject, type BlueprintComparison, type BlueprintGraph, type BlueprintNode, type BlueprintRequest, type BlueprintSide } from '@/ipc'
 import { graphChanges, graphText, pairGraphs, wireChanges, type GraphChange, type NodeChange } from '@/lib/blueprintGraph'
-import { loadKlee, type BlueprintCamera, type KleeCanvas } from '@/lib/blueprintKlee'
+import { loadKlee, preloadKlee, type BlueprintCamera, type KleeCanvas } from '@/lib/blueprintKlee'
 import { useDialogOverlayDismiss } from '@/lib/useDialogOverlayDismiss'
 import { BlueprintChoice } from './BlueprintChoice'
 import './BlueprintDiff.css'
 
 export interface BlueprintFileChoice { path: string; label?: string; stage?: 'Staged' | 'Unstaged'; selected?: boolean; onSelect(): void }
-export interface BlueprintDiffProps { onRetry?(): void; comparison?: BlueprintComparison; single?: boolean; files?: BlueprintFileChoice[]; project?: UEProject | null; repoPath: string; request: Omit<BlueprintRequest, 'requestId'>; revisionLabels?: { left: string; right: string }; onFallback(): void; onUnsupported?(reason: string): void }
+export interface BlueprintDiffProps { embedded?: boolean; onRetry?(): void; comparison?: BlueprintComparison; single?: boolean; files?: BlueprintFileChoice[]; project?: UEProject | null; repoPath: string; request: Omit<BlueprintRequest, 'requestId'>; revisionLabels?: { left: string; right: string }; onFallback(): void; onUnsupported?(reason: string): void }
 const tone: Record<NodeChange, string> = { added: 'var(--lg-success)', removed: 'var(--lg-error)', modified: 'var(--lg-warning)', moved: '#9c8de3', commented: 'var(--lg-warning)' }
 const mark: Record<NodeChange, string> = { added: '+', removed: '−', modified: '~', moved: '↔', commented: '✎' }
 const label = (ref: string) => ref === 'WORKING' ? 'Working tree' : ref === 'INDEX' ? 'Index' : ref === 'ABSENT' ? 'Absent revision' : ref === 'HEAD' ? 'HEAD' : ref.replace(/\^1$/, '').slice(0, 7) + (ref.endsWith('^1') ? ' parent' : '')
 
-function GraphPane({ side, graph, changes, wires, selected, canvasRef, saved, onCamera, onSelect, revisionLabel }: {
-  side: BlueprintSide; graph?: BlueprintGraph; changes: Record<string, NodeChange>; wires: Record<string, 'added' | 'removed' | 'modified'>; selected: string; canvasRef: React.MutableRefObject<KleeCanvas | null>; saved: React.MutableRefObject<BlueprintCamera | undefined>; onCamera(camera: BlueprintCamera): void; onSelect(id: string): void; revisionLabel?: string
+function GraphPane({ side, graph, changes, wires, selected, canvasRef, saved, onCamera, onSelect, revisionLabel, embedded }: {
+  embedded?: boolean; side: BlueprintSide; graph?: BlueprintGraph; changes: Record<string, NodeChange>; wires: Record<string, 'added' | 'removed' | 'modified'>; selected: string; canvasRef: React.MutableRefObject<KleeCanvas | null>; saved: React.MutableRefObject<BlueprintCamera | undefined>; onCamera(camera: BlueprintCamera): void; onSelect(id: string): void; revisionLabel?: string
 }) {
   const element = useRef<HTMLCanvasElement>(null), callbacks = useRef({ onCamera, onSelect })
   callbacks.current = { onCamera, onSelect }
@@ -44,11 +44,11 @@ function GraphPane({ side, graph, changes, wires, selected, canvasRef, saved, on
   useEffect(() => { canvasRef.current?.select(selected) }, [selected, canvasRef])
   const message = error ?? (side.status === 'unavailable' ? side.reason : side.status === 'absent' ? 'File is absent in this revision.' : !graph ? side.document?.diagnostics.join(' ') || 'This graph is absent in this revision.' : !graph.nodes.length ? 'This graph has no serialized nodes.' : null)
   return <section className="bp-pane" aria-label={label(side.ref)}>
-    <header><strong>{revisionLabel ? `${revisionLabel} · ${label(side.ref)}` : label(side.ref)}</strong><span className="bp-readonly">Read-only</span><small title={side.path}>{side.path}</small></header>
+    <header title={side.path}><strong>{revisionLabel ? `${revisionLabel} · ${label(side.ref)}` : label(side.ref)}</strong>{embedded ? <small className="bp-node-count">{graph?.nodes.length ?? 0} nodes</small> : <><span className="bp-readonly">Read-only</span><small title={side.path}>{side.path}</small></>}</header>
     <div className="bp-canvas-wrap">
       <canvas ref={element} tabIndex={0} aria-label={`${label(side.ref)} Blueprint graph. Drag to pan, scroll to zoom. Arrow keys pan; Home fits the graph.`} />
       {message && <div className="bp-empty" role={error || side.status === 'unavailable' ? 'alert' : undefined}>{message}</div>}
-      {graph?.nodes.length ? <span className="bp-canvas-hint">{graph.nodes.length} nodes · Drag to pan · Scroll to zoom</span> : null}
+      {!embedded && graph?.nodes.length ? <span className="bp-canvas-hint">{graph.nodes.length} nodes · Drag to pan · Scroll to zoom</span> : null}
     </div>
   </section>
 }
@@ -70,7 +70,7 @@ function Inspector({ change, node }: { change?: GraphChange; node?: BlueprintNod
   </div>
 }
 
-export function BlueprintDiff({ onRetry, comparison, files, project, repoPath, request, revisionLabels, onFallback, onUnsupported, single = false }: BlueprintDiffProps) {
+export function BlueprintDiff({ embedded = false, onRetry, comparison, files, project, repoPath, request, revisionLabels, onFallback, onUnsupported, single = false }: BlueprintDiffProps) {
   const [result, setResult] = useState<BlueprintComparison | null>(null), [error, setError] = useState<string | null>(null), [retry, setRetry] = useState(0)
   const [expanded, setExpanded] = useState(false), [graphKey, setGraphKey] = useState(''), [selected, setSelected] = useState(''), [sync, setSync] = useState(true), [highlight, setHighlight] = useState(true), [inspector, setInspector] = useState(false)
   const [graphHistory, setGraphHistory] = useState<string[]>([])
@@ -84,6 +84,7 @@ export function BlueprintDiff({ onRetry, comparison, files, project, repoPath, r
   useEffect(() => {
     let cancelled = false
     const requestId = crypto.randomUUID()
+    preloadKlee()
     setResult(null); setError(null); setSelected(''); setGraphKey(''); setGraphHistory([]); leftCamera.current = undefined; rightCamera.current = undefined
     const read = comparison && retry === 0 ? Promise.resolve(comparison) : ipc.blueprintCompare(repoPath, { filePath, oldPath, leftRef, rightRef, requestId, force: retry > 0 })
     read.then(data => {
@@ -108,10 +109,10 @@ export function BlueprintDiff({ onRetry, comparison, files, project, repoPath, r
     const family = (p.right ?? p.left)?.kind
     const familyLabel = family ? ({ event: 'Event graph', pose: 'Pose graph', 'state-machine': 'State machine', transition: 'Transition rule' })[family] : ''
     const suffix = [familyLabel, status, incomplete ? 'incomplete' : ''].filter(Boolean).join(', ')
-    return { pair: p, changes, wires: comparable && !single ? wireChanges(p) : [], label: p.name + (suffix ? ` (${suffix})` : ''), detail: suffix ? `(${suffix})` : '', color: single ? 'var(--lg-warning)' : !comparable ? 'var(--lg-text-secondary)' : !p.left ? 'var(--lg-success)' : !p.right ? 'var(--lg-error)' : 'var(--lg-warning)' }
+    return { pair: p, changes, label: p.name + (suffix ? ` (${suffix})` : ''), detail: suffix ? `(${suffix})` : '', color: single ? 'var(--lg-warning)' : !comparable ? 'var(--lg-text-secondary)' : !p.left ? 'var(--lg-success)' : !p.right ? 'var(--lg-error)' : 'var(--lg-warning)' }
   }), [pairs, comparable, single])
   const changes = graphEntries.find(entry => entry.pair === pair)?.changes ?? []
-  const currentWires = graphEntries.find(entry => entry.pair === pair)?.wires
+  const currentWires = useMemo(() => pair && comparable && !single ? wireChanges(pair) : [], [pair, comparable, single])
   const leftWires = useMemo(() => Object.fromEntries(highlight ? (currentWires ?? []).filter(c => c.kind !== 'added').map(c => [c.id, c.kind]) : []), [currentWires, highlight])
   const rightWires = useMemo(() => Object.fromEntries(highlight ? (currentWires ?? []).filter(c => c.kind !== 'removed').map(c => [c.id, c.kind]) : []), [currentWires, highlight])
   const leftChanges = useMemo(() => Object.fromEntries(highlight ? changes.filter(c => c.left).map(c => [c.id, c.kind]) : []), [changes, highlight])
@@ -153,14 +154,14 @@ export function BlueprintDiff({ onRetry, comparison, files, project, repoPath, r
     return () => { document.removeEventListener('keydown', dismiss, true); document.removeEventListener('pointerdown', outside) }
   }, [])
   const currentFile = files?.findIndex(file => file.selected ?? file.path === request.filePath) ?? -1
-  const content = <div className={single ? "bp-viewer bp-single" : "bp-viewer"}>
+  const content = <div className={(single ? "bp-viewer bp-single" : "bp-viewer") + (embedded ? " bp-embedded" : "")}>
     <div className="bp-toolbar">
       <details className="bp-navigation" ref={navigation}>
-        <summary tabIndex={0} aria-label="Choose Blueprint graph or file"><Menu size={15}/><span>Graphs &amp; files</span></summary>
+        <summary tabIndex={0} aria-label="Choose Blueprint graph or file"><Menu size={15}/><span>{embedded ? 'Graphs' : 'Graphs & files'}</span></summary>
         <div className="bp-navigation-panel">
-          <label htmlFor="bp-file-choice">{single ? 'Blueprint file' : 'Changed Blueprint file'}</label>
+          {!embedded && <><label htmlFor="bp-file-choice">{single ? 'Blueprint file' : 'Changed Blueprint file'}</label>
           {files?.length ? <BlueprintChoice id="bp-file-choice" label="Blueprint file" value={String(currentFile)} items={files.map((file, i) => ({ value: String(i), name: file.path.includes('/') ? '.../' + file.path.split('/').pop() : file.path, prefix: file.stage ?? file.label?.match(/^(Unstaged|Staged)\b/)?.[1], title: file.path }))} onChange={value => { if (navigation.current) navigation.current.open = false; files[Number(value)]?.onSelect() }}/> : <div className="bp-navigation-file" title={request.filePath}>{request.filePath}</div>}
-          <label htmlFor="bp-graph-choice">Graph / function</label>
+          </>}<label htmlFor="bp-graph-choice">Graph / function</label>
           <BlueprintChoice id="bp-graph-choice" label="Blueprint graph" value={pair?.key ?? ''} items={graphEntries.map(entry => ({ value: entry.pair.key, name: entry.pair.name, detail: entry.detail, color: entry.color }))} onChange={key => { setGraphHistory([]); chooseGraph(key) }}/>
           <small>{pairs.length} graph{pairs.length === 1 ? '' : 's'} in this {single ? 'asset' : 'comparison'}</small>
         </div>
@@ -168,21 +169,21 @@ export function BlueprintDiff({ onRetry, comparison, files, project, repoPath, r
       {graphHistory.length > 0 && <button className="lg-toolbar-control" onClick={() => { const previous = graphHistory[graphHistory.length - 1]; setGraphHistory(history => history.slice(0, -1)); chooseGraph(previous) }}>Back to graph</button>}
       <span className="bp-active-graph" title={pair?.name}>{pair?.name ?? 'Blueprint graph'}</span>
       {!single && <><button className="lg-toolbar-control lg-icon-control" title="Synchronize graph views" aria-label="Synchronize graph views" aria-pressed={sync} onClick={() => { setSync(!sync); if (!sync) { const camera = right.current?.getCamera() ?? left.current?.getCamera(); if(camera){left.current?.setCamera(camera);right.current?.setCamera(camera)} } }}><Link2 size={14}/></button>
-      <button className="lg-toolbar-control" aria-pressed={highlight} onClick={() => setHighlight(!highlight)}>Changes</button>
+      <button className="lg-toolbar-control" aria-pressed={highlight} onClick={() => setHighlight(!highlight)}>{embedded ? `${changes.length} changes` : 'Changes'}</button>
       <button className="lg-toolbar-control lg-icon-control" aria-label="Previous change" disabled={!changes.length} onClick={() => step(-1)}><ChevronLeft size={14}/></button><button className="lg-toolbar-control lg-icon-control" aria-label="Next change" disabled={!changes.length} onClick={() => step(1)}><ChevronRight size={14}/></button></>}
       <button className="lg-toolbar-control lg-icon-control" title="Fit graph" aria-label="Fit graph" onClick={fit}><Focus size={14}/></button>
       <button className="lg-toolbar-control lg-icon-control" aria-label="Zoom out" onClick={() => zoom(.8)}><Minus size={14}/></button><button className="lg-toolbar-control lg-icon-control" aria-label="Zoom in" onClick={() => zoom(1.25)}><Plus size={14}/></button>
       <button className="lg-toolbar-control lg-icon-control" aria-label="Toggle node inspector" aria-pressed={inspector} onClick={() => setInspector(!inspector)}>{inspector?<PanelRightClose size={14}/>:<PanelRightOpen size={14}/>}</button>
-      <button ref={fullscreenButton} className="lg-toolbar-control" onClick={() => setExpanded(!expanded)}>{expanded?<Minimize2 size={14}/>:<Maximize2 size={14}/>} {expanded?'Exit full screen':'Full screen'}</button>
-      <button className="lg-toolbar-control" onClick={onFallback}>Binary details</button>
+      {!embedded && <><button ref={fullscreenButton} className="lg-toolbar-control" onClick={() => setExpanded(!expanded)}>{expanded?<Minimize2 size={14}/>:<Maximize2 size={14}/>} {expanded?'Exit full screen':'Full screen'}</button>
+      <button className="lg-toolbar-control" onClick={onFallback}>Binary details</button></>}
     </div>
-    {project && <div className="bp-info" title={`${project.uprojectPath}\nEngine association: ${project.engineAssociation || project.engineVersion}`}>{project.name} · {project.engineVersion === 'Unknown' ? 'Engine version unknown' : `UE ${project.engineVersion}`} · {single ? 'Read-only graph view' : 'Read-only revision review'}</div>}
+    {project && !embedded && <div className="bp-info" title={`${project.uprojectPath}\nEngine association: ${project.engineAssociation || project.engineVersion}`}>{project.name} · {project.engineVersion === 'Unknown' ? 'Engine version unknown' : `UE ${project.engineVersion}`} · {single ? 'Read-only graph view' : 'Read-only revision review'}</div>}
     {!result && <div className="bp-empty" role={error ? 'alert' : 'status'}>{error ?? 'Reading Blueprint revisions…'}{error && <button onClick={() => onRetry ? onRetry() : setRetry(v => v+1)}><RotateCcw size={14}/> Retry</button>}</div>}
     {result && <>
       {(result.left.status === 'unavailable' || result.right.status === 'unavailable' || pair?.left?.complete === false || pair?.right?.complete === false) && <div className="bp-warning" role="status">{single ? 'Some asset data is unavailable or incomplete. Connections may be incomplete.' : 'Some revision data is unavailable or incomplete. Change highlights cover decoded nodes only.'}<details><summary>Details</summary>{Array.from(new Set([result.left.reason, result.right.reason, ...(pair?.left?.diagnostics??[]), ...(pair?.right?.diagnostics??[])].filter(Boolean))).map((s,i)=><div key={i}>{s}</div>)}</details><button onClick={() => onRetry ? onRetry() : setRetry(v => v+1)}>Retry reading</button></div>}
       {pair?.matchedByName && <div className="bp-info">Graphs matched by name because their saved identities differ.</div>}
       {(pair?.left?.kind === 'state-machine' || pair?.right?.kind === 'state-machine') && <details className="bp-state-overview"><summary>States and transitions</summary><div className="bp-state-sides">{(['left', 'right'] as const).filter(key => !single || key === 'right').map(key => pair?.[key]?.kind === 'state-machine' ? <AnimationStateMachine key={key} graph={pair[key]!} graphs={result[key].document?.graphs ?? []} label={revisionLabels?.[key] ?? (key === 'left' ? 'Base' : 'Selected')} selected={selected} changes={key === 'left' ? leftChanges : rightChanges} onSelect={id => { select(id, true); setInspector(true) }} onOpen={openGraph}/> : <section className="bp-state-machine" key={key}>State machine unavailable in this revision.</section>)}</div></details>}
-      <div className="bp-body"><div className="bp-revisions">{!single && <GraphPane revisionLabel={revisionLabels?.left} side={result.left} graph={pair?.left} changes={leftChanges} wires={leftWires} selected={selected} canvasRef={left} saved={leftCamera} onCamera={camera => cameraChanged('left',camera)} onSelect={id=>select(id)}/>}<GraphPane revisionLabel={revisionLabels?.right} side={result.right} graph={pair?.right} changes={rightChanges} wires={rightWires} selected={selected} canvasRef={right} saved={rightCamera} onCamera={camera=>cameraChanged('right',camera)} onSelect={id=>select(id)}/></div>
+      <div className="bp-body"><div className="bp-revisions">{!single && <GraphPane embedded={embedded} revisionLabel={revisionLabels?.left ?? (embedded ? 'Base' : undefined)} side={result.left} graph={pair?.left} changes={leftChanges} wires={leftWires} selected={selected} canvasRef={left} saved={leftCamera} onCamera={camera => cameraChanged('left',camera)} onSelect={id=>select(id)}/>}<GraphPane embedded={embedded} revisionLabel={revisionLabels?.right ?? (embedded ? 'Selected' : undefined)} side={result.right} graph={pair?.right} changes={rightChanges} wires={rightWires} selected={selected} canvasRef={right} saved={rightCamera} onCamera={camera=>cameraChanged('right',camera)} onSelect={id=>select(id)}/></div>
       {inspector && <aside className="bp-sidebar"><header>{single ? "Nodes" : "Graph changes"} <span>{single ? pair?.right?.nodes.length : changes.length}</span></header>{!single && <div className="bp-change-list">{changes.length ? changes.map(c=><button key={c.id} className={selected===c.id?'selected':''} onClick={()=>select(c.id,true)}><span style={{color:tone[c.kind]}}>{mark[c.kind]}</span><div>{c.title}<small>{[c.kind === 'modified' ? 'Properties, pins or connections changed' : c.kind === 'commented' ? 'Comment changed' : c.kind === 'moved' ? 'Saved layout changed' : 'Node '+c.kind, c.commentChanged && c.kind !== 'commented' ? 'Comment changed' : '', c.layoutChanged && c.kind !== 'moved' ? 'Saved layout changed' : ''].filter(Boolean).join(' / ')}</small></div></button>) : <p>{pair && (!comparable||pair.left?.complete===false||pair.right?.complete===false) ? 'Comparison is incomplete.' : pair ? 'No decoded graph changes. Other asset data may still differ.' : 'No supported graph to compare.'}</p>}</div>}<Inspector change={chosen} node={node}/>
         {(['left', 'right'] as const).filter(key => !single || key === 'right').flatMap(key => {
           const savedNode = pair?.[key]?.nodes.find(candidate => candidate.id === selected)
@@ -190,7 +191,7 @@ export function BlueprintDiff({ onRetry, comparison, files, project, repoPath, r
         })}
         <details className="bp-node-list"><summary>All nodes</summary>{(pair?.right?.nodes ?? pair?.left?.nodes ?? []).map(n=><button key={n.id||n.name} onClick={()=>select(n.id,true)}>{animationNodeName(n)}</button>)}</details>
       </aside>}</div>
-      {single ? <footer className="bp-footer">Read-only <span>Node positions are preserved</span></footer> : <footer className="bp-footer">{highlight && !!currentWires?.length && <small aria-label="Wire change summary">+ {currentWires.filter(w => w.kind === 'added').length} added wires / - {currentWires.filter(w => w.kind === 'removed').length} removed wires (dashed) / ~ {currentWires.filter(w => w.kind === 'modified').length} modified wires</small>}{sync?'Views synchronized':'Independent views'}<small aria-label="Graph change summary">{!comparable ? 'Comparison unavailable' : (pair?.left?.complete === false || pair?.right?.complete === false) ? `${changes.length} decoded changes - Comparison incomplete` : !changes.length ? 'No decoded changes · Other asset data may differ' : `${changes.length} graph change${changes.length === 1 ? '' : 's'}`}</small><span>Read-only · Node positions are preserved</span></footer>}
+      {embedded ? <footer className="bp-footer"><small aria-label="Graph change summary">{!comparable ? 'Comparison unavailable' : pair?.left?.complete === false || pair?.right?.complete === false ? `${changes.length} decoded changes · Incomplete comparison` : changes.length ? `${changes.length} graph changes` : 'No decoded graph changes'}</small><span>{!single && (sync ? 'Views linked · ' : 'Independent views · ')}Read-only</span></footer> : single ? <footer className="bp-footer">Read-only <span>Node positions are preserved</span></footer> : <footer className="bp-footer">{highlight && !!currentWires?.length && <small aria-label="Wire change summary">+ {currentWires.filter(w => w.kind === 'added').length} added wires / - {currentWires.filter(w => w.kind === 'removed').length} removed wires (dashed) / ~ {currentWires.filter(w => w.kind === 'modified').length} modified wires</small>}{sync?'Views synchronized':'Independent views'}<small aria-label="Graph change summary">{!comparable ? 'Comparison unavailable' : (pair?.left?.complete === false || pair?.right?.complete === false) ? `${changes.length} decoded changes - Comparison incomplete` : !changes.length ? 'No decoded changes · Other asset data may differ' : `${changes.length} graph change${changes.length === 1 ? '' : 's'}`}</small><span>Read-only · Node positions are preserved</span></footer>}
     </>}
   </div>
   return expanded ? createPortal(<ExpandedReview onClose={()=>setExpanded(false)}>{content}</ExpandedReview>, document.body) : content

@@ -2311,7 +2311,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
               </button>
               {stashOpen && (
                 <div style={{ maxHeight: 260, overflowY: 'auto', borderTop: '1px solid #1a1f2e' }}>
-                  <StashPanel repoPath={repoPath} onRefresh={() => refreshStatus()} />
+                  <StashPanel repoPath={repoPath} />
                 </div>
               )}
             </div>

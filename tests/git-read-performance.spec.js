@@ -34,6 +34,7 @@ for (const platform of ['win32', 'linux']) test(`${platform} watcher ignores met
   for (let i = 0; i < 100; i++) {
     h.emit(0, '.git'); h.emit(0, '.git/index'); h.emit(1, 'index.lock')
     h.emit(1, 'lfs/locks/local/lockcache.db'); h.emit(1, 'objects/pack/tmp'); h.emit(1, 'refs/heads/main.lock')
+    h.emit(1, 'refs/stash'); h.emit(1, 'refs/stash.lock'); h.emit(1, 'logs/refs/stash')
   }
   expect(await h.flush()).toBe(0)
   expect(h.indexReads()).toBe(1) // startup only; metadata noise spawned nothing

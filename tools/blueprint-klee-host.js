@@ -4,6 +4,10 @@ import { BlueprintParser } from '../third_party/klee/src/parser/blueprint-parser
 import { Constants } from '../third_party/klee/src/constants'
 import { NodeParserRegistry } from '../third_party/klee/src/parser/node-parser-registry'
 import { NodeConnectionControl } from '../third_party/klee/src/controls/node-connection.control'
+import { PinDirection } from '../third_party/klee/src/data/pin/pin-direction'
+import { NodePartialConnectionControl } from '../third_party/klee/src/controls/partial-node-connection.control'
+import { isDrawableControl } from '../third_party/klee/src/controls/interfaces/drawable'
+import { connectBlueprintPins } from './blueprint-connections'
 import { wireId } from '../src/lib/blueprintGraph'
 
 // The pinned upstream discovery uses webpack require.context. Only reviewed core
@@ -14,6 +18,7 @@ NodeParserRegistry.prototype.loadPlugins = () => {}
 // are never constructed. Only Klee's parser, node controls, and wires are used.
 export function createKleeCanvas(element, text, options = {}) {
   const canvas = new Canvas2D(element), context = canvas.getContext()
+  let theme
   function applyTheme() {
     const style = getComputedStyle(element), token = (name, fallback) => style.getPropertyValue(name).trim() || fallback
     Constants.NODE_FONT = `${token('--lg-font-size', '13px')} ${token('--lg-font-ui', 'system-ui')}`
@@ -23,34 +28,42 @@ export function createKleeCanvas(element, text, options = {}) {
     Constants.NODE_BACKGROUND_COLOR = token('--lg-bg-elevated', '#161a27')
     Constants.NODE_MATHFUNC_TITLE_FONT = `600 20px ${token('--lg-font-ui', 'system-ui')}`
     Constants.NODE_MATHFUNC_SUBTITLE_FONT = Constants.NODE_FONT
+    theme = {
+      background: token('--lg-bg-primary', '#0b0d13'), border: token('--lg-border', '#1d2535'),
+      accent: token('--lg-accent', '#4a9eff'), added: token('--lg-success', '#2dbd6e'),
+      removed: token('--lg-error', '#e84040'), modified: token('--lg-warning', '#f5a623'),
+    }
   }
   applyTheme()
   const host = { canvas, refresh: () => draw() }
   const scene = new Scene(canvas, host); host.scene = scene
   scene.createBackground = () => {} // App theme grid replaces Klee's stock image.
+  scene.createConnectionLines = () => {
+    scene._pins = connectBlueprintPins(scene._pins, PinDirection.EGPD_Output,
+      (from, to) => scene._controls.push(new NodeConnectionControl(from, to)),
+      pin => scene._controls.push(new NodePartialConnectionControl(pin)))
+  }
   const nodes = new BlueprintParser().parseBlueprint(text)
   scene.load(nodes); scene.updateLayout()
   let camera = options.camera ?? { x: 0, y: 0, zoom: 1 }, disposed = false, drag = null
   let selected = '', changes = options.changes ?? {}, wireChanges = options.wireChanges ?? {}, frame = 0
-  const originalRefresh = scene.refresh.bind(scene)
+  // Read-only controls and their Z order remain fixed for this canvas lifetime.
+  const drawables = [...scene._controls].sort((a, b) => a.ZIndex - b.ZIndex).filter(isDrawableControl)
   scene.refresh = () => draw()
   scene.camera.prepareViewport = () => {
     const rect = element.getBoundingClientRect(), dpr = window.devicePixelRatio || 1
-    const style = getComputedStyle(element)
-    const token = (name, fallback) => style.getPropertyValue(name).trim() || fallback
-    Constants.NODE_FONT = `${token('--lg-font-size', '13px')} ${token('--lg-font-ui', 'system-ui')}`
-    Constants.NODE_HEADER_FONT = `600 ${Constants.NODE_FONT}`
-    Constants.NODE_TEXT_COLOR = token('--lg-text-primary', '#e2e6f4')
-    Constants.NODE_BACKGROUND_COLOR = token('--lg-bg-elevated', '#161a27')
     context.setTransform(dpr, 0, 0, dpr, 0, 0)
-    context.fillStyle = token('--lg-bg-primary', '#0b0d13'); context.fillRect(0, 0, rect.width, rect.height)
+    context.fillStyle = theme.background; context.fillRect(0, 0, rect.width, rect.height)
     const spacing = Math.max(8, 32 * camera.zoom), ox = rect.width / 2 - camera.x * camera.zoom, oy = rect.height / 2 - camera.y * camera.zoom
-    context.beginPath(); context.strokeStyle = token('--lg-border', '#1d2535'); context.lineWidth = .5
+    context.beginPath(); context.strokeStyle = theme.border; context.lineWidth = .5
     for (let x = ((ox % spacing) + spacing) % spacing; x < rect.width; x += spacing) { context.moveTo(x, 0); context.lineTo(x, rect.height) }
     for (let y = ((oy % spacing) + spacing) % spacing; y < rect.height; y += spacing) { context.moveTo(0, y); context.lineTo(rect.width, y) }
     context.stroke(); context.setTransform(dpr * camera.zoom, 0, 0, dpr * camera.zoom, dpr * ox, dpr * oy)
   }
-  const nodeId = node => /NodeGuid=([^\r\n]+)/.exec(node.sourceText)?.[1]?.trim() ?? ''
+  const nodeIds = new Map(nodes.map(node => [node, /NodeGuid=([^\r\n]+)/.exec(node.sourceText)?.[1]?.trim() ?? '']))
+  const nodeId = node => nodeIds.get(node) ?? ''
+  const nodesById = new Map()
+  for (const node of nodes) if (!nodesById.has(nodeId(node))) nodesById.set(nodeId(node), node)
   const identities = new Map(nodes.map(node => [/Name="([^"\r\n]+)"/.exec(node.sourceText)?.[1], nodeId(node)]))
   // Pinned Klee exposes these TypeScript-private fields in its JS controls.
   // Adapt each instance; leave the upstream checkout and other canvases intact.
@@ -64,8 +77,7 @@ export function createKleeCanvas(element, text, options = {}) {
       if (!change) { originalDraw(canvas); return }
       const from = connection.pinStart.getPinAbsolutePosition(), to = connection.pinEnd.getPinAbsolutePosition()
       const curve = (Math.hypot(to.x - from.x, to.y - from.y) - 12) * .4
-      const style = getComputedStyle(element)
-      const color = style.getPropertyValue(({ added: '--lg-success', removed: '--lg-error', modified: '--lg-warning' })[change]).trim() || ({ added: '#2dbd6e', removed: '#e84040', modified: '#f5a623' })[change]
+      const color = theme[change]
       canvas.save().strokeStyle(color).lineWidth(start.category === 'exec' ? 2.5 : 1.5)
         .setLineDash(change === 'removed' ? [6 / camera.zoom, 4 / camera.zoom] : [])
         .beginPath().moveTo(from.x, from.y).lineTo(from.x + 6, from.y)
@@ -76,11 +88,13 @@ export function createKleeCanvas(element, text, options = {}) {
   }
   function draw() {
     if (disposed) return
-    originalRefresh()
+    canvas.clear()
+    scene.camera.prepareViewport()
+    for (const control of drawables) control.draw(canvas)
     for (const node of nodes) {
       const id = nodeId(node), change = changes[id]
       if (!change && selected !== id) continue
-      context.save(); context.strokeStyle = selected === id ? getComputedStyle(element).getPropertyValue('--lg-accent').trim() || '#4a9eff' : ({ added: '#2dbd6e', removed: '#e84040', modified: '#f5a623', moved: '#9c8de3', commented: '#f5a623' })[change]
+      context.save(); context.strokeStyle = selected === id ? theme.accent : ({ added: '#2dbd6e', removed: '#e84040', modified: '#f5a623', moved: '#9c8de3', commented: '#f5a623' })[change]
       context.lineWidth = 2 / camera.zoom; if (change === 'removed') context.setLineDash([6 / camera.zoom, 4 / camera.zoom])
       context.strokeRect(node.position.x - 3, node.position.y - 3, node.size.x + 6, node.size.y + 6)
       if (change) { context.fillStyle = context.strokeStyle; context.font = Constants.NODE_FONT; context.fillText(({added:'+ Added',removed:'− Removed',modified:'~ Modified',moved:'↔ Layout',commented:'✎ Comment'})[change], node.position.x, node.position.y - 10) }
@@ -108,7 +122,7 @@ export function createKleeCanvas(element, text, options = {}) {
   const events = { pointerdown: down, pointermove: move, pointerup: up, pointercancel: () => { drag = null }, wheel, keydown: key }
   for (const [name, fn] of Object.entries(events)) element.addEventListener(name, fn, { passive: false })
   const observer = new ResizeObserver(resize); observer.observe(element); resize()
-  const appearance = new MutationObserver(() => { scene.updateLayout(); resize() }); appearance.observe(document.documentElement, { attributes: true, attributeFilter: ['style','class'] })
+  const appearance = new MutationObserver(() => { applyTheme(); scene.updateLayout(); resize() }); appearance.observe(document.documentElement, { attributes: true, attributeFilter: ['style','class'] })
   if (!options.camera) fit()
-  return { setCamera, getCamera: () => ({ ...camera }), fit, bounds, setChanges: next => { changes = next; renderSoon() }, setWireChanges: next => { wireChanges = next; renderSoon() }, select: (id, focus = false) => { selected = id; if(focus){const n=nodes.find(n=>nodeId(n)===id);if(n)setCamera({...camera,x:n.position.x+n.size.x/2,y:n.position.y+n.size.y/2},true)}renderSoon() }, destroy: () => { disposed = true; cancelAnimationFrame(frame); observer.disconnect(); appearance.disconnect(); for(const [name,fn]of Object.entries(events))element.removeEventListener(name,fn);scene.unload();element.width=1;element.height=1 } }
+  return { setCamera, getCamera: () => ({ ...camera }), fit, bounds, setChanges: next => { changes = next; renderSoon() }, setWireChanges: next => { wireChanges = next; renderSoon() }, select: (id, focus = false) => { selected = id; if(focus){const n=nodesById.get(id);if(n)setCamera({...camera,x:n.position.x+n.size.x/2,y:n.position.y+n.size.y/2},true)}renderSoon() }, destroy: () => { disposed = true; cancelAnimationFrame(frame); observer.disconnect(); appearance.disconnect(); for(const [name,fn]of Object.entries(events))element.removeEventListener(name,fn);scene.unload();element.width=1;element.height=1 } }
 }

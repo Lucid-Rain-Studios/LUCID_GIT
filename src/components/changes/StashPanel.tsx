@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ipc, StashEntry, CommitFileChange, DiffContent } from '@/ipc'
 import { useDialogOverlayDismiss } from '@/lib/useDialogOverlayDismiss'
 import { useOperationStore } from '@/stores/operationStore'
@@ -11,7 +11,6 @@ import { TextDiff } from '@/components/diff/TextDiff'
 
 interface StashPanelProps {
   repoPath: string
-  onRefresh: () => void
 }
 
 function timeAgo(iso: string): string {
@@ -22,12 +21,13 @@ function timeAgo(iso: string): string {
   return `${Math.floor(diff / 86400)}d ago`
 }
 
-export function StashPanel({ repoPath, onRefresh }: StashPanelProps) {
+export function StashPanel({ repoPath }: StashPanelProps) {
   const [stashes, setStashes]       = useState<StashEntry[]>([])
   const [loading, setLoading]       = useState(false)
   const [message, setMessage]       = useState('')
   const [saving, setSaving]         = useState(false)
   const [error, setError]           = useState<string | null>(null)
+  const [listError, setListError]   = useState<string | null>(null)
   const [actionId, setActionId]     = useState<number | null>(null)
 
   // Partial-stash UI: pick a subset of working-tree paths to stash.
@@ -40,28 +40,43 @@ export function StashPanel({ repoPath, onRefresh }: StashPanelProps) {
   const opRun = useOperationStore(s => s.run)
   const fileStatus = useRepoStore(s => s.fileStatus)
   const dialog = useDialogStore()
+  const refreshWorkingTree = useRepoStore(s => s.refreshWorkingTree)
+  const activeRepo = useRef(repoPath)
+  activeRepo.current = repoPath
+  const listRequest = useRef(0)
 
   const stashableFiles = useMemo(
     () => fileStatus.filter(f => f.workingStatus !== '?'),
     [fileStatus],
   )
 
-  const load = async () => {
-    setLoading(true)
-    try { setStashes(await ipc.stashList(repoPath)) }
-    finally { setLoading(false) }
-  }
+  const load = useCallback(async () => {
+    if (activeRepo.current !== repoPath) return
+    const request = ++listRequest.current
+    const current = () => activeRepo.current === repoPath && listRequest.current === request
+    setLoading(true); setListError(null)
+    try {
+      const next = await ipc.stashList(repoPath)
+      if (current()) setStashes(next)
+    } catch (e) {
+      if (current()) {
+        // Pop/drop may have renumbered every stash ref. Hide outdated actions
+        // until a retry returns the current list.
+        setStashes([])
+        setListError(`Could not refresh stashes: ${String(e)}`)
+      }
+    } finally { if (current()) setLoading(false) }
+  }, [repoPath])
+  const refresh = () => Promise.all([load(), refreshWorkingTree(repoPath)])
 
-  useEffect(() => { load() }, [repoPath])
+  useEffect(() => { load() }, [load])
 
   const handleSave = async () => {
     setSaving(true); setError(null)
     try {
       await opRun('Stashing changes…', () => ipc.stashSave(repoPath, message || undefined))
       setMessage('')
-      await load()
-      onRefresh()
-    } catch (e) { setError(String(e)) } finally { setSaving(false) }
+    } catch (e) { setError(String(e)) } finally { await refresh(); setSaving(false) }
   }
 
   const handleSavePartial = async () => {
@@ -75,26 +90,22 @@ export function StashPanel({ repoPath, onRefresh }: StashPanelProps) {
       setMessage('')
       setPicked(new Set())
       setPickerOpen(false)
-      await load()
-      onRefresh()
-    } catch (e) { setError(String(e)) } finally { setSaving(false) }
+    } catch (e) { setError(String(e)) } finally { await refresh(); setSaving(false) }
   }
 
   const wrap = async (label: string, entry: StashEntry, op: () => Promise<void>) => {
     setActionId(entry.index); setError(null)
-    try { await opRun(label, op); await load(); onRefresh() }
+    try { await opRun(label, op) }
     catch (e) {
       // Applying a stash merges it into the working tree, so it conflicts the
       // same way a branch merge does. Send those to the resolver rather than
       // printing git's raw CONFLICT output, which leaves the user stuck with
       // unmerged files and no way to choose a side.
-      if (routeConflictToResolver(e, `the stashed changes`)) {
-        await load(); onRefresh()
-      } else {
+      if (!routeConflictToResolver(e, 'the stashed changes')) {
         setError(String(e))
       }
     }
-    finally { setActionId(null) }
+    finally { await refresh(); setActionId(null) }
   }
 
   const handlePop   = (e: StashEntry) => wrap('Applying stash…', e, () => ipc.stashPop(repoPath, e.ref))
@@ -109,9 +120,9 @@ export function StashPanel({ repoPath, onRefresh }: StashPanelProps) {
     })
     if (!ok) return
     setActionId(entry.index); setError(null)
-    try { await opRun('Dropping stash…', () => ipc.stashDrop(repoPath, entry.ref)); await load() }
+    try { await opRun('Dropping stash…', () => ipc.stashDrop(repoPath, entry.ref)) }
     catch (e) { setError(String(e)) }
-    finally { setActionId(null) }
+    finally { await load(); setActionId(null) }
   }
 
   const togglePick = (path: string) =>
@@ -194,6 +205,12 @@ export function StashPanel({ repoPath, onRefresh }: StashPanelProps) {
 
         {error && (
           <div className="text-[10px] font-mono text-lg-error" title={error}>{error}</div>
+        )}
+        {listError && (
+          <div className="text-[10px] font-mono text-lg-error">
+            {listError}
+            <ActionBtn onClick={load} disabled={loading} size="sm" title="Retry stash list">Retry</ActionBtn>
+          </div>
         )}
       </div>
 

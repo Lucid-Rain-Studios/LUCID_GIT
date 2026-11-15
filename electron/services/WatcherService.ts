@@ -8,7 +8,9 @@ import { noteWatcherFire } from '../util/status-telemetry'
 
 const TRANSIENT_WATCH_ERRORS = /^(EPERM|ENOENT|EBUSY|EACCES)\b/
 const IGNORED_SEGMENTS = /(?:^|\/)(?:node_modules|\.vs|Binaries|Intermediate|DerivedDataCache|Saved)(?:\/|$)/
-const metadataRelevant = (file: string) => /^(HEAD|index|MERGE_HEAD|ORIG_HEAD|CHERRY_PICK_HEAD|REBASE_HEAD|packed-refs|config)$/.test(file) || (file.startsWith('refs/') && !file.endsWith('.lock'))
+// Dropping a stash changes refs/stash only. Save/apply/pop still notify through
+// index and working-file changes; the stash panels reload their own lists.
+const metadataRelevant = (file: string) => /^(HEAD|index|MERGE_HEAD|ORIG_HEAD|CHERRY_PICK_HEAD|REBASE_HEAD|packed-refs|config)$/.test(file) || (file.startsWith('refs/') && file !== 'refs/stash' && !file.endsWith('.lock'))
 
 class WatcherService {
   private disposers = new Map<string, () => void>()

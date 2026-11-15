@@ -369,3 +369,13 @@
 .bp-state-row button small { color:var(--lg-text-secondary); }
 .bp-bound-graph { display:flex; flex-direction:column; gap:5px; margin:10px 0; }
 @media(max-width:600px) { .bp-state-sides { flex-direction:column; } }
+
+/* Embedded review shares file selection, expansion and binary actions with its shell. */
+.bp-embedded .bp-toolbar{gap:5px;padding:7px 10px}
+.bp-embedded .bp-pane>header{padding:6px 10px;flex-wrap:nowrap;background:var(--lg-bg-primary)}
+.bp-embedded .bp-pane>header strong{font-size:11px;font-weight:500}
+.bp-embedded .bp-pane>header .bp-node-count{flex-basis:auto;margin-left:auto;flex-shrink:0;font:10px var(--lg-font-ui)}
+.bp-embedded .bp-footer{padding:5px 10px;font-size:10px;gap:10px}
+.bp-embedded .bp-footer span{margin-left:auto}
+.bp-embedded .bp-navigation summary{background:transparent;border-color:transparent}
+.bp-embedded .bp-active-graph{font-size:12px}

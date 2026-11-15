@@ -13,6 +13,9 @@ interface KleeModule {
   createKleeCanvas(canvas: HTMLCanvasElement, text: string, options: { camera?: BlueprintCamera; changes: Record<string, string>; wireChanges?: Record<string, 'added' | 'removed' | 'modified'>; onCamera(camera: BlueprintCamera): void; onSelect(id: string): void }): KleeCanvas
 }
 let loading: Promise<KleeModule> | undefined
+// Start the shared import during asset IO. The canvas still reports failures
+// through loadKlee; a speculative preload must never produce an unhandled error.
+export function preloadKlee(): void { void loadKlee().catch(() => {}) }
 export function loadKlee(): Promise<KleeModule> {
   if (!loading) {
     const url = new URL('blueprint/klee.js', document.baseURI).href

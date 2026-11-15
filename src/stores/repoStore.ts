@@ -8,6 +8,9 @@ let repoGeneration = 0
 let statusRequest = 0
 let branchRequest = 0
 let unrealRequest = 0
+let workingTreeRefresh: { generation: number; promise: Promise<void> } | null = null
+let silentRefreshInFlight: { generation: number; promise: Promise<void> } | null = null
+let stashWatcherFollowup: { generation: number; promise: Promise<void> } | null = null
 export const repoSessionVersion = () => repoGeneration
 
 // A refresh that finds nothing new must not hand consumers a new array: every
@@ -52,6 +55,7 @@ interface RepoState {
 
   openRepo: (path: string) => Promise<void>
   refreshStatus: () => Promise<void>
+  refreshWorkingTree: (expectedRepo: string) => Promise<void>
   silentRefresh: () => Promise<void>
   loadBranches: () => Promise<void>
   checkout: (branch: string) => Promise<void>
@@ -171,27 +175,84 @@ export const useRepoStore = create<RepoState>((set, get) => ({
     }
   },
 
+  // Stash operations do not move HEAD or branch tips. Refresh file revisions
+  // without waking history/sync consumers or scanning for Unreal projects.
+  refreshWorkingTree: async (expectedRepo: string) => {
+    const { repoPath } = get()
+    if (!repoPath || repoPath !== expectedRepo) return
+    const generation = repoGeneration, request = ++statusRequest
+    const current = () => generation === repoGeneration && get().repoPath === repoPath && request === statusRequest
+    const promise = (async () => {
+      try {
+        const files = await window.lucidGit.status(repoPath)
+        if (!current()) return
+        const projectFile = (file: FileStatus) => /\.uproject$/i.test(file.path) || /\.uproject$/i.test(file.originalPath ?? '')
+        const projectChanged = get().fileStatus.some(projectFile) || files.some(projectFile)
+        set(s => ({ fileStatus: keepStatus(s.fileStatus, files), statusTick: s.statusTick + 1, error: null }))
+        if (projectChanged) void get().refreshUnrealProject()
+      } catch (error) {
+        if (current()) set({ error: String(error) })
+      } finally {
+        if (current()) set({ isLoading: false })
+      }
+    })()
+    const refresh = { generation, promise }
+    workingTreeRefresh = refresh
+    try { await promise }
+    finally { if (workingTreeRefresh === refresh) workingTreeRefresh = null }
+  },
+
   silentRefresh: async () => {
     const { repoPath, isLoading, isSilentRefreshing } = get()
+    // Collapse watcher bursts during a stash refresh into one follow-up. An
+    // event can describe an external edit after the scan started, so never
+    // discard it or satisfy it with that earlier scan.
+    if (workingTreeRefresh?.generation === repoGeneration) {
+      const generation = repoGeneration
+      if (stashWatcherFollowup?.generation === generation) return stashWatcherFollowup.promise
+      const promise = (async () => {
+        // A second stash can finish while an older watcher scan is draining.
+        // Wait for the latest scans too, then refresh once for the whole burst.
+        while (generation === repoGeneration) {
+          const working = workingTreeRefresh?.generation === generation ? workingTreeRefresh : null
+          const silent = silentRefreshInFlight?.generation === generation ? silentRefreshInFlight : null
+          if (!working && !silent) break
+          if (working) await working.promise
+          if (silent) await silent.promise
+        }
+        if (generation === repoGeneration && get().repoPath === repoPath) await get().silentRefresh()
+      })()
+      const followup = { generation, promise }
+      stashWatcherFollowup = followup
+      try { await promise }
+      finally { if (stashWatcherFollowup === followup) stashWatcherFollowup = null }
+      return
+    }
     // Skip if an explicit refreshStatus is already in flight — it will win
     if (!repoPath || isLoading || isSilentRefreshing) return
     const generation = repoGeneration
     const request = ++statusRequest
     set({ isSilentRefreshing: true })
     void get().refreshUnrealProject()
-    try {
-      const [statusR, branchR] = await Promise.allSettled([
-        window.lucidGit.status(repoPath),
-        window.lucidGit.currentBranch(repoPath),
-      ])
-      // Only write if no explicit refresh started while we were waiting
-      if (repoGeneration === generation && get().repoPath === repoPath && statusRequest === request && !get().isLoading) {
-        if (statusR.status === 'fulfilled') set(s => ({ fileStatus: keepStatus(s.fileStatus, statusR.value ?? []), statusTick: s.statusTick + 1 }))
-        if (branchR.status === 'fulfilled') set({ currentBranch: branchR.value ?? '' })
-        set({ error: [statusR, branchR].filter(r => r.status === 'rejected').map(r => String((r as PromiseRejectedResult).reason)).join('; ') || null })
-      }
-    } catch { /* ignore */ }
-    finally { if (generation === repoGeneration && get().repoPath === repoPath) set({ isSilentRefreshing: false }) }
+    const promise = (async () => {
+      try {
+        const [statusR, branchR] = await Promise.allSettled([
+          window.lucidGit.status(repoPath),
+          window.lucidGit.currentBranch(repoPath),
+        ])
+        // Only write if no explicit refresh started while we were waiting
+        if (repoGeneration === generation && get().repoPath === repoPath && statusRequest === request && !get().isLoading) {
+          if (statusR.status === 'fulfilled') set(s => ({ fileStatus: keepStatus(s.fileStatus, statusR.value ?? []), statusTick: s.statusTick + 1 }))
+          if (branchR.status === 'fulfilled') set({ currentBranch: branchR.value ?? '' })
+          set({ error: [statusR, branchR].filter(r => r.status === 'rejected').map(r => String((r as PromiseRejectedResult).reason)).join('; ') || null })
+        }
+      } catch { /* ignore */ }
+      finally { if (generation === repoGeneration && get().repoPath === repoPath) set({ isSilentRefreshing: false }) }
+    })()
+    const refresh = { generation, promise }
+    silentRefreshInFlight = refresh
+    try { await promise }
+    finally { if (silentRefreshInFlight === refresh) silentRefreshInFlight = null }
   },
 
   loadBranches: async () => {

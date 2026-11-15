@@ -36,6 +36,7 @@ function component(file, mocks = {}, globals = {}) {
     module, exports: module.exports,
     require: name => name === 'react' ? React : mocks[name] || (
       name === 'react-dom' ? { createPortal: node => node } :
+      name === '@/lib/blueprintKlee' ? { preloadKlee() {}, loadKlee: async () => ({}) } :
       // Scan logging only observes; services under test run without it.
       name === '../util/status-telemetry' ? { beginStatusScan: () => ({ started() {}, finish() {}, fail() {} }), noteWatcherFire() {}, flushStatusTelemetry() {} } :
       // Permission behavior has real Git/LFS coverage in unlock-permissions;

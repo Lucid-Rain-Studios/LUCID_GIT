@@ -581,14 +581,27 @@ function StashPanel({ repoPath }: { repoPath: string }) {
   const [loading, setLoading] = useState(false)
   const opRun        = useOperationStore(s => s.run)
   const dialog       = useDialogStore()
-  const bumpSyncTick = useRepoStore(s => s.bumpSyncTick)
+  const refreshWorkingTree = useRepoStore(s => s.refreshWorkingTree)
+  const showAlert = useDialogStore(s => s.alert)
+  const activeRepo = useRef(repoPath)
+  activeRepo.current = repoPath
+  const listRequest = useRef(0)
 
   const load = useCallback(async () => {
+    if (activeRepo.current !== repoPath) return
+    const request = ++listRequest.current
+    const current = () => activeRepo.current === repoPath && listRequest.current === request
     setLoading(true)
-    try { setStashes(await ipc.stashList(repoPath)) }
-    catch { setStashes([]) }
-    finally { setLoading(false) }
-  }, [repoPath])
+    try {
+      const next = await ipc.stashList(repoPath)
+      if (current()) setStashes(next)
+    } catch (e) {
+      if (current()) {
+        setStashes([]) // stash@{n} may have been renumbered by Pop/Drop
+        void showAlert({ title: 'Stash refresh failed', message: String(e) })
+      }
+    } finally { if (current()) setLoading(false) }
+  }, [repoPath, showAlert])
 
   useEffect(() => { load() }, [load])
 
@@ -602,9 +615,11 @@ function StashPanel({ repoPath }: { repoPath: string }) {
     if (!ok) return
     try {
       await opRun('Popping stash…', () => ipc.stashPop(repoPath, s.ref))
-      bumpSyncTick()
-      load()
-    } catch (e) { await dialog.alert({ title: 'Pop failed', message: String(e) }) }
+    } catch (e) {
+      if (!routeConflictToResolver(e, 'the stashed changes')) {
+        void dialog.alert({ title: 'Pop failed', message: String(e) })
+      }
+    } finally { await Promise.all([load(), refreshWorkingTree(repoPath)]) }
   }
 
   const handleApply = async (s: StashEntry) => {
@@ -617,18 +632,13 @@ function StashPanel({ repoPath }: { repoPath: string }) {
     if (!ok) return
     try {
       await opRun('Applying stash…', () => ipc.stashApply(repoPath, s.ref))
-      bumpSyncTick()
-      load()
     } catch (e) {
       // A stash applies by merging, so it conflicts like one. The resolver is
       // a better answer than an alert containing git's raw CONFLICT output.
-      if (routeConflictToResolver(e, 'the stashed changes')) {
-        bumpSyncTick()
-        load()
-      } else {
-        await dialog.alert({ title: 'Apply failed', message: String(e) })
+      if (!routeConflictToResolver(e, 'the stashed changes')) {
+        void dialog.alert({ title: 'Apply failed', message: String(e) })
       }
-    }
+    } finally { await Promise.all([load(), refreshWorkingTree(repoPath)]) }
   }
 
   const handleDrop = async (s: StashEntry) => {
@@ -641,8 +651,8 @@ function StashPanel({ repoPath }: { repoPath: string }) {
     if (!ok) return
     try {
       await opRun('Dropping stash…', () => ipc.stashDrop(repoPath, s.ref))
-      load()
-    } catch (e) { await dialog.alert({ title: 'Drop failed', message: String(e) }) }
+    } catch (e) { void dialog.alert({ title: 'Drop failed', message: String(e) }) }
+    finally { await load() }
   }
 
   return (

@@ -86,6 +86,58 @@ test('unused hidden pin GUID churn is ignored while values, visible pins and ref
   expect(diff()[0].kind).toBe('modified')
 })
 
+test('editor display settings and inactive compiler metadata do not mark nodes Modified', () => {
+  const left = node(), right = structuredClone(left)
+  Object.assign(right.properties, { AdvancedPinDisplay: 'Shown', bCommentBubblePinned: true, bCommentBubbleVisible: false,
+    bCommentBubbleMakeVisible: true, bHasCompilerMessage: false, ErrorType: 1, ErrorMsg: 'Old compiler message' })
+  const diff = () => graphChanges({ left: graph([left]), right: graph([right]) })
+  expect(diff()).toEqual([])
+  // Preserve every supported behavioral change, even when the canvas looks alike.
+  for (const [key, value] of [['EnabledState', 'Disabled'], ['FunctionReference', { MemberName: 'OtherFunction' }], ['UnknownSavedField', 42]]) {
+    const old = right.properties[key]
+    right.properties[key] = value
+    expect(diff().map(c => c.kind)).toEqual(['modified'])
+    if (old === undefined) delete right.properties[key]; else right.properties[key] = old
+  }
+  right.properties.bHasCompilerMessage = true
+  expect(diff().map(c => c.kind)).toEqual(['modified'])
+  right.properties.bHasCompilerMessage = false
+  right.pins[0].defaultValue = '2'
+  expect(diff().map(c => c.kind)).toEqual(['modified'])
+  expect(right.properties.ErrorMsg).toBe('Old compiler message') // Inspector data is untouched.
+})
+
+test('package export renumbering preserves split-pin identity without hiding rewiring', () => {
+  const a = node('A'), b = node('B'), c = node('C')
+  a.exportIndex = 1; b.exportIndex = 2; c.exportIndex = 3
+  a.pins[0].parent = { export: 2, pin: 'pin' }
+  a.pins[0].passThrough = { export: 3, pin: 'pin' }
+  a.pins[0].subPins = [{ export: 2, pin: 'pin' }]
+  const left = graph([a, b, c]), right = structuredClone(left)
+  right.nodes.forEach(n => { n.exportIndex += 10 })
+  const pin = right.nodes[0].pins[0]
+  pin.parent.export += 10; pin.passThrough.export += 10; pin.subPins[0].export += 10
+  const diff = () => graphChanges({ left, right })
+  expect(diff()).toEqual([])
+  pin.parent.export = 13
+  expect(diff().map(c => c.kind)).toEqual(['modified'])
+  pin.parent.export = 12; pin.subPins[0].pin = 'different'
+  expect(diff().map(c => c.kind)).toEqual(['modified'])
+  pin.subPins[0].pin = 'pin'; pin.passThrough.export = 999
+  expect(diff().map(c => c.kind)).toEqual(['modified'])
+  pin.passThrough.export = 13; right.nodes[2].exportIndex = 12
+  expect(diff().map(c => c.kind)).toEqual(['modified']) // Ambiguous exports are not normalized.
+})
+
+test('hidden pins referenced by serialized objects retain their identities', () => {
+  const left = node(), right = structuredClone(left)
+  left.pins[0].flags = right.pins[0].flags = 1
+  left.pins.push({ ...structuredClone(left.pins[0]), id: 'child', parent: { export: 1, pin: 'pin' } })
+  right.pins.push(structuredClone(left.pins[1]))
+  right.pins[0].id = 'regenerated'
+  expect(graphChanges({ left: graph([left]), right: graph([right]) })[0].kind).toBe('modified')
+})
+
 test('renderer cache hydrates shared documents, bounds retention and forces fresh retry data', async () => {
   const requests = [], doc = { graphs: [], status: 'complete' }, key = 'a'.repeat(64)
   const client = createBlueprintClient(async (_, req) => {
@@ -165,6 +217,19 @@ test('viewer sends wire decorations to the correct side and Changes disables the
   find(tree, e => e.type === 'button' && e.props.children[0] === 'Changes').props.onClick()
   const hidden = find(harness.render('BlueprintDiff', props), e => e.props?.className === 'bp-revisions').props.children
   expect(hidden.map(p => p.props.wires)).toEqual([{}, {}])
+})
+
+test('wire comparison visits only the selected graph and follows graph navigation', () => {
+  const graphs = Array.from({ length: 30 }, (_, i) => ({ ...graph([node()]), id: 'g' + i, name: i ? 'Function' + i : 'EventGraph' }))
+  const visited = []
+  const harness = component('src/components/diff/BlueprintDiff.tsx', { '@/lib/blueprintGraph': { ...graphTools, wireChanges(pair) { visited.push(pair.key); return [] } } })
+  harness.slots[0] = { left: { status: 'ready', document: { status: 'complete', graphs } }, right: { status: 'ready', document: { status: 'complete', graphs } } }
+  const props = { repoPath: 'repo', request: { filePath: 'A.uasset', leftRef: 'INDEX', rightRef: 'WORKING' }, onFallback() {} }
+  const tree = harness.render('BlueprintDiff', props)
+  expect(visited).toEqual(['g0'])
+  find(tree, e => e.props?.id === 'bp-graph-choice').props.onChange('g20')
+  harness.render('BlueprintDiff', props)
+  expect(visited).toEqual(['g0', 'g20'])
 })
 
 test('compiler banner text respects the Unreal active-message flag without losing saved properties', () => {
