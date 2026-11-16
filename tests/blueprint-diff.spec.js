@@ -289,7 +289,7 @@ test('retry refreshes cached revisions and incomplete warnings are deduplicated'
   expect(requests.map(req => req.force)).toEqual([false, true])
 })
 
-test('graph dropdown identifies changes, presence and incomplete comparisons', () => {
+test('graph dropdown uses compact change counts and preserves unavailable status', () => {
   const makeGraph = (name, nodes = [node()]) => ({ ...graph(nodes), id: name, name })
   const modified = node(); modified.pins[0].defaultValue = '2'
   const moved = node(); moved.x += 20
@@ -299,17 +299,17 @@ test('graph dropdown identifies changes, presence and incomplete comparisons', (
   harness.slots[0] = { left: { status: 'ready', document: { status: 'complete', graphs: left } }, right: { status: 'ready', document: { status: 'complete', graphs: right } } }
   const props = { repoPath: 'repo', request: { filePath: 'A.uasset', leftRef: 'INDEX', rightRef: 'WORKING' }, onFallback() {} }
   const labels = () => find(harness.render('BlueprintDiff', props), e => e.props?.id === 'bp-graph-choice').props.items.map(e => e.name + (e.detail ? ' ' + e.detail : ''))
-  expect(labels()).toEqual(['Same', 'Edit (1 change)', 'Layout (1 change)', 'Removed (removed)', 'Partial (incomplete)', 'Added (added)'])
+  expect(labels()).toEqual(['Same', 'Edit (1)', 'Layout (1)', 'Removed removed', 'Partial', 'Added added'])
   const items = find(harness.render('BlueprintDiff', props), e => e.props?.id === 'bp-graph-choice').props.items
   expect(items.find(e => e.name === 'Edit').color).toBe('var(--lg-warning)')
   expect(items.find(e => e.name === 'Removed').color).toBe('var(--lg-error)')
   expect(items.find(e => e.name === 'Added').color).toBe('var(--lg-success)')
   harness.slots[0].left.status = 'unavailable'
   expect(labels().every(label => label.includes('comparison unavailable'))).toBe(true)
-  expect(labels().find(label => label.startsWith('Partial'))).toBe('Partial (comparison unavailable, incomplete)')
-  for (const [kind, label] of Object.entries({ pose: 'Pose graph', 'state-machine': 'State machine', transition: 'Transition rule', event: 'Event graph' })) {
+  expect(labels().find(label => label.startsWith('Partial'))).toBe('Partial comparison unavailable')
+  for (const kind of ['pose', 'state-machine', 'transition', 'event']) {
     right[0].kind = kind
-    expect(labels()[0]).toBe(`Same (${label}, comparison unavailable)`)
+    expect(labels()[0]).toBe('Same comparison unavailable')
   }
 })
 

@@ -2,7 +2,7 @@ import { AnimationStateMachine } from './AnimationStateMachine'
 import { animationNodeName, boundGraphs } from '../../lib/animationReview'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Maximize2, Minimize2, Link2, Focus, PanelRightClose, PanelRightOpen, Minus, Plus, RotateCcw, ChevronLeft, ChevronRight, Menu } from 'lucide-react'
+import { Maximize2, Minimize2, Link2, Focus, PanelRightClose, PanelRightOpen, Minus, Plus, RotateCcw, ChevronLeft, ChevronRight, ChevronDown, RefreshCw } from 'lucide-react'
 import { ipc, type UEProject, type BlueprintComparison, type BlueprintGraph, type BlueprintNode, type BlueprintRequest, type BlueprintSide } from '@/ipc'
 import { graphChanges, graphText, pairGraphs, wireChanges, type GraphChange, type NodeChange } from '@/lib/blueprintGraph'
 import { loadKlee, preloadKlee, type BlueprintCamera, type KleeCanvas } from '@/lib/blueprintKlee'
@@ -11,7 +11,7 @@ import { BlueprintChoice } from './BlueprintChoice'
 import './BlueprintDiff.css'
 
 export interface BlueprintFileChoice { path: string; label?: string; stage?: 'Staged' | 'Unstaged'; selected?: boolean; onSelect(): void }
-export interface BlueprintDiffProps { embedded?: boolean; onRetry?(): void; comparison?: BlueprintComparison; single?: boolean; files?: BlueprintFileChoice[]; project?: UEProject | null; repoPath: string; request: Omit<BlueprintRequest, 'requestId'>; revisionLabels?: { left: string; right: string }; onFallback(): void; onUnsupported?(reason: string): void }
+export interface BlueprintDiffProps { embedded?: boolean; refreshing?: boolean; onRetry?(): void; comparison?: BlueprintComparison; single?: boolean; files?: BlueprintFileChoice[]; project?: UEProject | null; repoPath: string; request: Omit<BlueprintRequest, 'requestId'>; revisionLabels?: { left: string; right: string }; onFallback(): void; onUnsupported?(reason: string): void }
 const tone: Record<NodeChange, string> = { added: 'var(--lg-success)', removed: 'var(--lg-error)', modified: 'var(--lg-warning)', moved: '#9c8de3', commented: 'var(--lg-warning)' }
 const mark: Record<NodeChange, string> = { added: '+', removed: '−', modified: '~', moved: '↔', commented: '✎' }
 const label = (ref: string) => ref === 'WORKING' ? 'Working tree' : ref === 'INDEX' ? 'Index' : ref === 'ABSENT' ? 'Absent revision' : ref === 'HEAD' ? 'HEAD' : ref.replace(/\^1$/, '').slice(0, 7) + (ref.endsWith('^1') ? ' parent' : '')
@@ -70,9 +70,11 @@ function Inspector({ change, node }: { change?: GraphChange; node?: BlueprintNod
   </div>
 }
 
-export function BlueprintDiff({ embedded = false, onRetry, comparison, files, project, repoPath, request, revisionLabels, onFallback, onUnsupported, single = false }: BlueprintDiffProps) {
+export function BlueprintDiff({ embedded = false, refreshing = false, onRetry, comparison, files, project, repoPath, request, revisionLabels, onFallback, onUnsupported, single = false }: BlueprintDiffProps) {
   const [result, setResult] = useState<BlueprintComparison | null>(null), [error, setError] = useState<string | null>(null), [retry, setRetry] = useState(0)
   const [expanded, setExpanded] = useState(false), [graphKey, setGraphKey] = useState(''), [selected, setSelected] = useState(''), [sync, setSync] = useState(true), [highlight, setHighlight] = useState(true), [inspector, setInspector] = useState(false)
+  const [reading, setReading] = useState(false)
+  const capture = useRef('')
   const [graphHistory, setGraphHistory] = useState<string[]>([])
   const navigation = useRef<HTMLDetailsElement>(null)
   const left = useRef<KleeCanvas | null>(null), right = useRef<KleeCanvas | null>(null), leftCamera = useRef<BlueprintCamera>(), rightCamera = useRef<BlueprintCamera>()
@@ -85,18 +87,23 @@ export function BlueprintDiff({ embedded = false, onRetry, comparison, files, pr
     let cancelled = false
     const requestId = crypto.randomUUID()
     preloadKlee()
-    setResult(null); setError(null); setSelected(''); setGraphKey(''); setGraphHistory([]); leftCamera.current = undefined; rightCamera.current = undefined
+    const identity = JSON.stringify([repoPath, filePath, oldPath, leftRef, rightRef])
+    if (capture.current !== identity) {
+      capture.current = identity
+      setResult(null); setSelected(''); setGraphKey(''); setGraphHistory([]); leftCamera.current = undefined; rightCamera.current = undefined
+    }
+    setError(null); setReading(true)
     const read = comparison && retry === 0 ? Promise.resolve(comparison) : ipc.blueprintCompare(repoPath, { filePath, oldPath, leftRef, rightRef, requestId, force: retry > 0 })
     read.then(data => {
       if (cancelled) return
-      setResult(data)
+      setResult(data); setReading(false)
       const present = [data.left, data.right].filter(side => side.status !== 'absent')
       if (present.length && present.every(side => side.status === 'ready' && side.document?.status === 'unsupported')) {
         const classes = [...new Set(present.map(side => side.document?.assetClass).filter(Boolean))].join(' / ')
         const reasons = [...new Set(present.flatMap(side => side.document?.diagnostics ?? []))].join(' ')
         unsupportedCallback.current?.([classes ? 'Asset class: ' + classes + '.' : '', reasons, 'Showing binary details.'].filter(Boolean).join(' '))
       }
-    }).catch(e => { if (!cancelled) setError(String(e.message ?? e)) })
+    }).catch(e => { if (!cancelled) { setError(String(e.message ?? e)); setReading(false) } })
     return () => { cancelled = true; if (!comparison || retry > 0) void ipc.blueprintCancel(requestId).catch(() => {}) }
   }, [repoPath, filePath, oldPath, leftRef, rightRef, retry, comparison])
   const pairs = useMemo(() => pairGraphs(result?.left.document?.graphs ?? [], result?.right.document?.graphs ?? []), [result])
@@ -104,12 +111,9 @@ export function BlueprintDiff({ embedded = false, onRetry, comparison, files, pr
   const comparable = !!result && [result.left, result.right].every(side => side.status === 'absent' || side.status === 'ready' && side.document?.status !== 'unsupported')
   const graphEntries = useMemo(() => pairs.map(p => {
     const changes = comparable && !single ? graphChanges(p) : []
-    const incomplete = p.left?.complete === false || p.right?.complete === false
-    const status = single ? '' : !comparable ? 'comparison unavailable' : !p.left ? 'added' : !p.right ? 'removed' : changes.length ? `${changes.length} change${changes.length === 1 ? '' : 's'}` : ''
-    const family = (p.right ?? p.left)?.kind
-    const familyLabel = family ? ({ event: 'Event graph', pose: 'Pose graph', 'state-machine': 'State machine', transition: 'Transition rule' })[family] : ''
-    const suffix = [familyLabel, status, incomplete ? 'incomplete' : ''].filter(Boolean).join(', ')
-    return { pair: p, changes, label: p.name + (suffix ? ` (${suffix})` : ''), detail: suffix ? `(${suffix})` : '', color: single ? 'var(--lg-warning)' : !comparable ? 'var(--lg-text-secondary)' : !p.left ? 'var(--lg-success)' : !p.right ? 'var(--lg-error)' : 'var(--lg-warning)' }
+    const status = single ? '' : !comparable ? 'comparison unavailable' : !p.left ? 'added' : !p.right ? 'removed' : changes.length ? `(${changes.length})` : ''
+    const suffix = status
+    return { pair: p, changes, label: p.name + (suffix ? ` (${suffix})` : ''), detail: suffix, color: single ? 'var(--lg-warning)' : !comparable ? 'var(--lg-text-secondary)' : !p.left ? 'var(--lg-success)' : !p.right ? 'var(--lg-error)' : 'var(--lg-warning)' }
   }), [pairs, comparable, single])
   const changes = graphEntries.find(entry => entry.pair === pair)?.changes ?? []
   const currentWires = useMemo(() => pair && comparable && !single ? wireChanges(pair) : [], [pair, comparable, single])
@@ -157,7 +161,7 @@ export function BlueprintDiff({ embedded = false, onRetry, comparison, files, pr
   const content = <div className={(single ? "bp-viewer bp-single" : "bp-viewer") + (embedded ? " bp-embedded" : "")}>
     <div className="bp-toolbar">
       <details className="bp-navigation" ref={navigation}>
-        <summary tabIndex={0} aria-label="Choose Blueprint graph or file"><Menu size={15}/><span>{embedded ? 'Graphs' : 'Graphs & files'}</span></summary>
+        <summary tabIndex={0} aria-label="Select function or graph" title="Select the Blueprint function or graph to view"><span>{embedded ? 'Select function' : 'Select function / file'}</span><ChevronDown size={15}/></summary>
         <div className="bp-navigation-panel">
           {!embedded && <><label htmlFor="bp-file-choice">{single ? 'Blueprint file' : 'Changed Blueprint file'}</label>
           {files?.length ? <BlueprintChoice id="bp-file-choice" label="Blueprint file" value={String(currentFile)} items={files.map((file, i) => ({ value: String(i), name: file.path.includes('/') ? '.../' + file.path.split('/').pop() : file.path, prefix: file.stage ?? file.label?.match(/^(Unstaged|Staged)\b/)?.[1], title: file.path }))} onChange={value => { if (navigation.current) navigation.current.open = false; files[Number(value)]?.onSelect() }}/> : <div className="bp-navigation-file" title={request.filePath}>{request.filePath}</div>}
@@ -167,7 +171,8 @@ export function BlueprintDiff({ embedded = false, onRetry, comparison, files, pr
         </div>
       </details>
       {graphHistory.length > 0 && <button className="lg-toolbar-control" onClick={() => { const previous = graphHistory[graphHistory.length - 1]; setGraphHistory(history => history.slice(0, -1)); chooseGraph(previous) }}>Back to graph</button>}
-      <span className="bp-active-graph" title={pair?.name}>{pair?.name ?? 'Blueprint graph'}</span>
+      <span className="bp-active-graph" title={pair?.name}><small>Viewing: </small>{pair?.name ?? 'Blueprint graph'}</span>
+      <button className="lg-toolbar-control" title="Reload the saved Blueprint from disk" disabled={refreshing || reading} onClick={() => onRetry ? onRetry() : setRetry(v => v + 1)}><RefreshCw size={14}/>{refreshing || reading ? 'Refreshing...' : 'Refresh'}</button>
       {!single && <><button className="lg-toolbar-control lg-icon-control" title="Synchronize graph views" aria-label="Synchronize graph views" aria-pressed={sync} onClick={() => { setSync(!sync); if (!sync) { const camera = right.current?.getCamera() ?? left.current?.getCamera(); if(camera){left.current?.setCamera(camera);right.current?.setCamera(camera)} } }}><Link2 size={14}/></button>
       <button className="lg-toolbar-control" aria-pressed={highlight} onClick={() => setHighlight(!highlight)}>{embedded ? `${changes.length} changes` : 'Changes'}</button>
       <button className="lg-toolbar-control lg-icon-control" aria-label="Previous change" disabled={!changes.length} onClick={() => step(-1)}><ChevronLeft size={14}/></button><button className="lg-toolbar-control lg-icon-control" aria-label="Next change" disabled={!changes.length} onClick={() => step(1)}><ChevronRight size={14}/></button></>}
@@ -179,6 +184,7 @@ export function BlueprintDiff({ embedded = false, onRetry, comparison, files, pr
     </div>
     {project && !embedded && <div className="bp-info" title={`${project.uprojectPath}\nEngine association: ${project.engineAssociation || project.engineVersion}`}>{project.name} · {project.engineVersion === 'Unknown' ? 'Engine version unknown' : `UE ${project.engineVersion}`} · {single ? 'Read-only graph view' : 'Read-only revision review'}</div>}
     {!result && <div className="bp-empty" role={error ? 'alert' : 'status'}>{error ?? 'Reading Blueprint revisions…'}{error && <button onClick={() => onRetry ? onRetry() : setRetry(v => v+1)}><RotateCcw size={14}/> Retry</button>}</div>}
+    {result && error && <div className="bp-warning" role="alert">Refresh failed: {error}</div>}
     {result && <>
       {(result.left.status === 'unavailable' || result.right.status === 'unavailable' || pair?.left?.complete === false || pair?.right?.complete === false) && <div className="bp-warning" role="status">{single ? 'Some asset data is unavailable or incomplete. Connections may be incomplete.' : 'Some revision data is unavailable or incomplete. Change highlights cover decoded nodes only.'}<details><summary>Details</summary>{Array.from(new Set([result.left.reason, result.right.reason, ...(pair?.left?.diagnostics??[]), ...(pair?.right?.diagnostics??[])].filter(Boolean))).map((s,i)=><div key={i}>{s}</div>)}</details><button onClick={() => onRetry ? onRetry() : setRetry(v => v+1)}>Retry reading</button></div>}
       {pair?.matchedByName && <div className="bp-info">Graphs matched by name because their saved identities differ.</div>}

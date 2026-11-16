@@ -15,13 +15,13 @@ export function BlueprintChoice({ id, label, value, items, onChange }: { id: str
     document.addEventListener('pointerdown', outside)
     return () => document.removeEventListener('pointerdown', outside)
   }, [open, items, value])
-  const row = (item: BlueprintChoiceItem) => <>{item.prefix && <span className="bp-choice-prefix">{item.prefix}</span>}<span className="bp-choice-name">{item.name}</span>{item.detail && <span className="bp-choice-detail" style={{ color: item.color }}>{item.detail}</span>}</>
+  const row = (item: BlueprintChoiceItem) => <>{item.prefix && <span className="bp-choice-prefix">{item.prefix}</span>}<span className="bp-choice-text"><span className="bp-choice-name">{item.name}</span>{item.detail && <span className="bp-choice-detail" style={{ color: item.color }}>{item.detail}</span>}</span></>
   const close = () => { setOpen(false); trigger.current?.focus() }
   return <div className="bp-choice" ref={root} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setOpen(false) }} onKeyDown={event => {
     if (event.key === 'Escape' && open) { event.preventDefault(); event.stopPropagation(); close() }
     if (event.key === 'Tab') setOpen(false)
   }}>
-    <button id={id} ref={trigger} type="button" role="combobox" aria-label={label} aria-expanded={open} aria-controls={`${id}-list`} aria-haspopup="listbox" disabled={!items.length} onClick={() => setOpen(!open)} onKeyDown={event => { if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) { event.preventDefault(); setOpen(true) } }} title={selected?.title}>
+    <button id={id} ref={trigger} type="button" role="combobox" aria-label={label} aria-expanded={open} aria-controls={`${id}-list`} aria-haspopup="listbox" disabled={!items.length} onClick={() => setOpen(!open)} onKeyDown={event => { if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) { event.preventDefault(); setOpen(true) } }} title={selected?.title ?? selected?.name}>
       {selected ? row(selected) : <span>No graph available</span>}<ChevronDown size={14}/>
     </button>
     {open && <div id={`${id}-list`} role="listbox" aria-label={label} className="bp-choice-list" onKeyDown={event => {

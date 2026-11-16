@@ -50,3 +50,48 @@ test('Unreal asset review re-reads moving refs only when their identity changes'
     expect(errors).toEqual([])
   } finally { server.close() }
 })
+
+test('Blueprint picker wraps long names and refresh preserves selection with pending and failure feedback', async ({ page }) => {
+  const dir = tmpDir('lg-blueprint-refresh-')
+  const longName = 'CalculateExtremelyLongBlueprintFunctionNameWithoutLosingAnyCharacters';
+  const doc = { graphs: ['EventGraph', longName].map(name => ({ id: name, name, path: name, kind: 'event', complete: true, nodes: [], diagnostics: [] })), status: 'complete', diagnostics: [], assetClass: '/Script/Engine.World', assetReview: { family: 'map', objects: [], coverage: [], cooked: false } }
+  await require('esbuild').build({ stdin: { contents: `import React from 'react';import {createRoot} from 'react-dom/client';import {UnrealAssetReview} from './src/components/diff/UnrealAssetReview';import {useRepoStore} from './src/stores/repoStore';import './src/index.css';useRepoStore.setState({repoPath:'repo'});const root=createRoot(document.getElementById('root'));window.tick=()=>useRepoStore.setState(s=>({statusTick:s.statusTick+1}));window.show=(leftRef,rightRef)=>root.render(<UnrealAssetReview repoPath="repo" request={{filePath:'Actor.uasset',leftRef,rightRef}}/>);window.show('HEAD','WORKING');`, resolveDir: root, loader: 'tsx' }, alias: { '@': path.join(root, 'src') }, outfile: path.join(dir, 'app.js'), bundle: true, format: 'esm' })
+  const server = http.createServer((req, res) => {
+    if (req.url === '/') {
+      res.setHeader('Content-Type', 'text/html')
+      return res.end(`<html><style>html,body,#root{margin:0;width:100%;height:100%;display:flex}</style><link rel="stylesheet" href="/app.css"><div id="root"></div><script>
+        window.stamp='a';window.stamps=[];window.compares=[];
+        window.lucidGit={logRendererEvent:async()=>{},blueprintCancel:async()=>{},
+        blueprintStamp:async(repo,request)=>{window.stamps.push(request);return window.stamp},
+        blueprintCompare:async(repo,request)=>{window.compares.push(request);if(request.force) { await new Promise(resolve=>setTimeout(resolve,300)); if(window.failRefresh) throw new Error('Read failed'); } return {left:{status:'ready',ref:request.leftRef,document:${JSON.stringify(doc)}},right:{status:'ready',ref:request.rightRef,document:${JSON.stringify(doc)}}}}};
+      </script><script type="module" src="/app.js"></script></html>`)
+    }
+    res.setHeader('Content-Type', req.url.endsWith('.css') ? 'text/css' : 'text/javascript')
+    try { res.end(fs.readFileSync(path.join(dir, req.url.slice(1)))) } catch { res.statusCode = 404; res.end() }
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const errors = []; page.on('pageerror', error => errors.push(error.message))
+  try {
+    await page.goto(`http://127.0.0.1:${server.address().port}`)
+    await expect.poll(() => page.evaluate(() => window.compares.length)).toBe(1)
+    await page.getByLabel('Select function or graph').click()
+    await page.getByRole('combobox', { name: 'Blueprint graph', exact: true }).click()
+    const option = page.getByRole('option', { name: longName, exact: true })
+    await expect(option).toBeVisible()
+    expect(await option.locator('.bp-choice-name').evaluate(el => el.scrollWidth <= el.clientWidth && getComputedStyle(el).whiteSpace === 'normal')).toBe(true)
+    if (process.env.BLUEPRINT_PICKER_SCREENSHOT) await page.screenshot({ path: process.env.BLUEPRINT_PICKER_SCREENSHOT })
+    await option.click()
+    await expect(page.locator('.bp-active-graph')).toHaveText('Viewing: ' + longName)
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Refreshing...', exact: true })).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled()
+    expect(await page.evaluate(() => window.compares.map(r => r.force))).toEqual([false, true])
+    await expect(page.locator('.bp-active-graph')).toHaveText('Viewing: ' + longName)
+    await page.evaluate(() => { window.failRefresh = true })
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+    await expect(page.getByRole('alert')).toContainText('Read failed')
+    await expect(page.locator('.bp-active-graph')).toHaveText('Viewing: ' + longName)
+    await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled()
+    expect(errors).toEqual([])
+  } finally { server.close() }
+})
