@@ -1,4 +1,5 @@
 import { groupBranchTips } from '@/lib/branchTips'
+import { commitDisplayMessage } from '@/lib/commitDisplayMessage'
 import { BlueprintFileAction } from '@/components/shared/BlueprintFileAction'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { ipc, CommitEntry, CommitFileChange, BranchInfo, BlameEntry, StashEntry } from '@/ipc'
@@ -164,6 +165,8 @@ function CommitRow({ node, selected, isPrimary, repoPath, remoteUrl, onRefresh, 
   const col     = authorColor(commit.author)
   const ini     = initials(commit.author)
   const isMerge = commit.parentHashes.length > 1
+  const displayMessage = commitDisplayMessage(commit)
+  const hasMergeLabel = isMerge && displayMessage.startsWith('[MERGE] ')
   const shortHash = commit.hash.slice(0, 7)
   const tipBranches = branchTips.get(commit.hash) ?? []
   const isHeadTip = tipBranches.some(b => b.current)
@@ -244,8 +247,10 @@ function CommitRow({ node, selected, isPrimary, repoPath, remoteUrl, onRefresh, 
               fontFamily: 'var(--lg-font-ui)', fontSize: 13,
               fontWeight: isPrimary ? 600 : 400, color: selected ? '#dde1f0' : '#b0b8cc',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
-            }}>{commit.message}</span>
-            {isMerge && (
+            }} title={commit.message}>
+              {hasMergeLabel ? <><span style={{ color: '#a27ef0' }}>[MERGE]</span>{displayMessage.slice(7)}</> : displayMessage}
+            </span>
+            {isMerge && !hasMergeLabel && (
               <span style={{
                 background: 'rgba(162,126,240,0.15)', color: '#a27ef0',
                 border: '1px solid rgba(162,126,240,0.3)',

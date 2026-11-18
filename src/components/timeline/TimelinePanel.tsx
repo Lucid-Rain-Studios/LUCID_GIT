@@ -1,4 +1,5 @@
 import { groupBranchTips, selectedBranchTips } from '@/lib/branchTips'
+import { commitDisplayMessage } from '@/lib/commitDisplayMessage'
 import { RevisionFileActions } from '@/components/shared/RevisionFileActions'
 import { timelineBranches } from '@/lib/timelineBranches'
 import { isBinaryPath } from '@/lib/binaryFormats'
@@ -1184,6 +1185,8 @@ function LeftCommitRow({ node, selected, repoPath, remoteUrl, onRefresh, onClick
   const col        = authorColor(commit.author)
   const ini        = initials(commit.author)
   const isMerge    = commit.parentHashes.length > 1
+  const displayMessage = commitDisplayMessage(commit)
+  const hasMergeLabel = isMerge && displayMessage.startsWith('[MERGE] ')
   const shortHash  = commit.hash.slice(0, 7)
   const ghSlug     = remoteUrl ? parseGHSlug(remoteUrl) : null
   const tipBranches = branchTips.get(commit.hash) ?? []
@@ -1333,10 +1336,12 @@ function LeftCommitRow({ node, selected, repoPath, remoteUrl, onRefresh, onClick
               fontFamily: 'var(--lg-font-ui)', fontSize: 12,
               fontWeight: selected ? 600 : 400, color: '#c8cdd8',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
-            }}>{commit.message}</span>
+            }} title={commit.message}>
+              {hasMergeLabel ? <><span style={{ color: '#a27ef0' }}>[MERGE]</span>{displayMessage.slice(7)}</> : displayMessage}
+            </span>
             {needsPush && <SyncBadge dir="up" title="Needs push" />}
             {needsPull && <SyncBadge dir="down" title="Needs pull" />}
-            {isMerge && (
+            {isMerge && !hasMergeLabel && (
               <span style={{
                 background: 'rgba(162,126,240,0.12)', color: '#a27ef0',
                 border: '1px solid rgba(162,126,240,0.25)', borderRadius: 3,
@@ -2128,7 +2133,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
                   title={c.message}
                 >
                   <span style={{ color: '#4d9dff', fontFamily: 'var(--lg-font-mono)', fontSize: 10 }}>{c.hash.slice(0, 7)}</span>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.message}</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{commitDisplayMessage(c)}</span>
                 </button>
               ))}
               {prReadyCommits.length > 4 && (
