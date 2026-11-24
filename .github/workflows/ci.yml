@@ -11,7 +11,8 @@ jobs:
     uses: ./.github/workflows/git-safety.yml
 
   lint-typecheck:
-    runs-on: ubuntu-latest
+    # Keep Chromium installation on an Ubuntu release supported by the locked Playwright version.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 

@@ -43,8 +43,10 @@ function pinReferences(graph?: BlueprintGraph) {
     if (typeof reference.export !== 'number' || typeof reference.pin !== 'string' || duplicates.has(reference.export)) return value
     const target = exports.get(reference.export)
     if (!target?.id || !target.complete || !pinIds.get(target)?.has(reference.pin)) return value
-    const { export: _export, nodeName: _name, ...rest } = reference
-    return { ...rest, node: target.id }
+    const normalized: Record<string, unknown> = { ...reference, node: target.id }
+    delete normalized.export
+    delete normalized.nodeName
+    return normalized
   }
 }
 
