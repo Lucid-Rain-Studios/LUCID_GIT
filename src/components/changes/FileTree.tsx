@@ -1,3 +1,4 @@
+import { isGitHubLockOwner } from '../../../electron/util/github-login'
 import { isModalOpen } from '@/lib/useDialogOverlayDismiss'
 import { useRepoStore } from '@/stores/repoStore'
 import { createStageGuard } from '@/lib/staging'
@@ -23,7 +24,7 @@ interface FolderNode {
 }
 
 type FlatRow =
-  | { type: 'folder'; name: string; depth: number; fullPath: string; count: number; collapsed: boolean }
+  | { type: 'folder'; folder: FolderNode; depth: number; collapsed: boolean }
   | { type: 'file'; file: FileStatus; depth: number }
 
 function buildTree(files: FileStatus[]): FolderNode {
@@ -50,11 +51,39 @@ function buildTree(files: FileStatus[]): FolderNode {
 function flattenTree(node: FolderNode, depth: number, collapsed: Set<string>, rows: FlatRow[] = []): FlatRow[] {
   for (const child of node.children.values()) {
     const isCollapsed = collapsed.has(child.fullPath)
-    rows.push({ type: 'folder', name: child.name, depth, fullPath: child.fullPath, count: child.count, collapsed: isCollapsed })
+    rows.push({ type: 'folder', folder: child, depth, collapsed: isCollapsed })
     if (!isCollapsed) flattenTree(child, depth + 1, collapsed, rows)
   }
   for (const file of node.files) rows.push({ type: 'file', file, depth })
   return rows
+}
+
+interface FolderSelection {
+  eligible: number
+  selected: number
+}
+
+function summarizeFolderSelection(
+  folder: FolderNode,
+  selectedPaths: Set<string>,
+  canStage: (path: string) => boolean,
+  summaries: Map<FolderNode, FolderSelection>,
+): FolderSelection {
+  let eligible = 0
+  let selected = 0
+  for (const file of folder.files) {
+    if (!canStage(file.path)) continue
+    eligible++
+    if (selectedPaths.has(file.path)) selected++
+  }
+  for (const child of folder.children.values()) {
+    const counts = summarizeFolderSelection(child, selectedPaths, canStage, summaries)
+    eligible += counts.eligible
+    selected += counts.selected
+  }
+  const summary = { eligible, selected }
+  summaries.set(folder, summary)
+  return summary
 }
 
 function FolderIcon({ open }: { open: boolean }) {
@@ -70,8 +99,13 @@ function FolderIcon({ open }: { open: boolean }) {
   )
 }
 
-function FolderRow({ name, depth, count, collapsed, onToggle }: {
-  name: string; depth: number; count: number; collapsed: boolean; onToggle: () => void
+function FolderRow({ folder, depth, collapsed, onToggle, selection, onToggleSelection }: {
+  folder: FolderNode
+  depth: number
+  collapsed: boolean
+  onToggle: () => void
+  selection?: FolderSelection
+  onToggleSelection: (checked: boolean) => void
 }) {
   const [hover, setHover] = useState(false)
   return (
@@ -92,15 +126,25 @@ function FolderRow({ name, depth, count, collapsed, onToggle }: {
       }}>
         <path d="M1 2.5L4 5.5L7 2.5" stroke="#4e5870" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
+      {selection && (
+        <AppCheckbox
+          label={`Select changed files in ${folder.fullPath}`}
+          color="#f5a832"
+          checked={selection.eligible > 0 && selection.selected === selection.eligible}
+          indeterminate={selection.selected > 0 && selection.selected < selection.eligible}
+          disabled={selection.eligible === 0}
+          onChange={onToggleSelection}
+        />
+      )}
       <FolderIcon open={!collapsed} />
       <span style={{
         fontFamily: 'var(--lg-font-ui)', fontSize: 12, color: '#c4cad8',
         flex: 1, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-      }}>{name}</span>
+      }}>{folder.name}</span>
       <span style={{
         fontFamily: 'var(--lg-font-mono)', fontSize: 10, color: '#4e5870',
         background: '#1a2030', borderRadius: 8, padding: '1px 5px', flexShrink: 0,
-      }}>{count}</span>
+      }}>{folder.count}</span>
     </div>
   )
 }
@@ -270,7 +314,7 @@ export function FileTree({
     if (!currentLogin) return
     const targets = discarded.flatMap(file => {
       const lock = lockFor(file)
-      return lock?.owner.login === currentLogin ? [{ filePath: file.path, lockId: lock.id }] : []
+      return lock && isGitHubLockOwner(lock, currentLogin) ? [{ filePath: file.path, lockId: lock.id }] : []
     })
     if (!targets.length) return
     const result = await unlockFiles(repoPath, targets)
@@ -282,6 +326,27 @@ export function FileTree({
   const tree = useMemo(() => treeMode ? buildTree(isDeferredStaging ? staged : files) : null,
     [treeMode, files, staged, isDeferredStaging])
   const treeRows = useMemo(() => tree ? flattenTree(tree, 0, collapsedFolders) : [], [tree, collapsedFolders])
+  const folderSelections = useMemo(() => {
+    const summaries = new Map<FolderNode, FolderSelection>()
+    if (tree && isDeferredStaging && deferredStagePaths) {
+      summarizeFolderSelection(tree, deferredStagePaths, canStage, summaries)
+    }
+    return summaries
+  }, [tree, isDeferredStaging, deferredStagePaths, canStage])
+
+  const selectFolder = (folder: FolderNode, checked: boolean) => {
+    const next = new Set(deferredStagePaths)
+    const folders = [folder]
+    for (const current of folders) {
+      for (const child of current.children.values()) folders.push(child)
+      for (const file of current.files) {
+        if (!canStage(file.path)) continue
+        if (checked) next.add(file.path)
+        else next.delete(file.path)
+      }
+    }
+    onSetDeferredStagePaths?.([...next])
+  }
 
   const isCommitSelected = (file: FileStatus) => deferredStagePaths?.has(file.path) ?? file.staged
   const toggleCommitSelected = (file: FileStatus) => {
@@ -492,12 +557,14 @@ export function FileTree({
       <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
 
         {/* ── Content Browser (tree) mode ── */}
-        {treeMode && treeRows.map((row, _i) =>
+        {treeMode && treeRows.map(row =>
             row.type === 'folder'
               ? <FolderRow
-                  key={`folder-${row.fullPath}`}
-                  name={row.name} depth={row.depth} count={row.count} collapsed={row.collapsed}
-                  onToggle={() => toggleFolder(row.fullPath)}
+                  key={`folder-${row.folder.fullPath}`}
+                  folder={row.folder} depth={row.depth} collapsed={row.collapsed}
+                  onToggle={() => toggleFolder(row.folder.fullPath)}
+                  selection={folderSelections.get(row.folder)}
+                  onToggleSelection={checked => selectFolder(row.folder, checked)}
                 />
               : <div key={`file-${row.file.staged ? 's' : 'u'}-${row.file.path}`}
                   style={{ paddingLeft: row.depth * 14 }}>

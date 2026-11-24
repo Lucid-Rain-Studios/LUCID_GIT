@@ -366,7 +366,7 @@ app.whenReady().then(() => {
   logService.registerActivityProbe('git processes running', describeLiveGitProcesses)
   logService.registerActivityProbe('IPC calls in flight', describeInFlightIpc)
   logService.startEventLoopMonitor()
-  registerHandlers()
+  registerHandlers((sender, repoPath) => mergeWindows.blocksWrite(sender, repoPath))
   registerUpdaterHandlers()
   registerWindowHandlers()
   mergeWindows.register()

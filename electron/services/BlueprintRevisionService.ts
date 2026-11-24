@@ -14,7 +14,7 @@ import { confirmsMapOwnership, discoverExternalActors, emptyExternalReview, esti
 import { withRepoSlot } from '../util/repo-gate'
 import type { BlueprintComparison, BlueprintDocument, BlueprintRequest, BlueprintSide } from '../blueprintTypes'
 
-const EXTRACTOR_VERSION = '17-bound-event-signatures-v1-uassetapi-3228c1e8'
+const EXTRACTOR_VERSION = '17-bound-event-signatures-v1-uassetapi-3228c1e8-utf8'
 const READER_VERSION = 17
 const MAX_BYTES = 256 * 1024 * 1024
 const MAX_CACHE_BYTES = 256 * 1024 * 1024

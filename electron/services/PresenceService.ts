@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import * as fs from 'fs'
 import * as path from 'path'
 import type { PresenceEntry, PresenceFile } from '../types'
+import { sameGitHubLogin } from '../util/github-login'
 
 class PresenceService {
   private filePath(repoPath: string): string {
@@ -41,6 +42,9 @@ class PresenceService {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
 
     const current = this.read(repoPath)
+    for (const existingLogin of Object.keys(current.entries)) {
+      if (existingLogin !== login && sameGitHubLogin(existingLogin, login)) delete current.entries[existingLogin]
+    }
     current.entries[login] = entry
     writeJson(this.filePath(repoPath), current)
   }

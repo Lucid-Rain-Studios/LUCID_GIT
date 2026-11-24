@@ -1,5 +1,7 @@
+import { useBackgroundRepoTask } from '@/lib/useBackgroundRepoTask'
+import { MergeProgressCard } from './MergeProgressCard'
 import React, { useEffect, useState } from 'react'
-import { ipc, ConflictPreviewFile } from '@/ipc'
+import { ipc, backgroundTaskIpc, ConflictPreviewFile } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useOperationStore } from '@/stores/operationStore'
 import { cn } from '@/lib/utils'
@@ -17,8 +19,10 @@ function formatAge(seconds: number): string {
 }
 
 interface CherryPickConflictDialogProps {
+  repoPath?: string
   onClose: () => void
   onResolved: () => void
+  onAborted?: () => void
 }
 
 function timeAgo(iso: string): string {
@@ -47,8 +51,11 @@ const TYPE_ICON: Record<ConflictPreviewFile['type'], string> = {
   'ue-asset': '🎮',
 }
 
-export function CherryPickConflictDialog({ onClose, onResolved }: CherryPickConflictDialogProps) {
-  const { repoPath, currentBranch, refreshStatus, bumpSyncTick } = useRepoStore()
+export function CherryPickConflictDialog({ repoPath: taskRepo, onClose, onResolved, onAborted }: CherryPickConflictDialogProps) {
+  const repo = useRepoStore()
+  const [repoPath] = useState(taskRepo ?? repo.repoPath)
+  const [currentBranch, setCurrentBranch] = useState(repo.currentBranch)
+  const task = useBackgroundRepoTask(repoPath)
   const opRun = useOperationStore(s => s.run)
 
   const [loading, setLoading] = useState(true)
@@ -57,47 +64,51 @@ export function CherryPickConflictDialog({ onClose, onResolved }: CherryPickConf
   const [lockFailureCount, setLockFailureCount] = useState(0)
   const [conflicts, setConflicts] = useState<ConflictPreviewFile[]>([])
   const [sourceLabel, setSourceLabel] = useState<string>('')
-  const [working, setWorking] = useState(false)
+  const [stale, setStale] = useState(false)
+  const [sourceHead, setSourceHead] = useState<string | null>(null)
+  const working = task.running
   const [choices, setChoices] = useState<Record<string, 'ours' | 'theirs'>>({})
 
   useEffect(() => {
     if (!repoPath) return
+    let active = true
     setLoading(true)
     setError(null)
-    ipc.cherryPickInProgress(repoPath)
-      .then(state => {
+    Promise.all([ipc.cherryPickInProgress(repoPath), ipc.currentBranch(repoPath)])
+      .then(([state, branch]) => {
+        if (!active) return
         if (!state) {
           // No cherry-pick in progress — nothing to resolve, close.
           onClose()
           return
         }
+        setCurrentBranch(branch)
         setConflicts(state.conflicts)
+        setSourceHead(state.cherryPickHead)
         setSourceLabel(
           state.sourceMessage
             ? `${state.cherryPickHead.slice(0, 7)} — ${state.sourceMessage}`
             : state.cherryPickHead.slice(0, 7),
         )
       })
-      .catch(e => setError(String(e)))
-      .finally(() => setLoading(false))
+      .catch(e => { if (active) setError(String(e)) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
   }, [repoPath, onClose])
 
   const allChoicesMade = conflicts.length > 0 && conflicts.every(c => choices[c.path])
 
-  const runFinalize = async () => {
-    if (!repoPath) return
-    for (const c of conflicts) {
-      const choice = choices[c.path]
-      if (!choice) continue
-      // mergeResolveText is purely file-level (git checkout --ours/theirs + git add)
-      // and works identically for cherry-pick conflicts.
-      await opRun(`Resolving ${c.path}…`, () => ipc.mergeResolveText(repoPath, c.path, choice))
+  const assertSameCherryPick = async (path: string) => {
+    const [state, branch] = await Promise.all([ipc.cherryPickInProgress(path, false), ipc.currentBranch(path)])
+    if (!state || state.cherryPickHead !== sourceHead || branch !== currentBranch) {
+      setStale(true)
+      throw new Error('The cherry-pick changed. Close this review and reopen the current conflicts.')
     }
-    await opRun('Finalizing cherry-pick…', () => ipc.cherryPickContinue(repoPath))
-    await refreshStatus()
-    bumpSyncTick()
-    onResolved()
-    onClose()
+  }
+
+  const runStep = <T,>(label: string, fn: () => Promise<T>) => {
+    task.setStage(label)
+    return opRun(label, fn)
   }
 
   const handleFinalizeError = async (e: unknown) => {
@@ -115,57 +126,65 @@ export function CherryPickConflictDialog({ onClose, onResolved }: CherryPickConf
       setLockInfo(null)
       setLockFailureCount(0)
     }
-    setWorking(false)
+    task.finish(msg)
   }
 
-  const finalize = async () => {
-    if (!repoPath) return
-    setWorking(true)
-    setError(null)
-    setLockInfo(null)
-    setLockFailureCount(0)
-    try {
-      await runFinalize()
-    } catch (e) {
-      await handleFinalizeError(e)
-    }
-  }
-
-  const clearLockAndRetry = async () => {
-    if (!repoPath || !lockInfo) return
-    setWorking(true)
+  const finalize = async (retryIndex = false) => {
+    if (!repoPath || !sourceHead || stale || (conflicts.length > 0 && !allChoicesMade) ||
+      !task.begin('Completing cherry-pick…')) return
     setError(null)
     try {
-      const remaining = await ipc.getIndexLockInfo(repoPath)
-      if (remaining) throw new Error('The index lock still exists. Its age cannot prove that its owner stopped. Close other Git clients and verify no Git writer is running before manually removing ' + remaining.path)
+      await assertSameCherryPick(repoPath)
+      if (retryIndex) {
+        const remaining = await ipc.getIndexLockInfo(repoPath)
+        if (remaining) throw new Error('The index lock still exists. Its age cannot prove that its owner stopped. Close other Git clients and verify no Git writer is running before manually removing ' + remaining.path)
+      } else {
+        setLockFailureCount(0)
+      }
       setLockInfo(null)
-      await runFinalize()
+      for (const conflict of conflicts) {
+        const choice = choices[conflict.path]
+        if (!choice) continue
+        await runStep(`Resolving ${conflict.path}…`, () => backgroundTaskIpc.mergeResolveText(repoPath, conflict.path, choice))
+      }
+      await runStep('Finalizing cherry-pick…', () => backgroundTaskIpc.cherryPickContinue(repoPath))
     } catch (e) {
       await handleFinalizeError(e)
+      return
     }
+    task.finish()
+    onResolved()
+    onClose()
   }
 
   const abort = async () => {
-    if (!repoPath) return
+    if (!repoPath || !sourceHead || stale || !task.begin('Aborting cherry-pick…')) return
+    setError(null)
     try {
-      setError(null)
-      await opRun('Aborting cherry-pick…', () => ipc.cherryPickAbort(repoPath))
-      await refreshStatus()
-      bumpSyncTick()
-      onClose()
+      await assertSameCherryPick(repoPath)
+      await runStep('Aborting cherry-pick…', () => backgroundTaskIpc.cherryPickAbort(repoPath))
     } catch (e) {
-      setError(String(e))
+      await handleFinalizeError(e)
+      return
     }
+    task.finish()
+    onAborted?.()
+    onClose()
   }
 
-  // Disable backdrop-click dismiss while a cherry-pick is in progress —
-  // the user must explicitly resolve or abort.
-  const overlayDismiss = useDialogOverlayDismiss(onClose, false)
+  const canHide = working || !!task.failure
+  const overlayDismiss = useDialogOverlayDismiss(() => task.setHidden(true), canHide, 'Cherry-pick conflict', !task.hidden)
 
-  return (
+  return <>
+    {task.hidden && (working || task.failure) && <MergeProgressCard
+      label="Cherry-pick progress" stage={working ? task.stage : 'Cherry-pick needs attention'}
+      context={sourceLabel} error={task.failure} needsAttention={!!task.failure}
+      onDetails={() => task.setHidden(false)}
+      onDismiss={stale ? onClose : undefined}
+    />}
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      {...overlayDismiss}
+      style={{ display: task.hidden ? 'none' : undefined }} {...overlayDismiss}
     >
       <div className="bg-lg-bg-elevated border border-lg-border rounded-lg shadow-2xl w-[640px] max-h-[80vh] flex flex-col">
 
@@ -182,9 +201,10 @@ export function CherryPickConflictDialog({ onClose, onResolved }: CherryPickConf
             </div>
           </div>
           <button
-            onClick={abort}
+            onClick={() => stale ? onClose() : canHide ? task.setHidden(true) : void abort()}
+            disabled={!canHide && !stale && (task.blocked || !sourceHead)}
             className="text-lg-text-secondary hover:text-lg-text-primary text-lg font-mono leading-none"
-            title="Abort cherry-pick"
+            title={stale ? 'Close review' : canHide ? 'Hide progress' : 'Abort cherry-pick'}
           >
             ×
           </button>
@@ -218,15 +238,15 @@ export function CherryPickConflictDialog({ onClose, onResolved }: CherryPickConf
                     </div>
                     <div className="pt-1 flex gap-2">
                       <button
-                        onClick={clearLockAndRetry}
-                        disabled={working}
+                        onClick={() => finalize(true)}
+                        disabled={task.blocked}
                         className="px-2 h-6 rounded text-[10px] font-mono bg-lg-warning/20 border border-lg-warning/60 text-lg-warning hover:bg-lg-warning/30 transition-colors disabled:opacity-40"
                       >
                         {working ? 'Checking…' : 'Check lock & retry'}
                       </button>
                       <button
-                        onClick={finalize}
-                        disabled={working}
+                        onClick={() => finalize()}
+                        disabled={task.blocked}
                         className="px-2 h-6 rounded text-[10px] font-mono border border-lg-border text-lg-text-secondary hover:bg-lg-bg-secondary transition-colors disabled:opacity-40"
                         title="Try again without removing the lock — useful after closing the other process"
                       >
@@ -283,6 +303,7 @@ export function CherryPickConflictDialog({ onClose, onResolved }: CherryPickConf
                       <button
                         key={label}
                         type="button"
+                        disabled={working}
                         onClick={() => setChoices(prev => ({ ...prev, [file.path]: choice }))}
                         className={cn(
                           'bg-lg-bg-secondary rounded px-2 py-1.5 space-y-0.5 text-left border transition-colors',
@@ -314,6 +335,7 @@ export function CherryPickConflictDialog({ onClose, onResolved }: CherryPickConf
                   <div className="mt-2 flex items-center gap-2">
                     <span className="text-[10px] font-mono text-lg-text-secondary">Preferred resolution:</span>
                     <button
+                      disabled={working}
                       onClick={() => setChoices(prev => ({ ...prev, [file.path]: 'ours' }))}
                       className={cn(
                         'px-2 h-6 text-[10px] font-mono border rounded',
@@ -325,6 +347,7 @@ export function CherryPickConflictDialog({ onClose, onResolved }: CherryPickConf
                       Keep {currentBranch}
                     </button>
                     <button
+                      disabled={working}
                       onClick={() => setChoices(prev => ({ ...prev, [file.path]: 'theirs' }))}
                       className={cn(
                         'px-2 h-6 text-[10px] font-mono border rounded',
@@ -355,7 +378,7 @@ export function CherryPickConflictDialog({ onClose, onResolved }: CherryPickConf
             <div className="flex gap-2 shrink-0">
               <ActionBtn
                 onClick={abort}
-                disabled={working}
+                disabled={task.blocked || stale || !sourceHead}
                 color="#e84545"
                 size="sm"
                 style={{ height: 28, paddingLeft: 12, paddingRight: 12, fontSize: 11, fontFamily: 'var(--lg-font-mono)' }}
@@ -363,8 +386,8 @@ export function CherryPickConflictDialog({ onClose, onResolved }: CherryPickConf
                 Abort
               </ActionBtn>
               <button
-                onClick={finalize}
-                disabled={working || (conflicts.length > 0 && !allChoicesMade)}
+                onClick={() => finalize()}
+                disabled={task.blocked || stale || !sourceHead || (conflicts.length > 0 && !allChoicesMade)}
                 className="px-3 h-7 rounded text-[11px] font-mono bg-lg-success/20 border border-lg-success/60 text-lg-success hover:bg-lg-success/30 transition-colors disabled:opacity-40"
                 title={conflicts.length > 0 && !allChoicesMade ? 'Pick a side for every conflicted file first' : undefined}
               >
@@ -375,5 +398,5 @@ export function CherryPickConflictDialog({ onClose, onResolved }: CherryPickConf
         )}
       </div>
     </div>
-  )
+  </>
 }

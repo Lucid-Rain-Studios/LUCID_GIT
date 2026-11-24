@@ -1,19 +1,13 @@
-import { useDialogOverlayDismiss } from '@/lib/useDialogOverlayDismiss'
+import { useMergeWindowStore } from '@/stores/mergeWindowStore'
+import { usePRReviewStore } from '@/stores/prReviewStore'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import {
   ipc, SyncStatus,
-  CommitEntry, BranchActivity, SizeBreakdown, PullRequest, ConflictPreviewFile,
-  BranchDiffSummary, LFSStatus,
+  CommitEntry, BranchActivity, SizeBreakdown, PullRequest,
+  LFSStatus,
 } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
-import { useOperationStore } from '@/stores/operationStore'
-import { useStatusToastStore } from '@/stores/statusToastStore'
-import { useErrorStore } from '@/stores/errorStore'
-import { markFetchPerformed } from '@/lib/fetchState'
 import { ActionBtn } from '@/components/ui/ActionBtn'
-import { PRReviewWorkspace } from '@/components/pr/PRReviewWorkspace'
-import '@/components/pr/PRReviewDialog.css'
 
 interface OverviewPanelProps {
   repoPath: string
@@ -150,14 +144,16 @@ function Card({
 // ── Inline action button ───────────────────────────────────────────────────────
 
 function Btn({
-  label, onClick, loading, color, disabled,
+  label, onClick, loading, color, disabled, disabledReason,
 }: {
   label: string; onClick: () => void; loading?: boolean; color?: string; disabled?: boolean
+  disabledReason?: string
 }) {
   return (
     <ActionBtn
       onClick={onClick}
       disabled={loading || disabled}
+      disabledReason={disabledReason}
       color={color}
       size="sm"
       style={{ height: 25, paddingLeft: 13, paddingRight: 13, fontSize: 11.5 }}
@@ -422,233 +418,6 @@ function CommitsCard({ commits, onNavigate }: { commits: CommitEntry[]; onNaviga
 
 // ── PR Resolve Dialog ─────────────────────────────────────────────────────────
 
-export function ResolveDialog({
-  pr, ghSlug, repoPath, onClose, onDone,
-}: {
-  pr: PullRequest
-  ghSlug: string
-  repoPath: string
-  onClose: () => void
-  onDone: (result: { prNumber: number; action: 'accept' | 'decline' }) => void
-}) {
-  const opRun         = useOperationStore(s => s.run)
-  const bumpHistoryTick = useRepoStore(s => s.bumpHistoryTick)
-  const bumpPrTick      = useRepoStore(s => s.bumpPrTick)
-  const bumpSyncTick    = useRepoStore(s => s.bumpSyncTick)
-  const currentBranch   = useRepoStore(s => s.currentBranch)
-  const refreshStatus   = useRepoStore(s => s.refreshStatus)
-  const [choice, setChoice] = useState<'accept' | 'decline'>('accept')
-  const [expanded, setExpanded] = useState(false)
-  const showStatusToast = useStatusToastStore(s => s.show)
-  const pushError       = useErrorStore(s => s.pushRaw)
-  const [conflicts, setConflicts] = useState<ConflictPreviewFile[]>([])
-  const [conflictChoices, setConflictChoices] = useState<Record<string, 'head' | 'base'>>({})
-  const [conflictLoading, setConflictLoading] = useState(true)
-  const [conflictError, setConflictError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [branchDiff, setBranchDiff] = useState<BranchDiffSummary | null>(null)
-  const [branchDiffLoading, setBranchDiffLoading] = useState(true)
-  const [branchDiffError, setBranchDiffError] = useState<string | null>(null)
-  // Previews stay gated until a fresh fetch lands so they reflect the PR's
-  // current remote state rather than a stale local snapshot.
-  const [refsFetched, setRefsFetched] = useState(false)
-
-  // Fetch the latest remote refs once so the conflict / commit previews below
-  // reflect the PR's current state rather than a stale local snapshot.
-  useEffect(() => {
-    let cancelled = false
-    setRefsFetched(false)
-    ipc.fetch(repoPath)
-      .then(() => markFetchPerformed(repoPath))
-      .then(() => { if (!cancelled) setRefsFetched(true) })
-      .catch(error => { if (!cancelled) { setConflictError(String(error)); setConflictLoading(false); setBranchDiffError(String(error)); setBranchDiffLoading(false) } })
-    return () => { cancelled = true }
-  }, [repoPath, pr.headSha, pr.baseSha])
-
-  useEffect(() => {
-    if (choice !== 'accept' || !refsFetched) return
-    let cancelled = false
-    setConflictLoading(true)
-    setConflictError(null)
-    // Preview conflicts between the PR's own base and head branches — never
-    // the branch the user happens to be checked out on.
-    ipc.mergePreview(repoPath, pr.headSha, pr.baseSha)
-      .then(files => {
-        if (cancelled) return
-        setConflicts(files)
-        setConflictChoices(prev => {
-          const active = new Set(files.map(file => file.path))
-          const next: Record<string, 'head' | 'base'> = {}
-          Object.entries(prev).forEach(([path, selected]) => {
-            if (active.has(path)) next[path] = selected
-          })
-          return next
-        })
-      })
-      .catch((e) => {
-        if (cancelled) return
-        setConflicts([])
-        setConflictError(String(e))
-      })
-      .finally(() => { if (!cancelled) setConflictLoading(false) })
-    return () => { cancelled = true }
-  }, [choice, repoPath, pr.headBranch, pr.baseBranch, pr.headSha, pr.baseSha, refsFetched])
-
-  useEffect(() => {
-    if (choice !== 'accept' || !refsFetched) return
-    let cancelled = false
-    setBranchDiffLoading(true)
-    setBranchDiffError(null)
-    ipc.branchDiff(repoPath, pr.baseSha, pr.headSha)
-      .then(value => { if (!cancelled) setBranchDiff(value) })
-      .catch((e) => {
-        if (cancelled) return
-        setBranchDiff(null)
-        setBranchDiffError(String(e))
-      })
-      .finally(() => { if (!cancelled) setBranchDiffLoading(false) })
-    return () => { cancelled = true }
-  }, [choice, repoPath, pr.baseBranch, pr.headBranch, pr.baseSha, pr.headSha, refsFetched])
-
-  const allConflictChoicesMade = conflicts.length > 0 && conflicts.every(file => conflictChoices[file.path])
-  const modal = useDialogOverlayDismiss(onClose, !busy, 'Review pull request')
-
-  const resolveConflictedPRLocally = async (owner: string, repo: string) => {
-    const originalBranch = currentBranch
-
-    let mergeSha = pr.headSha
-    let switched = false
-    let cleanupError: unknown
-    try {
-    await opRun('Fetching latest PR refs...', () => ipc.fetch(repoPath))
-    markFetchPerformed(repoPath)
-    await opRun(`Switching to ${pr.headBranch}...`, () => ipc.checkout(repoPath, pr.headBranch))
-    switched = true
-    const [reviewedTip] = await ipc.log(repoPath, { limit: 1 })
-    if (!reviewedTip || reviewedTip.hash !== pr.headSha) throw new Error('PR head changed since review. Reopen the preview before resolving.')
-
-    try {
-      await opRun(`Updating ${pr.headBranch} from ${pr.baseBranch}...`, () => ipc.merge(repoPath, pr.baseSha))
-    } catch (mergeError) {
-      const message = mergeError instanceof Error ? mergeError.message : String(mergeError)
-      const isConflict = /conflict|automatic merge failed|fix conflicts|cannot merge binary/i.test(message)
-      if (!isConflict) throw mergeError
-
-      for (const file of conflicts) {
-        const selected = conflictChoices[file.path]
-        if (!selected) continue
-        await opRun(
-          `Resolving ${file.path}...`,
-          () => ipc.mergeResolveText(repoPath, file.path, selected === 'head' ? 'ours' : 'theirs'),
-        )
-      }
-      await opRun(`Committing ${pr.baseBranch} update...`, () => ipc.mergeContinue(repoPath, pr.baseBranch))
-    }
-
-    await opRun(`Pushing ${pr.headBranch}...`, () => ipc.push(repoPath))
-    const [tip] = await ipc.log(repoPath, { limit: 1 })
-    if (!tip) throw new Error('Unable to verify the PR revision after local resolution')
-    mergeSha = tip.hash
-    } finally {
-      try {
-      if (switched && originalBranch && originalBranch !== pr.headBranch) {
-        const inProgress = await ipc.mergeInProgress(repoPath)
-        if (!inProgress) await opRun('Restoring ' + originalBranch, () => ipc.checkout(repoPath, originalBranch))
-        else showStatusToast('Conflict resolution is still active on ' + pr.headBranch + '. Complete or abort it before switching branches.')
-      }
-      } catch (restoreError) {
-        showStatusToast('Could not restore ' + originalBranch + '. Check the current branch before continuing.')
-        cleanupError = restoreError
-      } finally { try { await refreshStatus() } finally { bumpSyncTick() } }
-    }
-    if (cleanupError) throw cleanupError
-    await opRun('Merging PR #' + pr.number, () => ipc.githubMergePR({ owner, repo, prNumber: pr.number, repoPath, expectedSha: mergeSha }))
-  }
-
-  const handleConfirm = async () => {
-    if (busy || (choice === 'accept' && (!refsFetched || conflictLoading || branchDiffLoading ||
-      conflictError || branchDiffError || !pr.headSha || !pr.baseSha || conflicts.some(file => !conflictChoices[file.path])))) return
-    const [owner, repo] = ghSlug.split('/')
-    setBusy(true)
-    try {
-      if (choice === 'accept') {
-        if (conflicts.length > 0) {
-          await resolveConflictedPRLocally(owner, repo)
-        } else {
-          await opRun(`Merging PR #${pr.number}…`, () => ipc.githubMergePR({ owner, repo, prNumber: pr.number, repoPath, expectedSha: pr.headSha }))
-        }
-        let fetchedMergedPrUpdates = false
-        try {
-          await opRun('Fetching merged PR updates...', () => ipc.fetch(repoPath))
-          markFetchPerformed(repoPath)
-          fetchedMergedPrUpdates = true
-        } catch (fetchError) {
-          showStatusToast('PR merged, but fetch failed. Fetch manually to update pull status.')
-          console.error('Post-PR-merge fetch failed', fetchError)
-        }
-        bumpPrTick()
-        if (fetchedMergedPrUpdates) bumpSyncTick()
-        else bumpHistoryTick()
-      } else {
-        await opRun(`Closing PR #${pr.number}…`, () => ipc.githubClosePR({ owner, repo, prNumber: pr.number }))
-        bumpPrTick()
-      }
-      onDone({ prNumber: pr.number, action: choice })
-      onClose()
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      const mergeBlocked = /not up to date|update branch|head branch was modified|pull first|fetch first|failed to merge/i.test(msg)
-      if (choice === 'accept' && mergeBlocked) {
-        showStatusToast('Merge aborted, please fetch and pull first.')
-      } else {
-        // Anything else used to fail silently — the dialog just stopped and the
-        // only record was the devtools console, leaving the user with no idea
-        // why the PR never merged. Route it through the error panel so the
-        // parsed cause and its fixes are on screen.
-        pushError(msg, repoPath)
-      }
-      console.error('PR merge/close failed', e)
-    } finally { setBusy(false) }
-  }
-
-  const waitingForConflictChoices = choice === 'accept' && conflicts.length > 0 && !allConflictChoicesMade
-  const disabled = busy || waitingForConflictChoices || (choice === 'accept' && (!refsFetched || conflictLoading || branchDiffLoading || !!conflictError || !!branchDiffError || !pr.headSha || !pr.baseSha))
-  const pending = conflicts.filter(file => !conflictChoices[file.path]).length
-  const reviewStatus = conflictError || branchDiffError ? 'Review unavailable'
-    : !refsFetched || conflictLoading || branchDiffLoading ? 'Loading review…'
-    : conflicts.length ? pending ? `${pending} of ${conflicts.length} files need a choice` : `${conflicts.length} file choices ready`
-    : 'No merge conflicts detected'
-
-  return createPortal(<div {...modal} style={{ position: 'fixed', inset: 0, zIndex: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)' }}>
-    <div className={'pr-review-dialog' + (expanded ? ' pr-review-expanded' : '')}>
-      <header className="pr-review-title">
-        <span className="pr-review-number">#{pr.number}</span><h2>{pr.title}</h2><span className="pr-review-pill">Open</span>
-        <span className="pr-review-spacer" />
-        <button aria-label={expanded ? 'Restore PR review size' : 'Expand PR review'} aria-pressed={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? 'Restore' : 'Expand'}</button>
-        <details className="pr-review-pr-menu"><summary aria-label="Pull request actions">⋮</summary>
-          <button disabled={busy} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); setChoice(choice === 'accept' ? 'decline' : 'accept') }}>{choice === 'accept' ? 'Close PR' : 'Review merge'}</button>
-        </details>
-        <button aria-label="Close PR review" disabled={busy} onClick={onClose}>×</button>
-      </header>
-      <div className="pr-review-branches"><strong>{pr.headBranch}</strong><span>→</span><span>{pr.baseBranch}</span><span>· by {pr.author}</span><small>{pr.headSha.slice(0, 7)}</small></div>
-      {choice === 'accept' ? <PRReviewWorkspace pr={pr} repoPath={repoPath} ghSlug={ghSlug} summary={branchDiff}
-        loading={!refsFetched || conflictLoading || branchDiffLoading} error={conflictError || branchDiffError}
-        conflicts={conflicts} choices={conflictChoices} busy={busy}
-        onChoose={(path, side) => setConflictChoices(previous => ({ ...previous, [path]: side }))} />
-        : <div className="pr-review-decline-warning">This will close PR #{pr.number} without merging. The branch will remain intact.<div style={{ marginTop: 14 }}><button disabled={busy} onClick={() => setChoice('accept')}>Back to review</button></div></div>}
-      <footer className="pr-review-footer">
-        <span role="status">{choice === 'accept' ? reviewStatus : 'Close without merging'}</span><span className="pr-review-spacer" />
-        {!expanded && <small className="pr-review-resize-note">Drag bottom-right corner to resize</small>}
-        <button onClick={onClose} disabled={busy}>Cancel</button>
-        <button className={choice === 'accept' ? 'pr-review-confirm' : 'pr-review-decline'} onClick={handleConfirm} disabled={disabled}
-          title={waitingForConflictChoices ? 'Choose a revision for every conflicting file.' : undefined}>
-          {busy ? '…' : choice === 'accept' ? conflicts.length > 0 ? 'Resolve & Merge' : 'Merge PR' : 'Close PR'}
-        </button>
-      </footer>
-    </div>
-  </div>, document.body)
-}
-
 // ── Admin PR management card ──────────────────────────────────────────────────
 
 function AdminPRsCard({ prs, ghSlug, repoPath, loading, error, onRefresh }: {
@@ -659,39 +428,22 @@ function AdminPRsCard({ prs, ghSlug, repoPath, loading, error, onRefresh }: {
   error: PRLoadError | null
   onRefresh: () => void
 }) {
-  const [resolving, setResolving] = useState<PullRequest | null>(null)
-  const [pendingPRs, setPendingPRs] = useState<Record<number, 'accept' | 'decline'>>({})
-
+  const localMergeBusy = useMergeWindowStore(s => !!s.task && s.task.phase !== 'complete')
+  const openReview = usePRReviewStore(s => s.open)
+  const busyPR = usePRReviewStore(s => s.busy ? s.request?.pr.number : undefined)
+  const completed = usePRReviewStore(s => s.completed)
+  const pendingPRs = completed[repoPath] ?? {}
   const visiblePRs = React.useMemo(
-    () => prs.filter(pr => !pendingPRs[pr.number]),
-    [prs, pendingPRs],
+    () => prs.filter(pr => !completed[repoPath]?.[pr.number]),
+    [prs, completed, repoPath],
   )
 
   useEffect(() => {
-    setPendingPRs(prev => {
-      const active = new Set(prs.map(pr => pr.number))
-      const next: Record<number, 'accept' | 'decline'> = {}
-      Object.entries(prev).forEach(([prNumber, action]) => {
-        if (active.has(Number(prNumber))) next[Number(prNumber)] = action
-      })
-      return next
-    })
-  }, [prs])
+    if (!loading && !error) usePRReviewStore.getState().reconcile(repoPath, prs)
+  }, [repoPath, prs, loading, error])
 
   return (
     <>
-      {resolving && ghSlug && (
-        <ResolveDialog
-          pr={resolving}
-          ghSlug={ghSlug}
-          repoPath={repoPath}
-          onClose={() => setResolving(null)}
-          onDone={({ prNumber, action }) => {
-            setPendingPRs(prev => ({ ...prev, [prNumber]: action }))
-            onRefresh()
-          }}
-        />
-      )}
       <Card
         title="Pull Request Management"
         icon={<PRCardIcon />}
@@ -795,8 +547,10 @@ function AdminPRsCard({ prs, ghSlug, repoPath, loading, error, onRefresh }: {
                 </div>
                 <Btn
                   label="Resolve"
+                  disabled={localMergeBusy || busyPR !== undefined}
+                  disabledReason={busyPR !== undefined ? `Wait for PR #${busyPR} to finish.` : undefined}
                   color="#a27ef0"
-                  onClick={() => setResolving(pr)}
+                  onClick={() => ghSlug && openReview({ pr, ghSlug, repoPath })}
                 />
               </div>
             ))

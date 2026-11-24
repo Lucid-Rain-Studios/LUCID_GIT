@@ -1,7 +1,14 @@
+using System.Text;
 using UAssetAPI;
 using UAssetAPI.UnrealTypes;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+
+// The Electron worker pipes use UTF-8. Windows console code pages can rewrite
+// characters after JSON escaping, including turning smart quotes into delimiters.
+var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+Console.InputEncoding = utf8;
+Console.OutputEncoding = utf8;
 
 static JObject Extract(string file, bool packagesOnly)
 {

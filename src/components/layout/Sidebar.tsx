@@ -1,3 +1,4 @@
+import { isGitHubLockOwner } from '../../../electron/util/github-login'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useRepoStore } from '@/stores/repoStore'
 import { useAuthStore } from '@/stores/authStore'
@@ -120,10 +121,10 @@ function loadVisibility(): Record<string, string[]> {
 export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthChange, repoPath, onOpenTerminal, onOpenRepo, onOpenExplorer }: SidebarProps) {
   const { fileStatus, currentBranch, syncTick, prTick, unrealProject } = useRepoStore()
   const { accounts, currentAccountId } = useAuthStore()
-  const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login?.toLowerCase() ?? null
+  const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login ?? null
   const lockedFileCount = useLockStore(s =>
     currentLogin
-      ? s.locks.filter(lock => lock.owner.login.toLowerCase() === currentLogin).length
+      ? s.locks.filter(lock => isGitHubLockOwner(lock, currentLogin)).length
       : 0,
   )
   const isAdmin = useAuthStore(s => s.isAdmin(repoPath ?? ''))

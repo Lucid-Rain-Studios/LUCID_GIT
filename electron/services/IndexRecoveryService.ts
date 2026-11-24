@@ -267,14 +267,15 @@ export class IndexRecoveryService {
       d.gitVersion = await required(repo, ['--version'])
       const c = await context(repo)
       await blockers(c)
-      const status = await git(repo, ['status', '--porcelain=v1', '--ignore-submodules=all', '-z'])
+      // Read staging directly so recovery does not scan or hash worktree files.
+      const staged = await git(repo, ['ls-files', '--stage', '-z'])
       d.token = token(c)
       if (!c.bytes) {
         d.issue = 'missing'; d.summary = 'The staging index is missing'
-      } else if (status.exitCode && indexError.test(status.stderr + status.stdout)) {
+      } else if (staged.exitCode && indexError.test(staged.stderr + staged.stdout)) {
         d.issue = 'corrupt'; d.summary = 'Git cannot read the staging index'
-        d.detail = status.stderr.trim()
-      } else if (status.exitCode) throw new Error(status.stderr || status.stdout)
+        d.detail = staged.stderr.trim()
+      } else if (staged.exitCode) throw new Error(staged.stderr || staged.stdout)
       else if (checksumBad(c)) { d.issue = 'checksum'; d.summary = 'The index checksum is damaged' }
       else {
         d.issue = 'healthy'; d.summary = 'The staging index is readable and healthy'
@@ -352,7 +353,8 @@ export class IndexRecoveryService {
         await fs.rename(lockPath, c.index)
         installed = true
         try {
-          await required(repo, ['status', '--porcelain=v1', '--ignore-submodules=all', '-z'])
+          // Read the installed index with Git and compare its staging metadata
+          // to the validated candidate. A worktree status scan is independent.
           if (await fingerprint(c) !== j.fingerprint) throw new Error('Installed index verification failed.')
           const verified = await context(repo)
           if (verified.head !== c.head || verified.branch !== c.branch) throw new Error('HEAD or branch changed during verification.')
@@ -368,8 +370,8 @@ export class IndexRecoveryService {
           diagnosis: { repoPath: repo, issue: 'healthy', summary: 'Repair verified; Git can read the index', detail: '', gitVersion: diagnosis.gitVersion,
             canRepair: false, token: token({ ...c, bytes: candidateBytes }), canUndo: true, backupId: id, backupPath: folder },
           summary: diagnosis.issue === 'checksum'
-          ? 'Checksum repaired and staging preserved. Git status verified.'
-          : 'Index rebuilt and Git status verified. Working files and branches preserved; changes are now unstaged.' }
+          ? 'Index checksum repaired and verified. Staged changes were preserved.'
+          : 'Index rebuilt and verified. Changes can now be reviewed and staged again.' }
       } catch (e) {
         throw new Error(`${String(e)}\nRecovery backup folder: ${folder}`)
       } finally {

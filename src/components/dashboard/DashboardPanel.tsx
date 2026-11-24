@@ -1,3 +1,4 @@
+import { isGitHubLockOwner } from '../../../electron/util/github-login'
 import { useBlueprintFileMenu } from '@/lib/useBlueprintFileMenu'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { ipc, SyncStatus, Lock, FileStatus, PullRequest, PotentialMergeConflictReport } from '@/ipc'
@@ -803,8 +804,8 @@ function LocksCard({ locks, currentLogin, repoPath, unlockFile, isAdmin }: {
   const unlockFiles = useLockStore(s => s.unlockFiles)
   const dialog      = useDialogStore()
 
-  const myLocks   = locks.filter(l => currentLogin && l.owner.login === currentLogin)
-  const teamLocks = locks.filter(l => !currentLogin || l.owner.login !== currentLogin)
+  const myLocks   = locks.filter(l => isGitHubLockOwner(l, currentLogin))
+  const teamLocks = locks.filter(l => !isGitHubLockOwner(l, currentLogin))
   const needle    = query.trim().toLowerCase()
   const shown     = (tab === 'mine' ? myLocks : teamLocks)
     .filter(l => !needle || l.path.toLowerCase().includes(needle) || l.owner.login.toLowerCase().includes(needle))
@@ -888,7 +889,7 @@ function LocksCard({ locks, currentLogin, repoPath, unlockFile, isAdmin }: {
           </div>
         ) : (
           shown.map(lock => {
-            const isOwn     = currentLogin && lock.owner.login === currentLogin
+            const isOwn     = isGitHubLockOwner(lock, currentLogin)
             const color     = isOwn ? '#4a9eff' : '#7b8499'
             const isBusy    = unlocking === lock.path
             const canUnlock = isOwn || isAdmin

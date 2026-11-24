@@ -1,3 +1,4 @@
+import { isGitHubLockOwner } from '../../../electron/util/github-login'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ipc, Lock, CommitFileChange, PresenceFile } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
@@ -258,7 +259,7 @@ function Cell({
 
       {/* Lock dot (top-right) */}
       {node.lockList.length > 0 && r.w > 16 && r.h > 16 && (() => {
-        const isOwn = node.lockList.some(l => l.owner.login === currentLogin)
+        const isOwn = node.lockList.some(l => isGitHubLockOwner(l, currentLogin))
         return (
           <circle cx={r.x + r.w - 8} cy={r.y + 8} r={5}
             fill={isOwn ? '#2ec573' : '#f5a832'} fillOpacity={0.95} />
@@ -311,7 +312,7 @@ function Tooltip({
 
   const isDir = node.isDir
   const locksByOwner = node.lockList.reduce((acc, l) => {
-    const key = l.owner.login
+    const key = l.prOverlay ? `pr:${l.prOverlay.number}` : l.owner.login.toLowerCase()
     if (!acc.has(key)) acc.set(key, l)
     return acc
   }, new Map<string, Lock>())

@@ -150,12 +150,37 @@ test('Verification failure restores the original index automatically', async () 
   const dir = repo(), file = index(dir), s = new IndexRecoveryService()
   fs.writeFileSync(file, 'bad'); const d = await s.diagnose(dir)
   const real = runner.execSafe
-  runner.execSafe = async (args, root, env) => args.includes('status') && !env?.GIT_INDEX_FILE && fs.readFileSync(file, 'utf8') !== 'bad'
+  runner.execSafe = async (args, root, env) => args.includes('ls-files') && env?.GIT_INDEX_FILE && path.normalize(env.GIT_INDEX_FILE) === path.normalize(file)
     ? { exitCode: 128, stdout: '', stderr: 'injected verification failure' } : real(args, root, env)
   try { await expect(s.repair(dir, d.token)).rejects.toThrow('verification failure') }
   finally { runner.execSafe = real }
   expect(fs.readFileSync(file, 'utf8')).toBe('bad')
   expect(fs.existsSync(file + '.lock')).toBe(false)
+})
+
+test('Index recovery succeeds even when a worktree status scan would time out', async () => {
+  const dir = repo(), file = index(dir), s = new IndexRecoveryService()
+  const head = git(dir, 'rev-parse', 'HEAD')
+  const edit = Buffer.from([255, 0, 3])
+  const asset = path.join(dir, 'asset.bin')
+  const corrupt = Buffer.alloc(32)
+  fs.writeFileSync(asset, edit)
+  fs.writeFileSync(file, corrupt)
+
+  const real = runner.execSafe
+  runner.execSafe = async (args, ...rest) => {
+    if (args.includes('status')) throw new Error('Index recovery Git check timed out after 60s')
+    return real(args, ...rest)
+  }
+  try {
+    const result = await repair(s, dir)
+    expect(result.diagnosis).toMatchObject({ issue: 'healthy', canUndo: true })
+    expect(fs.readFileSync(path.join(result.backupPath, 'original-index'))).toEqual(corrupt)
+    expect(git(dir, 'ls-files', '--stage')).toContain('asset.bin')
+    expect(git(dir, 'rev-parse', 'HEAD')).toBe(head)
+    expect(fs.readFileSync(asset)).toEqual(edit)
+    expect(await s.diagnose(dir)).toMatchObject({ issue: 'healthy', canUndo: true })
+  } finally { runner.execSafe = real }
 })
 
 test('Automatic worktree recovery and Undo never touch the parent index', async () => {

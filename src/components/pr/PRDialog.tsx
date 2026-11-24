@@ -1,3 +1,4 @@
+import { isGitHubLockOwner } from '../../../electron/util/github-login'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BranchDiffCommit, ipc } from '@/ipc'
 import { usePRStore } from '@/stores/prStore'
@@ -288,7 +289,7 @@ export function PRDialog() {
       // Associate currently-locked files with this PR so we can prompt to unlock on merge
       if (repoPath) {
         const myLockedFiles = locks
-          .filter(l => l.owner.login === currentLogin)
+          .filter(l => isGitHubLockOwner(l, currentLogin))
           .map(l => l.path)
         ipc.prMonitorRecord(repoPath, res.number, owner, repo, myLockedFiles, title.trim()).catch(() => {})
       }

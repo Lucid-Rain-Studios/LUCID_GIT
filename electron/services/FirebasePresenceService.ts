@@ -1,3 +1,4 @@
+import { sameGitHubLogin } from '../util/github-login'
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -196,7 +197,7 @@ export class FirebasePresenceService {
     const config = this.load(repoPath)
     if (!config?.enabled) return Promise.resolve()
     const identity = this.identity()
-    if (!identity || identity.login !== entry.login) return Promise.resolve()
+    if (!identity || !sameGitHubLogin(identity.login, entry.login)) return Promise.resolve()
     const key = this.key(config, identity)
     const job = async () => {
       const credential = await this.authenticate(config, identity)

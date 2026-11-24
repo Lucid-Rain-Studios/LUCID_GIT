@@ -137,7 +137,7 @@ test('real Git LFS unlocks 40 locks concurrently without corrupting cache or cha
 })
 
 test('Locked Files keeps live progress, all failures and completed results visible', async () => {
-  const locks = targets(3).map(target => ({ id: target.lockId, path: target.filePath, owner: { login: 'me', name: 'me' }, lockedAt: new Date().toISOString() }))
+  const locks = targets(3).map(target => ({ id: target.lockId, path: target.filePath, owner: { login: 'Me', name: 'Me' }, lockedAt: new Date().toISOString() }))
   let resolve, fail = false
   const op = { steps: [], start() { this.steps = [] }, finish() {} }
   const state = { locks, loadLocks() {}, unlockFiles: () => fail ? Promise.reject(Error('offline')) : new Promise(r => { resolve = r }) }

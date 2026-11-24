@@ -1,12 +1,11 @@
 import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { ErrorPanel } from '/src/components/errors/ErrorPanel'
-import { MergePreviewDialog } from '/src/components/merge/MergePreviewDialog'
-import { GlobalDialogs } from '/src/components/ui/GlobalDialogs'
-import { useErrorStore } from '/src/stores/errorStore'
-import { useRepoStore } from '/src/stores/repoStore'
-import { useDialogStore } from '/src/stores/dialogStore'
-import '/src/index.css'
+import { ErrorPanel } from '@/components/errors/ErrorPanel'
+import { MergePreviewDialog } from '@/components/merge/MergePreviewDialog'
+import { GlobalDialogs } from '@/components/ui/GlobalDialogs'
+import { useErrorStore } from '@/stores/errorStore'
+import { useRepoStore } from '@/stores/repoStore'
+import { useDialogStore } from '@/stores/dialogStore'
 
 const warning = () => useErrorStore.getState().pushRaw('CONFLICT (content): Merge conflict in Content/Asset.uasset', 'test-repo')
 window.showWarning = warning

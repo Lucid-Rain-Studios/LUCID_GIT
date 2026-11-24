@@ -17,7 +17,7 @@ class WatcherService {
   private timers = new Map<string, ReturnType<typeof setTimeout>>()
   private sessions = new Map<string, object>()
 
-  async watch(repoPath: string, onChange: () => void): Promise<void> {
+  async watch(repoPath: string, onChange: () => void, isWriting = () => false): Promise<void> {
     this.unwatch(repoPath)
     const session = {}
     this.sessions.set(repoPath, session)
@@ -52,12 +52,12 @@ class WatcherService {
       try { localGitDir = path.relative(realpathSync.native(gitDir), realpathSync.native(path.join(repoPath, '.git'))) === '' }
       catch { /* Uncertain paths retain conservative worktree-pointer handling. */ }
     }
-    const trackedDirectories = new Set<string>()
+    let trackedDirectories: Set<string> | undefined
     const refreshDirectories = () => {
+      if (!trackedDirectories) return
       trackedDirectories.clear()
       for (const file of tracked) { const parts = file.split('/'); for (let i = 1; i < parts.length; i++) trackedDirectories.add(parts.slice(0, i).join('/')) }
     }
-    refreshDirectories()
     const relevant = (relative: string) => {
       const file = relative.replace(/\\/g, '/')
       // A dedicated metadata watcher owns these events, including linked worktrees.
@@ -68,20 +68,30 @@ class WatcherService {
     // What the debounce window collected, so the status log can say which change
     // led to a refresh and how many events one refresh stood in for.
     let firstFile = '', pendingEvents = 0
+    let rebuildTracked = false
+    const deliver = () => {
+      this.timers.delete(repoPath)
+      if (!current()) return
+      if (isWriting()) {
+        this.timers.set(repoPath, setTimeout(deliver, performanceService.get().watcherDelayMs))
+        return
+      }
+      if (rebuildTracked) {
+        rebuildTracked = false
+        void refreshTracked().then(refreshDirectories).catch(error => logService.warn('watcher.tracked', String(error)))
+      }
+      noteWatcherFire(repoPath, firstFile, pendingEvents)
+      firstFile = ''
+      pendingEvents = 0
+      onChange()
+    }
     const fire = (refreshIndex = false, file = '') => {
       if (!current()) return
-      if (refreshIndex) void refreshTracked().then(refreshDirectories).catch(error => logService.warn('watcher.tracked', String(error)))
+      rebuildTracked ||= refreshIndex
       if (pendingEvents++ === 0) firstFile = file
       const previous = this.timers.get(repoPath)
       if (previous) clearTimeout(previous)
-      this.timers.set(repoPath, setTimeout(() => {
-        this.timers.delete(repoPath)
-        if (!current()) return
-        noteWatcherFire(repoPath, firstFile, pendingEvents)
-        firstFile = ''
-        pendingEvents = 0
-        onChange()
-      }, performanceService.get().watcherDelayMs))
+      this.timers.set(repoPath, setTimeout(deliver, performanceService.get().watcherDelayMs))
     }
     let indexTimer: ReturnType<typeof setTimeout> | undefined
     const verifyIndex = () => {
@@ -90,6 +100,7 @@ class WatcherService {
       indexTimer = setTimeout(() => {
         indexTimer = undefined
         if (!current()) return
+        if (isWriting()) { fire(true, '[index during write]'); return }
         // A later index event must get a new snapshot, not join a read that
         // may already have observed the previous index.
         if (loadingTracked) { void loadingTracked.then(verifyIndex, verifyIndex); return }
@@ -122,6 +133,10 @@ class WatcherService {
           return
         } catch (error) { logService.warn('watcher', 'Native watch unavailable: ' + String(error)) }
       }
+      if (!metadata && !trackedDirectories) {
+        trackedDirectories = new Set<string>()
+        refreshDirectories()
+      }
       const watcher = chokidar.watch(root, {
         ignoreInitial: true, awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 100 },
         ignored: (absolute: string) => {
@@ -130,7 +145,7 @@ class WatcherService {
           if (metadata) return !metadataRelevant(file) && file !== 'refs'
           if (file === '.git') return localGitDir
           if (file.startsWith('.git/')) return true
-          return IGNORED_SEGMENTS.test(file) && !tracked.has(file) && !trackedDirectories.has(file)
+          return IGNORED_SEGMENTS.test(file) && !tracked.has(file) && !trackedDirectories?.has(file)
         },
       })
       watcher.on('all', (_event, absolute) => { const file = path.relative(root, absolute); if (metadata && file === 'index') { verifyIndex(); return }; if (accepts(file)) fire(/(?:^|[\\/])index$/.test(file), label(file)) }).on('error', onError)

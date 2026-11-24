@@ -78,8 +78,35 @@ test('LG-029 batch eligibility rejects foreign LFS locks and avoids lock request
   attrs = 'asset.uasset\0filter\0lfs\0text.txt\0filter\0unspecified\0'
   await expect(lockService.assertStageAllowed('repo', ['asset.uasset', 'text.txt'])).rejects.toThrow('Other')
   expect(checks).toBe(2); expect(lists).toBe(1)
-  const { canStagePath } = component('src/lib/staging.ts').exports
+  const ownLock = { id: 'own', path: 'asset.uasset', owner: { login: 'Me', name: 'Me' } }
+  lockService.listLocks = async () => [ownLock]
+  await lockService.assertStageAllowed('repo', ['asset.uasset', 'text.txt'])
+  const { canStagePath, createStageGuard } = component('src/lib/staging.ts').exports
   expect(canStagePath('asset.uasset', [{ path: 'asset.uasset', owner: { login: 'other' } }], 'me')).toBe(false)
+  expect(canStagePath('asset.uasset', [ownLock], 'me')).toBe(true)
+  expect(createStageGuard([ownLock], 'me')('asset.uasset')).toBe(true)
+  expect(createStageGuard([ownLock], null)('asset.uasset')).toBe(false)
+  const overlay = { ...ownLock, id: 'ghost-pr-1-asset', prOverlay: { number: 1 } }
+  expect(canStagePath('asset.uasset', [overlay], 'me')).toBe(false)
+  expect(createStageGuard([overlay], 'me')('asset.uasset')).toBe(false)
+})
+
+test('folder unlock targets owned locks regardless of login casing and skips other owners and folders', async () => {
+  const { lockService } = component('electron/services/LockService.ts', {
+    './AuthService': { authService: { listAccounts: () => ({ currentAccountId: 'me', accounts: [{ userId: 'me', login: 'me' }] }) } },
+  }).exports
+  lockService.listLocks = async () => [
+    { id: '1', path: 'Maps/Harbour.umap', owner: { login: 'Me' } },
+    { id: '2', path: 'Maps/Other.umap', owner: { login: 'Other' } },
+    { id: '3', path: 'Maps2/Another.umap', owner: { login: 'ME' } },
+  ]
+  const targets = []
+  lockService.unlockFiles = async (_, batch) => {
+    targets.push(...batch)
+    return { unlocked: batch.map(target => target.filePath), failed: [] }
+  }
+  expect(await lockService.unlockFolderMine('repo', 'Maps')).toEqual({ unlocked: 1, failed: 0 })
+  expect(targets).toEqual([{ filePath: 'Maps/Harbour.umap', lockId: '1' }])
 })
 
 test('LG-038 lock polling reports failure without inventing removals or unlock notifications', async () => {
@@ -134,14 +161,15 @@ test('LG-049 failed closure follow-up remains pending and concurrent retries not
     './NotificationService': { notificationService }, './DesktopNotificationService': { desktopNotificationService: { notify: n => desktop.push(n) } },
     './AuthService': { authService: { getCurrentToken: async () => 'token', listAccounts: () => ({ currentAccountId: '1', accounts: [{ userId: '1', login: 'me' }] }) } },
     './GitHubService': { gitHubService: { getPRStatus: async () => ({ state: 'closed', merged: true, title: 'PR' }) } },
-    './GitService': { gitService: { status: async () => { if (failed) throw Error('unknown status'); return [] } } },
-    './LockService': { lockService: { listLocks: async () => [{ id: '1', path: 'asset', owner: { login: 'me' } }] } },
+    './GitService': { gitService: { cachedStatus: async () => { if (failed) throw Error('unknown status'); return [] } } },
+    './LockService': { lockService: { listLocks: async () => [{ id: '1', path: 'asset', owner: { login: 'Me' } }] } },
   }).exports
   service.recordPR('repo', 12, 'o', 'r', ['asset'], 'PR'); await service.check('repo', { owner: 'o', repo: 'r' })
   const file = path.join(dir, 'prMonitor-' + crypto.createHash('md5').update('repo').digest('hex').slice(0,8) + '.json')
   expect(JSON.parse(fs.readFileSync(file)).trackedPRs['12']).toMatchObject({ state: 'closed-merged', followupPending: true }); expect(emitted).toEqual([])
   failed = false; await Promise.all([service.check('repo', { owner: 'o', repo: 'r' }), service.check('repo', { owner: 'o', repo: 'r' })])
   expect(emitted).toHaveLength(1); expect(desktop).toHaveLength(1); expect(notificationService.list('repo')).toHaveLength(1)
+  expect(emitted[0].meta.availableToUnlock).toEqual(['asset'])
   expect(JSON.parse(fs.readFileSync(file)).trackedPRs['12'].followupPending).toBe(false)
 })
 

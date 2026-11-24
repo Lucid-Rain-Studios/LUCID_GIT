@@ -1,26 +1,32 @@
 const { test, expect } = require('@playwright/test')
 const { chromium } = require('playwright')
 const fs = require('fs')
-let server, browser, page, url
+const path = require('path')
+const root = path.resolve(__dirname, '..')
+let browser, page, bundle, css
 test.setTimeout(30_000)
 
 test.beforeAll(async () => {
-  const { createServer } = await import('vite')
-  server = await createServer({
-    server: { host: '127.0.0.1', port: 0, strictPort: false },
-    optimizeDeps: { entries: ['tests/fixtures/error-panel.html'] },
+  const result = await require('esbuild').build({
+    absWorkingDir: root, bundle: true, write: false, outdir: 'fixture', jsx: 'automatic',
+    entryPoints: ['tests/fixtures/error-panel.jsx'], alias: { '@': path.join(root, 'src') },
   })
-  await server.listen()
-  url = `http://127.0.0.1:${server.httpServer.address().port}/tests/fixtures/error-panel.html`
+  bundle = result.outputFiles.find(file => file.path.endsWith('.js')).text
+  const source = path.join(root, 'src/index.css')
+  css = (await require('postcss')([require('tailwindcss')(require('../tailwind.config'))])
+    .process(fs.readFileSync(source, 'utf8'), { from: source })).css
+  css += result.outputFiles.find(file => file.path.endsWith('.css'))?.text ?? ''
   browser = await chromium.launch(fs.existsSync(chromium.executablePath()) ? {} : { channel: 'msedge' })
 })
 test.beforeEach(async () => {
   page = await browser.newPage()
   page.on('pageerror', error => console.error('Fixture error:', error.message))
-  await page.goto(url)
+  await page.setContent(fs.readFileSync(path.join(__dirname, 'fixtures/error-panel.html'), 'utf8'))
+  await page.addStyleTag({ content: css })
+  await page.addScriptTag({ content: bundle })
 })
 test.afterEach(async () => { await page?.close() })
-test.afterAll(async () => { await browser?.close(); await server?.close() })
+test.afterAll(async () => { await browser?.close() })
 
 test('warning Close is clickable over a merge dialog and restores the merge controls', async () => {
   await page.setViewportSize({ width: 768, height: 486 })

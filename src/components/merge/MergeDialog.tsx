@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { ipc, BranchDiffSummary, ConflictPreviewFile, FileStatus } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
 import { useOperationStore } from '@/stores/operationStore'
+import type { MergeWindowProgress } from '../../../electron/mergeWindowTypes'
 import { cn } from '@/lib/utils'
 import { FilePathText } from '@/components/ui/FilePathText'
 import { ActionBtn } from '@/components/ui/ActionBtn'
@@ -118,9 +119,36 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged, standalone
   // auto-resolved everything but stopped before committing. In that case the
   // user just needs to finalize; there are no per-file choices required.
   const canFinalizeWithoutChoices = inConflictResolution && unresolvedFiles.length === 0
+  const stage = useRef('')
+  const report = (phase: MergeWindowProgress['phase'], message: string, hide = false, error?: string) =>
+    standalone ? ipc.reportMergeWindowProgress({ phase, stage: message, error }, hide) : Promise.resolve()
+  const startTask = async (message: string) => {
+    stage.current = message
+    await report('running', message, true)
+  }
+  const runStep = async <T,>(message: string, action: () => Promise<T>) => {
+    if (stage.current !== message) {
+      stage.current = message
+      await report('running', message)
+    }
+    return opRun(message, action)
+  }
+  const finishTask = (message: string, autoDismiss = false) =>
+    standalone ? ipc.reportMergeWindowProgress({ phase: 'complete', stage: message, autoDismiss }) : Promise.resolve()
+  const pauseTask = async (message: string, error?: string) => {
+    try {
+      await report('attention', message, false, error)
+    } finally {
+      busy.current = false
+      setMerging(false)
+    }
+  }
   const closeRequest = useRef(() => {})
   closeRequest.current = () => {
-    if (busy.current) return
+    if (busy.current) {
+      if (standalone) void ipc.reportMergeWindowProgress(null, true)
+      return
+    }
     if (onRequestClose) void onRequestClose(inConflictResolution)
     else onClose()
   }
@@ -184,8 +212,11 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged, standalone
     setMerging(true)
     setError(null)
     try {
-      await opRun(`Merging ${targetBranch}…`, () => ipc.merge(repoPath, targetBranch))
+      const message = `Merging ${targetBranch}…`
+      await startTask(message)
+      await runStep(message, () => ipc.merge(repoPath, targetBranch))
       if (!standalone) { await refreshStatus(); bumpSyncTick() }
+      await finishTask('Merge complete', true)
       onMerged()
       onClose()
     } catch (e) {
@@ -215,8 +246,7 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged, standalone
       } else {
         setError(msg)
       }
-      setMerging(false)
-      busy.current = false
+      await pauseTask('Merge needs attention', msg)
     }
   }
 
@@ -230,21 +260,22 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged, standalone
     setMerging(true)
     setError(null)
     try {
+      await startTask(isRealMerge ? 'Completing merge…' : 'Applying choices…')
       for (const c of conflicts) {
         const choice = preselectedChoices[c.path]
         if (!choice) continue
-        await opRun(`Resolving ${c.path}…`, () => ipc.mergeResolveText(repoPath, c.path, choice))
+        await runStep(`Resolving ${c.path}…`, () => ipc.mergeResolveText(repoPath, c.path, choice))
       }
-      await opRun(isRealMerge ? 'Finalizing merge...' : 'Applying choices...',
+      await runStep(isRealMerge ? 'Finalizing merge...' : 'Applying choices...',
         () => ipc.mergeContinue(repoPath, displayMergeBranch))
       if (!standalone) { await refreshStatus(); bumpSyncTick() }
+      await finishTask(isRealMerge ? 'Merge complete' : 'Choices applied', isRealMerge)
       onMerged()
       onClose()
     } catch (e) {
       if (String(e).includes('Merge completion blocked:')) setBlockingReason(String(e))
       else setError(String(e))
-      setMerging(false)
-      busy.current = false
+      await pauseTask('Merge needs attention', String(e))
     }
   }
 
@@ -254,13 +285,14 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged, standalone
     setMerging(true)
     try {
       setError(null)
-      await opRun('Aborting merge...', () => ipc.mergeAbort(repoPath))
+      await startTask('Aborting merge…')
+      await runStep('Aborting merge…', () => ipc.mergeAbort(repoPath))
       if (!standalone) { await refreshStatus(); bumpSyncTick() }
+      await finishTask('Merge aborted')
       onClose()
     } catch (e) {
       setError(String(e))
-      busy.current = false
-      setMerging(false)
+      await pauseTask('Merge needs attention', String(e))
     }
   }
 
@@ -272,8 +304,10 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged, standalone
     setMerging(true)
     try {
       setError(null)
-      await opRun('Aborting merge and retrying update…', () => ipc.mergeAbortRetryUpdate(repoPath))
+      await startTask('Aborting merge and retrying update…')
+      await runStep('Aborting merge and retrying update…', () => ipc.mergeAbortRetryUpdate(repoPath))
       if (!standalone) { await refreshStatus(); bumpSyncTick() }
+      await finishTask('Update complete', true)
       onMerged()
       onClose()
     } catch (e) {
@@ -289,12 +323,11 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged, standalone
         // blocked merge is already explained by the recovery banner.
         setError(pending.blockingReason || pending.conflicts.length ? null : msg)
       } else setError(msg)
-      setMerging(false)
-      busy.current = false
+      await pauseTask('Merge needs attention', String(e))
     }
   }
 
-  const overlayDismiss = useDialogOverlayDismiss(() => closeRequest.current(), !merging && (standalone || !inConflictResolution), 'Merge')
+  const overlayDismiss = useDialogOverlayDismiss(() => closeRequest.current(), standalone || (!merging && !inConflictResolution), 'Merge')
 
   return (
     /* Backdrop */
@@ -318,8 +351,8 @@ export function MergePreviewDialog({ targetBranch, onClose, onMerged, standalone
           </div>
           <button
             onClick={standalone ? () => closeRequest.current() : inConflictResolution ? abortMerge : onClose}
-            disabled={merging}
-            aria-label="Close Merge"
+            disabled={merging && !standalone}
+            aria-label={standalone && merging ? 'Hide progress' : 'Close Merge'}
             className="text-lg-text-secondary hover:text-lg-text-primary text-lg font-mono leading-none"
           >
             ×

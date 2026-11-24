@@ -1,3 +1,4 @@
+import { isGitHubLockOwner } from '../util/github-login'
 import path from 'path'
 import { app, ipcMain, dialog, shell, BrowserWindow, powerMonitor, type IpcMainInvokeEvent } from 'electron'
 import { permissionService } from '../services/PermissionService'
@@ -254,15 +255,18 @@ async function requirePresenceAdmin(repoPath: string): Promise<string | null> {
   return accountId
 }
 
-export function registerHandlers(): void {
+export function registerHandlers(blocksMergeWrite?: (sender: Electron.WebContents, repoPath: string) => boolean): void {
   const blueprintReads = new Map<string, AbortController>()
   const handle = <TArgs extends unknown[]>(channel: string, fn: IpcHandler<TArgs>): void => {
     ipcMain.handle(channel, async (event, ...args) => {
       if (ipcShuttingDown) throw new Error('Lucid Git is shutting down. App action was cancelled.')
+      const repoPath = EXCLUSIVE_CHANNELS.has(channel) ? repoArgOf(args) : null
+      if (repoPath !== null && blocksMergeWrite?.(event.sender, repoPath)) {
+        throw new Error('Finish or review the local merge before changing this repository.')
+      }
       const callId = nextIpcCallId++
       const calledAt = Date.now()
       inFlightIpc.set(callId, { channel, startedAt: calledAt })
-      const repoPath = EXCLUSIVE_CHANNELS.has(channel) ? repoArgOf(args) : null
       const trailed = EXCLUSIVE_CHANNELS.has(channel) || PROGRESS_CHANNELS.has(channel)
       const trailRepo = repoPath ?? (PROGRESS_CHANNELS.has(channel) ? repoArgOf(args) : null)
       let startedWork = calledAt
@@ -458,7 +462,7 @@ export function registerHandlers(): void {
 
   handle(CHANNELS.GIT_PUSH, async (event, repoPath: string, force?: boolean, lockOverride?: import('../pushTypes').PushLockOverride) => {
     if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, { id: 'push-prepare', label: 'Preparing push', status: 'running', progress: 3 })
-    const { branch, filesAhead } = await gitService.push(repoPath, (step) => {
+    const { branch, filesAhead, unlockScanError } = await gitService.push(repoPath, (step) => {
       if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.EVT_OPERATION_PROGRESS, step)
     }, force === true, lockOverride)
     const reportUnlockFailure = (detail: string) => {
@@ -469,16 +473,18 @@ export function registerHandlers(): void {
       } catch (error) { logService.error('push.unlock-notice', String(error)) }
     }
 
-    if (!lockOverride && filesAhead.length > 0) {
+    if (!lockOverride && (filesAhead.length > 0 || unlockScanError)) {
       try {
         const defaultBranch = await gitService.defaultBranch(repoPath)
-        if (branch.trim() === defaultBranch) {
+        if (branch.trim() === defaultBranch && unlockScanError) {
+          reportUnlockFailure(unlockScanError)
+        } else if (branch.trim() === defaultBranch) {
           const { accounts, currentAccountId } = authService.listAccounts()
           const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login
           if (currentLogin) {
             const locks = await lockService.listLocks(repoPath)
             const pushedFiles = new Set(filesAhead)
-            const candidates = locks.filter(lock => lock.owner.login === currentLogin && pushedFiles.has(lock.path))
+            const candidates = locks.filter(lock => isGitHubLockOwner(lock, currentLogin) && pushedFiles.has(lock.path))
             const dirty = new Set((await gitService.statusPaths(repoPath, candidates.map(lock => lock.path)))
               .flatMap(file => file.originalPath ? [file.path, file.originalPath] : [file.path]))
             const result = await lockService.unlockFiles(
@@ -1138,11 +1144,11 @@ export function registerHandlers(): void {
     runGitOp('Cherry-pick', () => gitService.cherryPick(repoPath, hash, noCommit))
   )
 
-  handle(CHANNELS.GIT_CHERRY_PICK_IN_PROGRESS, async (_event, repoPath: string) => {
+  handle(CHANNELS.GIT_CHERRY_PICK_IN_PROGRESS, async (_event, repoPath: string, includeConflictDetails = true) => {
     return withRepoSlot(repoPath, 'read', async () => {
       const state = await gitService.cherryPickInProgress(repoPath)
       if (!state) return null
-      const conflicts = await gitService.listInProgressCherryPickConflicts(repoPath)
+      const conflicts = includeConflictDetails ? await gitService.listInProgressCherryPickConflicts(repoPath) : []
       return { ...state, conflicts }
     })
   })
@@ -1235,7 +1241,7 @@ export function registerHandlers(): void {
       if (win && !win.isDestroyed()) {
         win.webContents.send(CHANNELS.EVT_STATUS_CHANGED)
       }
-    })
+    }, () => repoSlotState(repoPath).activeWrite)
   })
 
   handle(CHANNELS.GIT_UNWATCH_STATUS, (_event, repoPath: string) => {
@@ -1451,7 +1457,7 @@ export function registerHandlers(): void {
           const prFileSet = new Set(prFiles)
           await Promise.allSettled(
             currentLocks
-              .filter(lock => prFileSet.has(lock.path) && lock.owner.login === currentLogin)
+              .filter(lock => prFileSet.has(lock.path) && isGitHubLockOwner(lock, currentLogin))
               .map(lock => lockService.unlockFile(args.repoPath, lock.path, false, lock.id))
           )
         } catch {

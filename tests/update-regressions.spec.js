@@ -17,6 +17,15 @@ function presenceFile() {
   return { repo, file: path.join(repo, '.lucid-git/lucid-presence.json') }
 }
 
+test('local presence updates the same teammate after a GitHub login casing change', () => {
+  const { repo, file } = presenceFile()
+  const bob = { ...entry, login: 'bob', name: 'Bob' }
+  fs.writeFileSync(file, JSON.stringify({ entries: { alice: entry, bob } }))
+  const updated = { ...entry, login: 'Alice', status: 'away' }
+  presenceService.update(repo, 'Alice', updated)
+  expect(presenceService.read(repo).entries).toEqual({ Alice: updated, bob })
+})
+
 test('legacy versionless presence migrates without losing entries or the original backup', () => {
   const { repo, file } = presenceFile()
   const original = JSON.stringify({ entries: { alice: entry } })

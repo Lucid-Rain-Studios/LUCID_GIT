@@ -203,15 +203,17 @@ test('indicator sizing matches navbar icon controls across appearance settings a
       }
     }
   }
-  await warning.hover(); await expect(page.getByRole('tooltip')).toBeVisible()
+  const warningTooltip = page.getByRole('tooltip').filter({ hasText: 'Click to refresh repository data.' })
+  const errorTooltip = page.getByRole('tooltip').filter({ hasText: 'Click to view error details and recovery options.' })
+  await warning.hover(); await expect(warningTooltip).toBeVisible()
   await page.screenshot({ path: test.info().outputPath('navbar-indicator-sizing.png') })
   await page.evaluate(() => window.store.setState({ error: null }))
   await expect(warning).toHaveCount(0); await expect(error).toBeVisible()
-  await expect(page.getByRole('tooltip')).toHaveCount(0)
-  await error.hover(); await expect(page.getByRole('tooltip')).toBeVisible()
+  await expect(warningTooltip).toHaveCount(0)
+  await error.hover(); await expect(errorTooltip).toBeVisible()
   await page.evaluate(async healthy => { window.result = healthy; await window.api.lfsLocksCheck('C:/repo') }, healthy)
   await expect(error).toHaveCount(0); await expect(warning).toHaveCount(0)
-  await expect(page.getByRole('tooltip')).toHaveCount(0)
+  await expect(errorTooltip).toHaveCount(0)
   expect((await fetch.boundingBox()).x).toBe(originalX)
   expect(await page.evaluate(() => window.calls)).toEqual([['check', 'C:/repo'], ['check', 'C:/repo']])
   await page.close()

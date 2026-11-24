@@ -8,6 +8,14 @@ const api = {
     ipcRenderer.invoke(CHANNELS.MERGE_WINDOW_OPEN, context),
   mergeWindowContext: (): Promise<import('./mergeWindowTypes').MergeWindowContext> =>
     ipcRenderer.invoke(CHANNELS.MERGE_WINDOW_CONTEXT),
+  reportMergeWindowProgress: (progress: import('./mergeWindowTypes').MergeWindowProgress | null, hide = false): Promise<void> =>
+    ipcRenderer.invoke(CHANNELS.MERGE_WINDOW_PROGRESS, progress, hide),
+  showMergeWindow: (): Promise<void> => ipcRenderer.invoke(CHANNELS.MERGE_WINDOW_SHOW),
+  onMergeWindowProgress: (cb: (progress: import('./mergeWindowTypes').MergeWindowProgress | null, context: import('./mergeWindowTypes').MergeWindowContext) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, progress: import('./mergeWindowTypes').MergeWindowProgress | null, context: import('./mergeWindowTypes').MergeWindowContext) => cb(progress, context)
+    ipcRenderer.on(CHANNELS.EVT_MERGE_WINDOW_PROGRESS, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.EVT_MERGE_WINDOW_PROGRESS, handler)
+  },
   closeMergeWindow: (): Promise<void> => ipcRenderer.invoke(CHANNELS.MERGE_WINDOW_CLOSE),
   onMergeWindowCloseRequest: (cb: () => void) => {
     const handler = () => cb()
@@ -329,8 +337,8 @@ const api = {
     ipcRenderer.invoke(CHANNELS.GIT_REVERT, repoPath, hash, noCommit),
   gitCherryPick: (repoPath: string, hash: string, noCommit?: boolean) =>
     ipcRenderer.invoke(CHANNELS.GIT_CHERRY_PICK, repoPath, hash, noCommit),
-  cherryPickInProgress: (repoPath: string) =>
-    ipcRenderer.invoke(CHANNELS.GIT_CHERRY_PICK_IN_PROGRESS, repoPath),
+  cherryPickInProgress: (repoPath: string, includeConflictDetails = true) =>
+    ipcRenderer.invoke(CHANNELS.GIT_CHERRY_PICK_IN_PROGRESS, repoPath, includeConflictDetails),
   cherryPickContinue: (repoPath: string) =>
     ipcRenderer.invoke(CHANNELS.GIT_CHERRY_PICK_CONTINUE, repoPath),
   cherryPickAbort: (repoPath: string) =>

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { FileStatus, BranchInfo, UEProject } from '@/ipc'
+import { ipc, FileStatus, BranchInfo, UEProject } from '@/ipc'
 import { useOperationStore } from './operationStore'
 
 const RECENT_REPOS_KEY = 'lucid-git:recent-repos'
@@ -274,7 +274,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
     const generation = repoGeneration
     await op.run(`Switching to ${branch}…`, async () => {
       if (generation !== repoGeneration || get().repoPath !== repoPath) return
-      await window.lucidGit.checkout(repoPath, branch)
+      await ipc.checkout(repoPath, branch)
       if (generation !== repoGeneration || get().repoPath !== repoPath) return
       void get().refreshUnrealProject()
       const request = ++statusRequest

@@ -14,6 +14,8 @@
     "dev": "tsc -p tsconfig.main.json && concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "build": "tsc --noEmit && tsc -p tsconfig.main.json && vite build",
     "test": "tsc -p tsconfig.main.json && playwright test",
+    "test:unit": "playwright test tests/unit/ tests/pr-review-store.spec.js",
+    "test:ui": "tsc -p tsconfig.main.json && playwright test tests/pr-review.spec.js tests/push-locks-ui.spec.js tests/repository-refresh-warning.spec.js tests/repository-error-indicator.spec.js tests/index-recovery-ui.spec.js tests/lock-cache-recovery-ui.spec.js tests/error-panel-modal.spec.js",
     "test:stash-safety": "tsc -p tsconfig.main.json && playwright test tests/stash-performance.spec.js tests/stash-lock.spec.js tests/stash-conflict.spec.js tests/git-read-performance.spec.js tests/usecase-workflows.spec.js --workers=1",
     "test:pull-safety": "tsc -p tsconfig.main.json && playwright test tests/pull-safety-matrix.spec.js tests/pull-staged-preflight.spec.js tests/pull-local-changes.spec.js tests/sync-performance.spec.js tests/git-read-performance.spec.js --workers=1",
     "package": "npm run blueprint:publish && npm run build && electron-builder",

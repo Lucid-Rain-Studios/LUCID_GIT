@@ -9,6 +9,7 @@ interface AppCheckboxProps {
   showHoverDash?: boolean
   className?: string
   indeterminate?: boolean
+  label?: string
 }
 
 export function AppCheckbox({
@@ -20,6 +21,7 @@ export function AppCheckbox({
   showHoverDash = false,
   className,
   indeterminate = false,
+  label,
 }: AppCheckboxProps) {
   const [hover, setHover] = useState(false)
 
@@ -27,6 +29,7 @@ export function AppCheckbox({
     <button
       type="button"
       role="checkbox"
+      aria-label={label}
       aria-checked={indeterminate ? "mixed" : checked}
       disabled={disabled}
       onClick={e => {

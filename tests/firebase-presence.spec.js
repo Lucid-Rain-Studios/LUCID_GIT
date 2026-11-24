@@ -72,7 +72,7 @@ function client(db, login, device) {
 
 test('two clones publish and admin reads one shared roster; members cannot read it', async () => {
  const db = database(), admin = client(db, 'admin', 'desktop-a'), member = client(db, 'member', 'desktop-b')
- await Promise.all([admin.service.publish(admin.repo, entry('admin')), member.service.publish(member.repo, entry('member', 'away'))])
+ await Promise.all([admin.service.publish(admin.repo, entry('admin')), member.service.publish(member.repo, entry('Member', 'away'))])
  const shared = await admin.service.read(config)
  expect(shared.source).toBe('firebase'); expect(shared.entries['uid-admin'].status).toBe('active'); expect(shared.entries['uid-member'].status).toBe('away')
  await expect(member.service.read(config)).rejects.toThrow('denied access')

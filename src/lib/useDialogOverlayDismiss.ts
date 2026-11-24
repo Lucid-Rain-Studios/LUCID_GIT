@@ -26,13 +26,13 @@ function isolateTopDialog() {
   }
 }
 
-export function useDialogOverlayDismiss(onDismiss: () => void, enabled = true, label = 'Dialog') {
+export function useDialogOverlayDismiss(onDismiss: () => void, enabled = true, label = 'Dialog', active = true) {
   const ref = useRef<HTMLDivElement>(null)
   const latest = useRef({ onDismiss, enabled })
   latest.current = { onDismiss, enabled }
   useEffect(() => {
     const root = ref.current
-    if (!root) return
+    if (!root || !active) return
     const previous = document.activeElement as HTMLElement | null
     const previousZIndex = root.style.zIndex
     dialogs.push(root)
@@ -72,7 +72,7 @@ export function useDialogOverlayDismiss(onDismiss: () => void, enabled = true, l
       isolateTopDialog()
       if (wasTop && previous?.isConnected && !previous.closest('[inert]')) previous.focus()
     }
-  }, [])
+  }, [active])
   const downOnOverlay = useRef(false)
   return {
     ref, role: 'dialog' as const, 'aria-modal': true as const, 'aria-label': label, tabIndex: -1,

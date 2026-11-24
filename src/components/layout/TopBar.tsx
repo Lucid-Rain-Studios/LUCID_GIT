@@ -1,3 +1,6 @@
+import { useBackgroundRepoTaskStore } from '@/stores/backgroundRepoTaskStore'
+import { useMergeWindowStore } from '@/stores/mergeWindowStore'
+import { usePRReviewStore } from '@/stores/prReviewStore'
 import { useDialogOverlayDismiss } from '@/lib/useDialogOverlayDismiss'
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import lucidGitIcon from '@/lib/icons/lucid_git.svg'
@@ -323,15 +326,19 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
     }
   }
 
-  const isIdle    = syncOp === 'idle'
+  const prBusy = usePRReviewStore(s => s.busy)
+  const localMergeBusy = useMergeWindowStore(s => !!s.task && s.task.phase !== 'complete')
+  const taskBusy = useBackgroundRepoTaskStore(s => !!repoPath && s.repoPath === repoPath)
+  const mergeBusy = prBusy || localMergeBusy || taskBusy
+  const isIdle    = syncOp === 'idle' && !mergeBusy
   const hasBehind = (sync?.behind ?? 0) > 0
   const ghSlug = remoteUrl ? parseGitHubSlug(remoteUrl) : null
   const busyState = syncOp === 'idle' ? 'idle' : syncOp === 'fetching' ? 'fetch' : syncOp === 'pulling' ? 'pull' : 'push'
   const hasUpstream = sync?.hasUpstream ?? true
   const hasPublishedBranch = sync?.hasPublishedBranch ?? hasUpstream
   const hasIntegrated = !!repoPath && hasBranchIntegrated(repoPath, currentBranch)
-  const canPushNow = !updatingFromMain && canPush(hasFetched, sync?.behind ?? 0, sync?.ahead ?? 0, busyState, hasPublishedBranch, hasIntegrated)
-  const canCreatePRNow = canCreatePR(!!ghSlug, currentBranch, busyState)
+  const canPushNow = !mergeBusy && !updatingFromMain && canPush(hasFetched, sync?.behind ?? 0, sync?.ahead ?? 0, busyState, hasPublishedBranch, hasIntegrated)
+  const canCreatePRNow = !mergeBusy && canCreatePR(!!ghSlug, currentBranch, busyState)
   const pushReason = updatingFromMain ? 'Update in progress' : pushDisabledReason(hasFetched, sync?.behind ?? 0, sync?.ahead ?? 0, busyState, hasPublishedBranch, hasIntegrated)
   const createPRReason = createPRDisabledReason(!!ghSlug, currentBranch, busyState)
 
@@ -670,7 +677,8 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
                 <div style={{ position: 'relative', flexShrink: 0 }}>
                   <button
                     onClick={() => setBranchMenuOpen(o => !o)}
-                    title="Switch branch"
+                    disabled={mergeBusy}
+                    title={mergeBusy ? 'Finish the repository operation before switching branches' : 'Switch branch'}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 5,
                       background: branchMenuOpen ? 'rgba(74,158,255,0.18)' : 'rgba(74,158,255,0.1)',
@@ -791,7 +799,7 @@ export function TopBar({ onOpen, onClone, onAddAccount, onSynced, onMergeConflic
                 defaultBranch={defaultBranch}
                 currentBranch={currentBranch ?? ''}
                 busy={updatingFromMain}
-                disabled={syncOp !== 'idle'}
+                disabled={mergeBusy || syncOp !== 'idle'}
                 onClick={doUpdateFromMain}
               />
 

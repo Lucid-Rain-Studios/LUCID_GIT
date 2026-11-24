@@ -138,7 +138,7 @@ test('tree preserves row order, counts and collapse behavior for nested and dupl
   const files = ['z/a/one', 'root', 'z/b/two', 'a\\nested\\three', 'z/a/one'].map((path, i) => ({ path, staged: i === 4 }))
   const tree = buildTree(files)
   const rows = flattenTree(tree, 0, new Set(['z/a']))
-  expect(rows.map(r => r.type === 'folder' ? [r.fullPath, r.count, r.depth, r.collapsed] : [r.file.path, r.depth])).toEqual([
+  expect(rows.map(r => r.type === 'folder' ? [r.folder.fullPath, r.folder.count, r.depth, r.collapsed] : [r.file.path, r.depth])).toEqual([
     ['z', 3, 0, false], ['z/a', 2, 1, true], ['z/b', 1, 1, false], ['z/b/two', 2],
     ['a', 1, 0, false], ['a/nested', 1, 1, false], ['a\\nested\\three', 2], ['root', 0],
   ])

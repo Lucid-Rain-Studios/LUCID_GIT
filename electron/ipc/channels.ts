@@ -263,6 +263,9 @@ export const CHANNELS = {
   // Window controls (frameless)
   WIN_MINIMIZE:          'win:minimize',
   MERGE_WINDOW_OPEN:     'merge-window:open',
+  MERGE_WINDOW_PROGRESS: 'merge-window:progress',
+  MERGE_WINDOW_SHOW: 'merge-window:show',
+  EVT_MERGE_WINDOW_PROGRESS: 'merge-window:progress-changed',
   MERGE_WINDOW_CONTEXT:  'merge-window:context',
   MERGE_WINDOW_CLOSE:    'merge-window:close',
   EVT_MERGE_WINDOW_CLOSE_REQUEST: 'merge-window:close-request',

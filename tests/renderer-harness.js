@@ -8,7 +8,7 @@ const ts = require('typescript')
 function component(file, mocks = {}, globals = {}) {
   const slots = [], effects = [], refs = []
   let cursor = 0, refCursor = 0
-  const React = {
+  const React = globals.__react ?? {
     createElement: (type, props, ...children) => ({ type, props: { ...props, children } }),
     Fragment: 'fragment',
     Suspense: 'suspense',
@@ -35,6 +35,10 @@ function component(file, mocks = {}, globals = {}) {
   vm.runInNewContext(source + exposed, {
     module, exports: module.exports,
     require: name => name === 'react' ? React : mocks[name] || (
+      name === '@/lib/useBackgroundRepoTask' ? component('src/lib/useBackgroundRepoTask.ts', mocks, { __react: React }).exports :
+      name === '@/stores/backgroundRepoTaskStore' ? { useBackgroundRepoTaskStore: store({repoPath:null}) } :
+      name === '@/stores/mergeWindowStore' ? { useMergeWindowStore: store({task:null}) } :
+      name === '@/stores/prReviewStore' ? { usePRReviewStore: store({ busy: false, request: null }) } :
       name === 'react-dom' ? { createPortal: node => node } :
       name === '@/lib/blueprintKlee' ? { preloadKlee() {}, loadKlee: async () => ({}) } :
       // Scan logging only observes; services under test run without it.
@@ -48,6 +52,7 @@ function component(file, mocks = {}, globals = {}) {
       name === '../util/performance' || name.endsWith('electron/util/performance') ? component('electron/util/performance.ts', {}, { ...globals, __privateExports: [] }).exports :
       name === '@/stores/performanceStore' ? { usePerformanceStore: store({ settings: component('electron/util/performance.ts', {}, { ...globals, __privateExports: [] }).exports.DEFAULT_PERFORMANCE }) } :
       name === '@/lib/visiblePolling' ? component('src/lib/visiblePolling.ts', {}, { ...globals, __privateExports: [] }).exports :
+      name.endsWith('/util/github-login') ? component('electron/util/github-login.ts').exports :
       ['../util/network', '../util/git-paths', '../util/json-store', '../util/external-actors', '@/lib/staging', '@/lib/branchTips'].includes(name)
         ? component(name === '@/lib/branchTips' ? 'src/lib/branchTips.ts' : name === '@/lib/staging' ? 'src/lib/staging.ts' : 'electron/util/' + name.split('/').pop() + '.ts', {}, globals).exports
         : name.startsWith('node:') || ['fs', 'path', 'crypto'].includes(name) ? require(name)

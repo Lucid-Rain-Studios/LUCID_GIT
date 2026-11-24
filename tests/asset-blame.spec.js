@@ -29,7 +29,18 @@ test('Blame tab loads on demand, handles revisions, retries and stale responses 
       return res.end(`<html><link rel="stylesheet" href="/app.css"><style>html,body,#root{margin:0;width:100%;height:100%;display:flex}</style><div id="root"></div><script>
         window.reads=[];window.compareReads=0;window.fail=false;window.delay=false;
         window.lucidGit={logRendererEvent:async()=>{},blueprintCompare:async()=>{window.compareReads++;return {left:{status:'ready',ref:'base',document:${JSON.stringify(doc)}},right:{status:'ready',ref:'selected',document:${JSON.stringify(doc)}}}},blueprintCancel:async()=>{},
-        log:async(repo,args)=>{window.reads.push(args);if(window.fail)throw Error('Offline object');if(window.delay)return await new Promise(resolve=>window.finish=()=>resolve([{hash:'delayed',author:'Stale Author',timestamp:1000,message:'Stale history'}]));return args.refs[0]==='empty'?[]:[{hash:'abcdef0123456789',author:args.refs[0]==='base'?'Base Author':'Selected Author',timestamp:1000,message:'Changed the map'}]}};
+        log:async(repo,args)=>{
+          window.reads.push(args);
+          if(window.fail)throw Error('Offline object');
+          if(window.delay)return await new Promise(resolve=>window.finish=()=>resolve([{hash:'delayed',author:'Stale Author',timestamp:1000,message:'Stale history'}]));
+          if(args.refs[0]==='long')return Array.from({length:Math.min(args.limit,105)},(_,index)=>({
+            hash:(index+1).toString(16).padStart(7,'0'),
+            author:'Long Author Name '.repeat(5),
+            timestamp:1000,
+            message:'Map edit '+(index+1)
+          }));
+          return args.refs[0]==='empty'?[]:[{hash:'abcdef0123456789',author:args.refs[0]==='base'?'Base Author':'Selected Author',timestamp:1000,message:'Changed the map'}];
+        }};
       </script><script type="module" src="/app.js"></script></html>`)
     }
     res.setHeader('Content-Type', req.url.endsWith('.css') ? 'text/css' : 'text/javascript')
@@ -47,13 +58,14 @@ test('Blame tab loads on demand, handles revisions, retries and stale responses 
     const blame = page.getByRole('region', { name: 'Asset blame' })
     await expect(tab).toHaveAttribute('aria-pressed', 'true')
     await expect(blame).toContainText('Selected Author')
-    expect(await page.evaluate(() => window.reads)).toEqual([{filePath:'Map.umap',refs:['selected'],limit:100}])
+    expect(await page.evaluate(() => window.reads)).toEqual([{filePath:'Map.umap',refs:['selected'],limit:101}])
+    await expect(blame.getByRole('button', { name: 'Show More' })).toHaveCount(0)
     await page.getByRole('button', { name: 'Contents', exact: true }).click()
     await tab.click(); await expect(blame).toContainText('Selected Author')
     expect(await page.evaluate(() => window.reads.length)).toBe(1)
     await page.getByRole('button', { name: 'Base', exact: true }).click()
     await expect(blame).toContainText('Base Author')
-    expect(await page.evaluate(() => window.reads.at(-1))).toEqual({filePath:'Old.umap',refs:['base'],limit:100})
+    expect(await page.evaluate(() => window.reads.at(-1))).toEqual({filePath:'Old.umap',refs:['base'],limit:101})
     await page.evaluate(() => { window.fail=true })
     await page.getByRole('button', { name: 'Selected', exact: true }).click()
     await expect(blame.getByRole('alert')).toContainText('Offline object')
@@ -79,6 +91,37 @@ test('Blame tab loads on demand, handles revisions, retries and stale responses 
     await page.evaluate(() => window.show('Map.umap','base','WORKING'))
     await tab.click(); await expect(blame).toContainText('Local changes have no commit author yet')
     expect(await page.evaluate(() => window.reads.at(-1).refs)).toEqual(['HEAD'])
+
+    await page.evaluate(() => window.show('Map.umap','base','long'))
+    await tab.click()
+    const rows = blame.getByRole('listitem')
+    const more = blame.getByRole('button', { name: 'Show More' })
+    await expect(rows).toHaveCount(20)
+    expect(await rows.first().evaluate(row => {
+      const author = row.querySelector('strong').getBoundingClientRect()
+      const time = row.querySelector('time').getBoundingClientRect()
+      return time.left >= author.right && time.top < author.bottom && time.right <= row.getBoundingClientRect().right
+    })).toBe(true)
+    const readCount = await page.evaluate(() => window.reads.length)
+    for (const count of [40, 60, 80, 100]) {
+      await more.click()
+      await expect(rows).toHaveCount(count)
+    }
+    expect(await page.evaluate(() => window.reads.length)).toBe(readCount)
+
+    await page.evaluate(() => { window.fail=true })
+    await more.click()
+    await expect(blame.getByRole('alert')).toContainText('Offline object')
+    await expect(rows).toHaveCount(100)
+    await page.evaluate(() => { window.fail=false })
+    await blame.getByRole('button', { name: 'Retry blame' }).click()
+    await expect(rows).toHaveCount(105)
+    await expect(rows.last()).toContainText('Map edit 105')
+    await expect(more).toHaveCount(0)
+    expect(await page.evaluate(() => window.reads.slice(-2).map(args=>args.limit))).toEqual([201,201])
+    await page.getByRole('button', { name: 'Base', exact: true }).click()
+    await expect(rows).toHaveCount(1)
+    await expect(rows.first()).toContainText('Base Author')
     expect(errors).toEqual([])
   } finally { await page.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)) }
 })

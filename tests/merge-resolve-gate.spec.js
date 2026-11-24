@@ -16,7 +16,7 @@ function mountHandlers(gitService) {
     '../util/repo-gate': gate,
     '../util/dugite-exec': { withGitTimeout: fn => fn(), preemptRepoReads() {} },
     '../services/LogService': { logService: { error() {}, warn() {} } },
-    '../services/GitService': { gitService },
+    '../services/GitService': { gitService: { invalidateStatusCache() {}, ...gitService } },
     '../services/HeatmapService': { heatmapService: { markConflictsResolved() {}, recordConflictEvent() {} } },
   })
   api.exports.registerHandlers()

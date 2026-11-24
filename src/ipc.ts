@@ -1,3 +1,6 @@
+import { useBackgroundRepoTaskStore } from '@/stores/backgroundRepoTaskStore'
+import { useMergeWindowStore } from '@/stores/mergeWindowStore'
+import { usePRReviewStore } from '@/stores/prReviewStore'
 // Typed wrappers around window.lucidGit.*
 import type { IndexDiagnosis, IndexRepairResult, IndexRecoveryBlockers, IndexLockRecoveryResult, RecoveryGitTask } from '../electron/indexRecoveryTypes'
 import type { BlueprintRequest, BlueprintComparison } from '../electron/blueprintTypes'
@@ -695,6 +698,9 @@ export type RepoPermission = 'admin' | 'write' | 'read'
 export interface LucidGitAPI {
   openMergeWindow: (context: import('../electron/mergeWindowTypes').MergeWindowContext) => Promise<void>
   mergeWindowContext: () => Promise<import('../electron/mergeWindowTypes').MergeWindowContext>
+  reportMergeWindowProgress: (progress: import('../electron/mergeWindowTypes').MergeWindowProgress | null, hide?: boolean) => Promise<void>
+  showMergeWindow: () => Promise<void>
+  onMergeWindowProgress: (cb: (progress: import('../electron/mergeWindowTypes').MergeWindowProgress | null, context: import('../electron/mergeWindowTypes').MergeWindowContext) => void) => () => void
   closeMergeWindow: () => Promise<void>
   onMergeWindowCloseRequest: (cb: () => void) => () => void
   onMergeWindowClosed: (cb: (repoPath: string) => void) => () => void
@@ -888,7 +894,7 @@ export interface LucidGitAPI {
   gitRestoreFile: (repoPath: string, filePath: string, fromHash: string) => Promise<void>
   gitRevert: (repoPath: string, hash: string, noCommit: boolean) => Promise<void>
   gitCherryPick: (repoPath: string, hash: string, noCommit?: boolean) => Promise<void>
-  cherryPickInProgress: (repoPath: string) => Promise<{
+  cherryPickInProgress: (repoPath: string, includeConflictDetails?: boolean) => Promise<{
     cherryPickHead: string
     sourceMessage: string
     unresolvedFiles: string[]
@@ -1014,7 +1020,22 @@ function logRendererEvent(source: string, message: string, detail?: unknown): vo
   window.lucidGit.logRendererEvent(source, message, detail).catch(() => {})
 }
 
-function wrapApi<T extends LucidGitAPI>(api: T): T {
+// Merge resolution may span several writes. Keep competing renderer actions
+// out between steps while leaving read-only browsing usable.
+const mergeConflictingCalls = new Set([
+  'openMergeWindow', 'checkout', 'stage', 'unstage', 'commit', 'commitAmend', 'applyPatch', 'push', 'pull', 'fetch',
+  'createBranch', 'renameBranch', 'deleteBranch', 'deleteRemoteBranch', 'updateFromMain',
+  'merge', 'mergeResolveText', 'mergeContinue', 'mergeAbort', 'mergeAbortRetryUpdate',
+  'gitRestoreFile', 'gitRevert', 'gitCherryPick', 'cherryPickContinue', 'cherryPickAbort',
+  'gitResetTo', 'discard', 'discardAll', 'stashSave', 'stashApply', 'stashPop', 'stashDrop',
+  'repairIndex', 'undoIndexRepair', 'stopIndexTasks', 'recoverIndexLock', 'removeIndexLock', 'rebaseAbort',
+  'lfsRestore', 'lfsTrack', 'lfsUntrack', 'lfsMigrate', 'lfsLocksRepair',
+  'cleanupGc', 'cleanupPruneLfs', 'cleanupShallow', 'cleanupUnshallow',
+  'lockFile', 'unlockFile', 'unlockFiles', 'lockFolder', 'unlockFolderMine',
+  'githubMergePR', 'githubClosePR', 'githubCreatePR', 'publishPRBranch',
+])
+
+function wrapApi<T extends LucidGitAPI>(api: T, owner?: 'pr' | 'background'): T {
   const wrapped: Partial<T> = {}
   const diagnosticRequests = new Map<string, symbol>()
 
@@ -1026,6 +1047,19 @@ function wrapApi<T extends LucidGitAPI>(api: T): T {
     }
 
     wrapped[key] = ((...args: unknown[]) => {
+        if (mergeConflictingCalls.has(String(key))) {
+          const phase = useMergeWindowStore.getState().task?.phase
+          if (phase === 'attention') return Promise.reject(new Error('Review the local merge issue before changing the repository.'))
+          if (phase === 'running') return Promise.reject(new Error('A local merge is running. Wait for it to finish before changing the repository.'))
+          const taskRepo = useBackgroundRepoTaskStore.getState().repoPath
+          const writesOtherRepo = typeof args[0] === 'string' && args[0] !== taskRepo
+          if (owner !== 'background' && taskRepo && !writesOtherRepo) {
+            return Promise.reject(new Error('A repository operation is running. Wait for it to finish before making changes.'))
+          }
+          if (owner !== 'pr' && usePRReviewStore.getState().busy) {
+            return Promise.reject(new Error('A pull request operation is running. Wait for it to finish before changing the repository.'))
+          }
+        }
         const group = ['diagnoseIndex', 'repairIndex', 'undoIndexRepair'].includes(String(key)) ? 'index'
           : ['lfsLocksCheck', 'lfsLocksRepair', 'clearLockCache'].includes(String(key)) ? 'lock-cache' : null
         const requestKey = group && typeof args[0] === 'string' ? `${args[0]}\0${group}` : null
@@ -1062,3 +1096,7 @@ function wrapApi<T extends LucidGitAPI>(api: T): T {
 export const logUiError = logRendererEvent
 
 export const ipc: LucidGitAPI = wrapApi({ ...window.lucidGit, blueprintCompare: createBlueprintClient((repo, request) => window.lucidGit.blueprintCompare(repo, request)) })
+
+/** Only the persistent PR task controller may bypass its own write guard. */
+export const prTaskIpc: LucidGitAPI = wrapApi(window.lucidGit, 'pr')
+export const backgroundTaskIpc = wrapApi(window.lucidGit, 'background')

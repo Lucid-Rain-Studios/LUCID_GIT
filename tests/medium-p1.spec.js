@@ -225,6 +225,7 @@ function repoStore(api) {
   api.isRepo ??= async () => true
   api.ueDetect ??= async () => null
   return component('src/stores/repoStore.ts', {
+    '@/ipc': { ipc: api },
     zustand: require('zustand'), './operationStore': { useOperationStore: store({ run: (_, fn) => fn() }) },
   }, { window: { lucidGit: api } }).exports
 }

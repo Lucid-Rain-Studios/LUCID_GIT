@@ -1,3 +1,6 @@
+import { sameGitHubLogin } from '../../../electron/util/github-login'
+import { LocalMergeProgress } from '@/components/merge/LocalMergeProgress'
+import { PRReviewHost } from '@/components/pr/PRReviewTask'
 import { isModalOpen } from '@/lib/useDialogOverlayDismiss'
 import { useAutoFetch } from '@/lib/useAutoFetch'
 import React, { useState, useEffect, useCallback, useRef } from 'react'
@@ -160,8 +163,9 @@ export function AppShell() {
   const mergeTarget = useConflictStore(s => s.target)
   const setMergeTarget = useConflictStore(s => s.open)
   const closeMergeTarget = useConflictStore(s => s.close)
-  const [cherryPickConflict, setCherryPickConflict] = useState(false)
-  const [pushBlockedError, setPushBlockedError] = useState<string | null>(null)
+  const [cherryPickRepo, setCherryPickRepo] = useState<string | null>(null)
+  const closeCherryPick = useCallback(() => setCherryPickRepo(null), [])
+  const [pushBlocked, setPushBlocked] = useState<{ repoPath: string; message: string } | null>(null)
   const [cmdOpen, setCmdOpen] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
 
@@ -203,13 +207,13 @@ export function AppShell() {
   // Auto-open the cherry-pick conflict dialog if a previous session left
   // CHERRY_PICK_HEAD around (e.g. user closed the app mid-resolution).
   useEffect(() => {
-    if (!repoPath) return
+    if (!repoPath || cherryPickRepo) return
     let cancelled = false
-    ipc.cherryPickInProgress(repoPath).then(state => {
-      if (!cancelled && state) setCherryPickConflict(true)
+    ipc.cherryPickInProgress(repoPath, false).then(state => {
+      if (!cancelled && state) setCherryPickRepo(current => current ?? repoPath)
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [repoPath])
+  }, [repoPath, cherryPickRepo])
   const { loadAccounts, accounts, currentAccountId } = useAuthStore()
   const canViewTeam = useAuthStore(s => !!repoPath && s.isAdmin(repoPath))
   useEffect(() => {
@@ -368,7 +372,7 @@ export function AppShell() {
         const ownerLogin = (n.meta as { ownerLogin?: string } | undefined)?.ownerLogin
         const auth = useAuthStore.getState()
         const myLogin = auth.accounts.find(a => a.userId === auth.currentAccountId)?.login ?? null
-        const isSelfLock = !!ownerLogin && !!myLogin && ownerLogin === myLogin
+        const isSelfLock = sameGitHubLogin(ownerLogin, myLogin)
         if (!isSelfLock) {
           const lockedPath = n.body.replace(/\\/g, '/')
           const dirtyPaths = useRepoStore.getState().fileStatus.map(f => f.path.replace(/\\/g, '/'))
@@ -490,6 +494,15 @@ export function AppShell() {
     setShowCloneDialog(true)
   }
 
+  const reportRepoTask = (taskRepo: string, message: string) => {
+    showStatusToast(message)
+    const repo = useRepoStore.getState()
+    if (repo.repoPath !== taskRepo) return
+    repo.bumpSyncTick()
+    void repo.refreshStatus()
+    void loadLocks(taskRepo)
+  }
+
   const handleRefresh = () => {
     refreshStatus()
     if (repoPath) loadLocks(repoPath)
@@ -523,7 +536,7 @@ export function AppShell() {
           if (useRepoStore.getState().repoPath === syncedRepo) loadLocks(syncedRepo)
         }}
         onMergeConflict={branch => setMergeTarget(branch)}
-        onPushBlockedByLocks={msg => setPushBlockedError(msg)}
+        onPushBlockedByLocks={message => { if (repoPath) setPushBlocked(current => current ?? { repoPath, message }) }}
         onOpenIndexRecovery={() => { setIndexRecoveryRequest(n => n + 1); setLeftTab('tools') }}
       />
 
@@ -674,7 +687,7 @@ export function AppShell() {
           ) : leftTab === 'tools' ? (
             /* ── Tools — full width ── */
             <PanelErrorBoundary tabId={leftTab} onGoHome={() => setLeftTab('dashboard')}>
-              <ToolsPanel repoPath={repoPath} onRefresh={handleRefresh} onCherryPickConflict={() => setCherryPickConflict(true)} indexRecoveryRequest={indexRecoveryRequest} />
+              <ToolsPanel repoPath={repoPath} onRefresh={handleRefresh} onCherryPickConflict={() => setCherryPickRepo(current => current ?? repoPath)} indexRecoveryRequest={indexRecoveryRequest} />
             </PanelErrorBoundary>
           ) : leftTab === 'content' ? (
             /* ── Content Browser — full width ── */
@@ -766,21 +779,25 @@ export function AppShell() {
       </div>
 
       <StatusBar />
+      <div id="repository-progress" />
       <GlobalLoadingCursor />
 
       {showCloneDialog && <CloneDialog onClose={() => setShowCloneDialog(false)} />}
       {showLoginDialog && <DeviceFlowLogin onClose={() => setShowLoginDialog(false)} />}
-      {cherryPickConflict && (
+      {cherryPickRepo && (
         <CherryPickConflictDialog
-          onClose={() => setCherryPickConflict(false)}
-          onResolved={() => { setCherryPickConflict(false); handleRefresh() }}
+          repoPath={cherryPickRepo}
+          onClose={closeCherryPick}
+          onResolved={() => reportRepoTask(cherryPickRepo, 'Cherry-pick completed.')}
+          onAborted={() => reportRepoTask(cherryPickRepo, 'Cherry-pick aborted.')}
         />
       )}
-      {pushBlockedError && (
+      {pushBlocked && (
         <PushBlockedByLocksDialog
-          errorMessage={pushBlockedError}
-          onClose={() => setPushBlockedError(null)}
-          onPushed={() => { setPushBlockedError(null); handleRefresh() }}
+          repoPath={pushBlocked.repoPath}
+          errorMessage={pushBlocked.message}
+          onClose={() => setPushBlocked(null)}
+          onPushed={() => reportRepoTask(pushBlocked.repoPath, 'Push complete.')}
         />
       )}
 
@@ -809,6 +826,8 @@ export function AppShell() {
         onAddAccount={() => setShowLoginDialog(true)}
       />
       <StatusToastStack />
+      <PRReviewHost />
+      <LocalMergeProgress />
     </div>
   )
 }

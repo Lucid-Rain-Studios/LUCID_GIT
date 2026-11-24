@@ -23,6 +23,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Run unit regressions
+        run: npm run test:unit
+
       - name: Install native credential-store runtime
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-0
 
@@ -33,11 +36,14 @@ jobs:
       - name: Build Blueprint tools
         run: npm run blueprint:setup && npm run blueprint:build
 
-      - name: Install browser for Blueprint regression checks
+      - name: Install Chromium for UI regression checks
         run: npx playwright install --with-deps chromium
 
+      - name: Run browser UI regressions
+        run: npm run test:ui
+
       - name: Blueprint revision and renderer regression checks
-        run: npx tsc -p tsconfig.main.json && npx playwright test tests/blueprint-viewer.spec.js tests/blueprint-diff.spec.js tests/unreal-detection.spec.js
+        run: npx playwright test tests/blueprint-viewer.spec.js tests/blueprint-diff.spec.js tests/unreal-detection.spec.js
 
       - name: Type check (renderer)
         run: npx tsc -p tsconfig.renderer.json --noEmit

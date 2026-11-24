@@ -1,3 +1,4 @@
+import { sameGitHubLogin } from '../util/github-login'
 import type { PresenceEntry } from '../types'
 
 type Identity = { login: string; name: string }
@@ -34,7 +35,7 @@ export class PresenceSession {
 
   tick(): void {
     if (!this.session) return
-    if (this.identity()?.login !== this.session.identity.login) { this.stop(); return }
+    if (!sameGitHubLogin(this.identity()?.login, this.session.identity.login)) { this.stop(); return }
     const idle = this.idleState()
     this.write(this.locked || idle === 'idle' || idle === 'locked' || idle === 'unknown' ? 'away' : 'active')
   }

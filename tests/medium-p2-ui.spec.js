@@ -27,21 +27,22 @@ test('LG-059/061 PR acceptance waits for verified previews and push failure rest
   const pr = { number:1, title:'PR', headBranch:'feature', baseBranch:'main', headSha:'a'.repeat(40), baseSha:'b'.repeat(40), author:'me' }
   const api = {
     fetch: async () => fetch.promise, mergePreview: async () => [{ path:'asset', isBinary:true }], branchDiff: async () => ({ files:[], aheadCommits:[], behindCommits:[], totalAdditions:0,totalDeletions:0 }),
-    checkout: async (_, branch) => calls.push(branch), log: async () => [{ hash:pr.headSha }], merge: async () => {}, push: async () => { throw Error('push offline') }, mergeInProgress: async () => null,
+    currentBranch: async () => 'original', checkout: async (_, branch) => calls.push(branch), log: async () => [{ hash:pr.headSha }], merge: async () => {}, push: async () => { throw Error('push offline') }, mergeInProgress: async () => null,
     githubMergePR: async () => { throw Error('should not merge after failed push') },
   }
-  const h = component('src/components/overview/OverviewPanel.tsx', {
-    '@/ipc': { ipc: api }, '@/stores/operationStore': { useOperationStore: store({ run: (_,fn)=>fn() }) },
-    '@/lib/useDialogOverlayDismiss': { useDialogOverlayDismiss: () => ({}) },
-    '@/stores/repoStore': { useRepoStore: store({ currentBranch:'original',refreshStatus:async()=>refreshed++,bumpSyncTick:()=>tick++,bumpHistoryTick:noop,bumpPrTick:noop }) },
+  const h = component('src/components/pr/PRReviewTask.tsx', {
+    '@/ipc': { ipc: api, prTaskIpc: api }, '@/stores/operationStore': { useOperationStore: store({ run: (_,fn)=>fn() }) },
+    '@/stores/prReviewStore': { usePRReviewStore: Object.assign(store({busy:false}), {setState:noop}) },
+      '@/lib/useDialogOverlayDismiss': { useDialogOverlayDismiss: () => ({}) },
+    '@/stores/repoStore': { useRepoStore: store({ repoPath:'repo',currentBranch:'original',refreshStatus:async()=>refreshed++,bumpSyncTick:()=>tick++,bumpHistoryTick:noop,bumpPrTick:noop }) },
     '@/stores/statusToastStore': { useStatusToastStore: store({ show:m=>toasts.push(m) }) }, '@/stores/errorStore': { useErrorStore: store({ pushRaw:m=>errors.push(m) }) }, '@/lib/fetchState': { markFetchPerformed:noop },
   }, { __privateExports:['ResolveDialog'] })
   const props = { pr, ghSlug:'o/r',repoPath:'repo',onClose:noop,onDone:noop }
   const confirm = tree => find(tree,n=>n.type==='button' && /^(Merge PR|Resolve & Merge)$/.test(n.props.children.flat().join('')))
   let tree = h.render('ResolveDialog', props); expect(confirm(tree).props.disabled).toBe(true)
   h.effects[0](); fetch.resolve(); await flush(); h.render('ResolveDialog', props); h.effects[1](); h.effects[2](); await flush()
-  h.slots[2] = { asset:'head' }; tree = h.render('ResolveDialog', props); expect(confirm(tree).props.disabled).toBe(false)
-  await confirm(tree).props.onClick(); expect(calls).toEqual(['feature','original']); expect(refreshed).toBe(1); expect(tick).toBe(1); expect(errors).toContainEqual(expect.stringContaining('push offline'))
+  h.slots[3] = { asset:'head' }; tree = h.render('ResolveDialog', props); expect(confirm(tree).props.disabled).toBe(false)
+  await confirm(tree).props.onClick(); expect(calls).toEqual(['feature','original']); expect(refreshed).toBe(1); expect(tick).toBe(1); expect(h.slots.some(value=>typeof value==='string' && value.includes('push offline'))).toBe(true)
 })
 
 test('LG-069 modal focus traps Tab, isolates background, chooses Cancel, contains Escape and restores focus', async () => {
@@ -93,13 +94,41 @@ test('LG-041 post-push unlock keeps dirty paths and reports partial failures', a
     electron:{ipcMain:{handle:(channel,fn)=>handlers.set(channel,fn)}}, './channels':{CHANNELS}, '../util/repo-gate':{withRepoSlot:(_,__,fn)=>fn()},
     '../services/GitService':{gitService:{invalidateStatusCache(){},push:async()=>({branch:'main',filesAhead:['dirty','clean']}),defaultBranch:async()=> 'main',statusPaths:async()=>[{path:'dirty'}]}},
     '../services/AuthService':{authService:{listAccounts:()=>({currentAccountId:'1',accounts:[{userId:'1',login:'me'}]})}},
-    '../services/LockService':{lockService:{listLocks:async()=>['dirty','clean'].map(p=>({id:p,path:p,owner:{login:'me'}})),unlockFiles:async(_,list)=>{targets.push(...list);return {unlocked:[],failed:[{filePath:'clean',error:'offline'}]}}}},
+    '../services/LockService':{lockService:{listLocks:async()=>['dirty','clean'].map(p=>({id:p,path:p,owner:{login:'Me'}})),unlockFiles:async(_,list)=>{targets.push(...list);return {unlocked:[],failed:[{filePath:'clean',error:'offline'}]}}}},
     '../services/LogService':{logService:{error:noop}},
     '../services/NotificationService':{notificationService:{push:(_,type,title,body)=>({type,title,body})}},
   }).exports.registerHandlers()
   await handlers.get(CHANNELS.GIT_PUSH)({sender:{isDestroyed:()=>false,send:(...args)=>events.push(args)}},'repo')
   expect(targets).toEqual([{filePath:'clean',lockId:'clean'}]); expect(events.some(e=>e[1]?.id==='push-unlock'&&e[1].status==='error')).toBe(true)
   expect(events.some(e=>e[0]===CHANNELS.EVT_NOTIFICATION&&e[1].type==='locks-retained')).toBe(true)
+})
+
+test('merging a PR releases only its owned locks when GitHub reports a different login casing', async () => {
+  const handlers = new Map(), calls = []
+  const { CHANNELS } = require(path.join(DIST, 'ipc/channels'))
+  component('electron/ipc/handlers.ts', {
+    electron: { ipcMain: { handle: (channel, fn) => handlers.set(channel, fn) } },
+    './channels': { CHANNELS },
+    '../util/repo-gate': { withRepoSlot: (_, __, fn) => fn() },
+    '../services/AuthService': { authService: {
+      getCurrentToken: async () => 'token',
+      listAccounts: () => ({ currentAccountId: '1', accounts: [{ userId: '1', login: 'me' }] }),
+    } },
+    '../services/GitHubService': { gitHubService: {
+      mergePR: async () => calls.push(['merge']),
+      getPRFiles: async () => ['mine.umap', 'other.umap'],
+    } },
+    '../services/LockService': { lockService: {
+      listLocks: async () => [
+        { id: 'mine', path: 'mine.umap', owner: { login: 'Me' } },
+        { id: 'other', path: 'other.umap', owner: { login: 'teammate' } },
+        { id: 'elsewhere', path: 'elsewhere.umap', owner: { login: 'ME' } },
+      ],
+      unlockFile: async (...args) => calls.push(['unlock', ...args]),
+    } },
+  }).exports.registerHandlers()
+  await handlers.get(CHANNELS.GITHUB_MERGE_PR)({}, { repoPath: 'repo', owner: 'owner', repo: 'repo', prNumber: 1 })
+  expect(calls).toEqual([['merge'], ['unlock', 'repo', 'mine.umap', false, 'mine']])
 })
 
 test('LG-065 settings saves touch global Git only for branch changes and roll back on disk failures', async () => {

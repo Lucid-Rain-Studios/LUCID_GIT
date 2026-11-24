@@ -2,6 +2,24 @@ const { test, expect } = require('@playwright/test')
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path')
 const { Arch } = require('builder-util')
 const checkPackage = require('../scripts/check-blueprint-package.cjs')
+const { BlueprintReaderWorker } = require('../dist-electron/services/BlueprintReaderWorker')
+
+test('hidden Blueprint reader preserves Unicode across both pipes', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lg-reader-unicode-'))
+  const worker = new BlueprintReaderWorker()
+  const helper = path.resolve(__dirname, '../tools/BlueprintExtractor/bin/Release/net10.0')
+  const fixture = path.resolve(__dirname, '../third_party/UAssetAPI/UAssetAPI.Tests/TestAssets/TestEditorAssets/TestActorBP.uasset')
+  const file = path.join(root, 'Blueprint “emissive”.uasset')
+  try {
+    await expect(worker.read(helper, file, false)).rejects.toThrow('Blueprint “emissive”.uasset')
+    await fs.copyFile(fixture, file)
+    const document = JSON.parse(await worker.read(helper, file, false))
+    expect(document.graphs.length).toBeGreaterThan(0)
+  } finally {
+    worker.stop()
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
 
 for (const [platform, prefix, native] of [
   ['darwin', 'osx', ['BlueprintExtractor', 'libhostfxr.dylib', 'libcoreclr.dylib']],

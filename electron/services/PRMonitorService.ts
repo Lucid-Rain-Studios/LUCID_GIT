@@ -1,3 +1,4 @@
+import { isGitHubLockOwner } from '../util/github-login'
 import { readJson, writeJson, isRecord } from '../util/json-store'
 import { app, BrowserWindow } from 'electron'
 import * as path from 'path'
@@ -248,7 +249,7 @@ class PRMonitorService {
     try {
       const locks = await lockService.listLocks(repoPath)
       const myLockPaths = locks
-        .filter(lock => lock.owner.login === currentLogin)
+        .filter(lock => isGitHubLockOwner(lock, currentLogin))
         .map(lock => lock.path.replace(/\\/g, '/'))
       if (myLockPaths.length === 0) return empty
 
@@ -425,7 +426,7 @@ class PRMonitorService {
       const mine = filePaths
         .map(filePath => currentLocks.find(lock => lock.path === filePath))
         .filter((lock): lock is NonNullable<(typeof currentLocks)[number]> => lock != null)
-        .filter(lock => lock.owner.login === currentLogin)
+        .filter(lock => isGitHubLockOwner(lock, currentLogin))
 
       const containsLocalChanges: string[] = []
       const availableToUnlock: string[] = []

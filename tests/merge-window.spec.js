@@ -34,6 +34,8 @@ async function launch() {
   const parent = await app.firstWindow()
   await parent.evaluate(() => {
     window.closedRepos = []
+    window.mergeProgress = null
+    window.lucidGit.onMergeWindowProgress(progress => { window.mergeProgress = progress })
     window.lucidGit.onMergeWindowClosed(repo => window.closedRepos.push(repo))
   })
   return { app, parent }
@@ -67,9 +69,16 @@ test('pending writes reject native close and duplicate actions; failures remain 
       }
     })
     await merge.getByRole('button', { name: 'Merge', exact: true }).click()
+    await expect.poll(() => parent.evaluate(() => window.mergeProgress?.phase)).toBe('running')
+    await expect.poll(() => app.evaluate(({ BrowserWindow }) => {
+      const child = BrowserWindow.getAllWindows().find(w => w.getParentWindow())
+      return { hidden: !child.isVisible(), parentEnabled: child.getParentWindow().isEnabled() }
+    })).toEqual({ hidden: true, parentEnabled: true })
+    await expect(parent.evaluate(repo => window.lucidGit.checkout(repo, 'feature'), dir)).rejects.toThrow('Finish or review the local merge')
+    await parent.evaluate(() => window.lucidGit.showMergeWindow())
     await expect(merge.getByRole('button', { name: 'Merging…', exact: true })).toBeDisabled()
     await expect.poll(() => app.evaluate(() => global.mergeAttempts), { timeout: 15000 }).toBe(1)
-    await expect(merge.getByRole('button', { name: 'Close Merge', exact: true })).toBeDisabled()
+    await expect(merge.getByRole('button', { name: 'Hide progress', exact: true })).toBeEnabled()
     await app.evaluate(({ BrowserWindow }) => {
       BrowserWindow.getAllWindows().find(w => w.getParentWindow()).close()
       BrowserWindow.getAllWindows().find(w => !w.getParentWindow()).close()
@@ -80,6 +89,8 @@ test('pending writes reject native close and duplicate actions; failures remain 
     expect(git(dir, 'rev-parse', 'HEAD')).toBe(original)
     expect(await app.evaluate(() => global.mergeAttempts)).toBe(1)
     await app.evaluate(() => global.rejectMerge())
+    await expect.poll(() => parent.evaluate(() => window.mergeProgress?.phase)).toBe('attention')
+    await parent.evaluate(() => window.lucidGit.showMergeWindow())
     await expect(merge.getByText(/Injected merge failure/).first()).toBeVisible()
     await expect(merge.getByRole('button', { name: 'Merge', exact: true })).toBeEnabled()
     const closed = merge.waitForEvent('close')
@@ -152,6 +163,8 @@ test('native close preserves real conflicts, reopen resumes, choices finalize; a
   try {
     let merge = await open(app, parent, dir)
     await merge.getByRole('button', { name: 'Merge', exact: true }).click()
+    await expect.poll(() => parent.evaluate(() => window.mergeProgress?.phase)).toBe('attention')
+    await parent.evaluate(() => window.lucidGit.showMergeWindow())
     await expect(merge.getByRole('button', { name: 'Complete merge', exact: true })).toBeDisabled()
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => w.getParentWindow()).close())
     await expect(merge.getByText('Close Merge window?', { exact: true })).toBeVisible()
@@ -174,10 +187,15 @@ test('native close preserves real conflicts, reopen resumes, choices finalize; a
     const abortRepo = repository(true), original = git(abortRepo, 'rev-parse', 'HEAD')
     merge = await open(app, parent, abortRepo)
     await merge.getByRole('button', { name: 'Merge', exact: true }).click()
+    await expect.poll(() => parent.evaluate(() => window.mergeProgress?.phase)).toBe('attention')
+    await parent.evaluate(() => window.lucidGit.showMergeWindow())
     await expect(merge.getByRole('button', { name: 'Abort merge', exact: true })).toBeVisible()
     const aborted = merge.waitForEvent('close')
     await merge.getByRole('button', { name: 'Abort merge', exact: true }).click()
     await aborted
+    await expect.poll(() => parent.evaluate(() => window.mergeProgress)).toMatchObject({
+      phase: 'complete', stage: 'Merge aborted', autoDismiss: false,
+    })
     expect(git(abortRepo, 'rev-parse', 'HEAD')).toBe(original)
     expect(fs.readFileSync(path.join(abortRepo, 'shared.txt'), 'utf8')).toBe('main\n')
     expect(fs.existsSync(path.join(abortRepo, '.git/MERGE_HEAD'))).toBe(false)
@@ -202,9 +220,27 @@ test('the real app Branches action launches Merge separately and refreshes after
       window.closedRepos = []
       window.lucidGit.onMergeWindowClosed(repo => window.closedRepos.push(repo))
     })
-    const closed = merge.waitForEvent('close')
+    await app.evaluate(() => {
+      const service = global.mergeTestGitService
+      const merge = service.merge.bind(service)
+      service.merge = async (...args) => {
+        await new Promise(resolve => { global.finishMerge = resolve })
+        return merge(...args)
+      }
+    })
     await merge.getByRole('button', { name: 'Merge', exact: true }).click()
-    await closed
+    const progress = parent.getByRole('region', { name: 'Local merge progress' })
+    await expect(progress).toContainText('Merging feature')
+    await parent.getByRole('button', { name: /^Timeline\b/ }).click({ timeout: 6000 })
+    await progress.getByRole('button', { name: 'View details' }).click({ timeout: 6000 })
+    await merge.getByRole('button', { name: 'Hide progress' }).click({ timeout: 6000 })
+    await app.evaluate(() => global.finishMerge())
+    await expect.poll(() => merge.isClosed()).toBe(true)
+    await expect(progress).toContainText('Merge complete')
+    await expect(progress).toHaveCSS('animation-name', 'merge-progress-fade-out')
+    await expect(progress).toHaveCSS('animation-delay', '3s')
+    await expect(progress).toHaveCount(0, { timeout: 6000 })
+    await parent.getByRole('button', { name: 'Branches', exact: true }).click()
     await expect.poll(() => parent.evaluate(() => window.closedRepos)).toEqual([dir])
     expect(git(dir, 'show', 'HEAD:incoming.txt')).toBe('feature\n')
     await expect(parent.getByTitle('Merge "feature" into main', { exact: true })).toBeEnabled()

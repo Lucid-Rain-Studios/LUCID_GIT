@@ -43,6 +43,7 @@ test('Repository open and refresh detect Unreal metadata; late responses cannot 
     ueDetect: repo => { calls.push(repo); return new Promise(resolve => pending.push(resolve)) },
   }
   const { useRepoStore: state } = component('src/stores/repoStore.ts', {
+    '@/ipc': { ipc: api },
     zustand: require('zustand'), './operationStore': { useOperationStore: store({ run: (_, fn) => fn() }) },
   }, { window: { lucidGit: api } }).exports
   await state.getState().openRepo('A')

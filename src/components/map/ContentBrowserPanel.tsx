@@ -1,3 +1,4 @@
+import { isGitHubLockOwner } from '../../../electron/util/github-login'
 import React, { useState, useEffect, useMemo, useRef, useLayoutEffect, useCallback } from 'react'
 import { ipc, Lock, BlameEntry } from '@/ipc'
 import { useLockStore } from '@/stores/lockStore'
@@ -128,7 +129,7 @@ function ContextMenu({ menu, repoPath, locks, currentUserName, onClose, onNaviga
 
   const normPath = menu.filePath.replace(/\\/g, '/')
   const lock = locks.find(l => l.path.replace(/\\/g, '/') === normPath)
-  const isLockedByMe    = lock && lock.owner.login === currentUserName
+  const isLockedByMe    = isGitHubLockOwner(lock, currentUserName)
   const isLockedByOther = lock && !isLockedByMe
 
   // Clamp to viewport

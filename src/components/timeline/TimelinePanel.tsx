@@ -1598,16 +1598,18 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   const [remoteUrl,   setRemoteUrl]   = useState<string | null>(null)
   const [branches,     setBranches]     = useState<BranchInfo[]>([])
   const [defaultBranch, setDefaultBranch] = useState('main')
-  const [selBranches,  setSelBranches]  = useState<Set<string>>(new Set())
+  const [selBranches,  setSelBranches]  = useState<Set<string> | null>(null)
   const [filterOpen,   setFilterOpen]   = useState(false)
   const [branchTips,   setBranchTips]   = useState<Map<string, BranchInfo[]>>(new Map())
   const [hoveredBranchKey, setHoveredBranchKey] = useState<string | null>(null)
   const [hiddenUsers,  setHiddenUsers]  = useState<Set<string>>(new Set())
   const [userFilterOpen, setUserFilterOpen] = useState(false)
-  const [showOnlyPushReady, setShowOnlyPushReady] = useState(false)
+  const [localHistory, setLocalHistory] = useState(false)
   const [needsPushHashes, setNeedsPushHashes] = useState<Set<string>>(new Set())
   const [needsPullHashes, setNeedsPullHashes] = useState<Set<string>>(new Set())
   const autoLoadingRef = useRef(false)
+  const historyRequest = useRef<symbol | null>(null)
+  const graphMainBranch = localHistory ? branches.find(b => b.current && !b.isRemote)?.name ?? 'HEAD' : defaultBranch
 
   const filterBranches = React.useMemo(() => {
     const remoteBranches = timelineBranches(branches)
@@ -1627,11 +1629,11 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     const colorBranches = mergeBranchLists(filterBranches, branches.filter(b => !b.isRemote))
     const map = new Map<string, string>()
     for (const b of colorBranches) {
-      const isDefault = b.displayName === defaultBranch || b.name === defaultBranch
+      const isDefault = b.displayName === graphMainBranch || b.name === graphMainBranch
       map.set(b.name, isDefault ? MAIN_BRANCH_COLOR : branchColor(b.name))
     }
     return map
-  }, [filterBranches, branches, defaultBranch])
+  }, [filterBranches, branches, graphMainBranch])
   const allAuthors = React.useMemo(() => {
     const set = new Set<string>()
     for (const node of nodes) set.add(node.commit.author)
@@ -1639,18 +1641,9 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   }, [nodes])
 
   const displayedNodes = React.useMemo(() => {
-    let filtered = nodes
-    let modified = false
-    if (hiddenUsers.size > 0) {
-      filtered = filtered.filter(n => !hiddenUsers.has(n.commit.author))
-      modified = true
-    }
-    if (showOnlyPushReady) {
-      filtered = filtered.filter(n => needsPushHashes.has(n.commit.hash))
-      modified = true
-    }
-    return modified ? compactGraphLanes(filtered) : filtered
-  }, [nodes, hiddenUsers, showOnlyPushReady, needsPushHashes])
+    if (hiddenUsers.size === 0) return nodes
+    return compactGraphLanes(nodes.filter(n => !hiddenUsers.has(n.commit.author)))
+  }, [nodes, hiddenUsers])
 
   const graphColW = React.useMemo(() => {
     if (displayedNodes.length === 0) return GRAPH_PAD * 2 + TL_LANE_W
@@ -1658,11 +1651,11 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     return GRAPH_PAD + (maxLane + 1) * TL_LANE_W + GRAPH_PAD
   }, [displayedNodes])
   const branchHoverLabels = React.useMemo(() => {
-    const labels = new Map<string, string>([['main', defaultBranch || 'main']])
+    const labels = new Map<string, string>([['main', graphMainBranch]])
     for (const node of displayedNodes) {
       const tips = branchTips.get(node.commit.hash) ?? []
       for (const branch of tips) {
-        const key = branch.displayName === defaultBranch || branch.name === defaultBranch ? 'main' : node.branchKey
+        const key = branch.displayName === graphMainBranch || branch.name === graphMainBranch ? 'main' : node.branchKey
         const existing = labels.get(key)
         if (existing && !existing.split(' / ').includes(branch.name)) {
           labels.set(key, `${existing} / ${branch.name}`)
@@ -1672,18 +1665,14 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
       }
     }
     return labels
-  }, [displayedNodes, branchTips, defaultBranch])
+  }, [displayedNodes, branchTips, graphMainBranch])
   const minLeftWidth = React.useMemo(() => Math.max(320, graphColW + 260), [graphColW])
   const maxLeftWidth = Math.max(LEFT_WIDTH_MAX, minLeftWidth)
 
-  const branchNames = React.useMemo(
-    () => filterBranches.map(b => b.name),
-    [filterBranches]
+  const selectedBranchNames = useMemo(
+    () => selBranches ?? new Set(filterBranches.map(b => b.name)),
+    [selBranches, filterBranches]
   )
-  const fetchBranchTips = useCallback(async (branchList: BranchInfo[]) => {
-    const tips = groupBranchTips(branchList)
-    setBranchTips(new Map(tips))
-  }, [])
   const [stashOpen,   setStashOpen]   = useState(() => {
     try { return localStorage.getItem(STASH_KEY) === '1' } catch { return false }
   })
@@ -1770,65 +1759,82 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   // ── Load history ───────────────────────────────────────────────────────────
   const loadHistory = useCallback(async (
     limit: number,
-    selectedBranchesOverride?: Set<string>,
-    defaultBranchOverride?: string,
-    filterBranchesOverride?: BranchInfo[],
-    allBranchesOverride?: BranchInfo[],
+    {
+      local = localHistory,
+      selected = selBranches,
+      mainBranch = defaultBranch,
+      branchSnapshot,
+    }: { local?: boolean; selected?: Set<string> | null; mainBranch?: string; branchSnapshot?: BranchInfo[] } = {},
   ) => {
+    const request = Symbol()
+    historyRequest.current = request
     setHistLoading(true)
     setHistError('')
     try {
-      const active = selectedBranchesOverride ?? selBranches
-      const mainBranch = defaultBranchOverride ?? defaultBranch
-      const allBranchPool = allBranchesOverride ?? await ipc.branchList(repoPath)
-      const remoteBranchPool = filterBranchesOverride ?? timelineBranches(allBranchPool)
-      if (!allBranchesOverride) {
-        setBranches(allBranchPool)
-        fetchBranchTips(selectedGraphBranches(active, allBranchPool, remoteBranchPool))
-      }
-      const branchPool = mergeBranchLists(remoteBranchPool, selectedGraphBranches(active, allBranchPool, remoteBranchPool))
-      const refs = selectedGraphBranches(active, branchPool, remoteBranchPool).map(branch => branch.name).filter(Boolean)
-      if (refs.length === 0) {
-        setNodes([])
-        setTotalLoaded(0)
-        setHasMore(false)
-        return
-      }
-      const commits = await opRun('Loading history…', () => ipc.log(repoPath, { limit, all: !refs, refs }))
-      setHasMore(commits.length >= limit)
-      const defaultRef = branchPool.find(b => !b.isRemote && (b.displayName === mainBranch || b.name === mainBranch))?.name
-        ?? branchPool.find(b => active.has(b.name) && (b.displayName === mainBranch || b.name === mainBranch))?.name
-        ?? branchPool.find(b => b.displayName === mainBranch || b.name === mainBranch)?.name
-      const defaultCommits = defaultRef
-        ? await ipc.log(repoPath, { limit, all: false, refs: [defaultRef] }).catch(() => [])
+      const allBranchPool = branchSnapshot ?? await ipc.branchList(repoPath)
+      if (request !== historyRequest.current) return
+      const remoteBranchPool = timelineBranches(allBranchPool)
+      const active = selected ?? new Set(remoteBranchPool.map(branch => branch.name))
+      const currentBranch = allBranchPool.find(branch => branch.current && !branch.isRemote)
+      const localBranches = currentBranch ? [currentBranch] : []
+      const graphBranches = local
+        ? localBranches
+        : selectedGraphBranches(active, allBranchPool, remoteBranchPool)
+      const refs = graphBranches.map(branch => branch.name)
+      // Git defaults to HEAD when no refs are supplied, including detached HEAD.
+      const commits = local || refs.length > 0
+        ? await opRun('Loading history…', () => ipc.log(repoPath, { limit, all: false, refs: local ? undefined : refs }))
         : []
-      const defaultHashes = firstParentHashes(commits, defaultCommits[0]?.hash)
-      const selectedTipRefs = selectedBranchTips(branchPool, refs)
+      if (request !== historyRequest.current) return
+      const branchPool = mergeBranchLists(remoteBranchPool, graphBranches)
+      const isMainBranch = (branch: BranchInfo) => branch.displayName === mainBranch || branch.name === mainBranch
+      const defaultRef = local ? undefined : (
+        branchPool.find(b => !b.isRemote && isMainBranch(b))
+        ?? branchPool.find(b => active.has(b.name) && isMainBranch(b))
+        ?? branchPool.find(isMainBranch)
+      )?.name
+      let mainTip = local ? commits[0]?.hash : undefined
+      if (defaultRef && commits.length > 0) {
+        const defaultCommits = await ipc.log(repoPath, { limit, all: false, refs: [defaultRef] }).catch(() => [])
+        mainTip = defaultCommits[0]?.hash
+      }
+      if (request !== historyRequest.current) return
+      const mainHashes = firstParentHashes(commits, mainTip)
+      const selectedTipRefs = selectedBranchTips(graphBranches, refs)
       // Key each lane by the branch name where we know one, so a branch keeps
       // its identity — and therefore its colour — as new commits move its tip.
       const graph = remapGraphWithMainLeft(
         computeGraph(commits, { branchNameByHash: selectedTipRefs }),
-        defaultHashes,
+        mainHashes,
       )
-      const allowedKeys = new Set<string>()
-      for (const node of graph) {
-        const ref = selectedTipRefs.get(node.commit.hash)
-        if (!ref) continue
-        const branch = branchPool.find(b => b.name === ref)
-        if (branch && (branch.displayName === mainBranch || branch.name === mainBranch)) allowedKeys.add('main')
-        else allowedKeys.add(node.branchKey)
+      let visibleGraph = graph
+      if (!local) {
+        const allowedKeys = new Set<string>()
+        for (const node of graph) {
+          const ref = selectedTipRefs.get(node.commit.hash)
+          if (!ref) continue
+          const branch = branchPool.find(b => b.name === ref)
+          if (branch && isMainBranch(branch)) allowedKeys.add('main')
+          else allowedKeys.add(node.branchKey)
+        }
+        if (selected || allowedKeys.has('main')) visibleGraph = pruneGraphToBranchKeys(graph, allowedKeys)
       }
-      const pruned = pruneGraphToBranchKeys(graph, allowedKeys)
-      setNodes(pruned)
-      setTotalLoaded(pruned.length)
+      setBranches(allBranchPool)
+      setBranchTips(groupBranchTips(graphBranches))
+      setHasMore(commits.length >= limit)
+      setNodes(visibleGraph)
+      setTotalLoaded(visibleGraph.length)
     } catch (error) {
       // Most callers start a load without awaiting it, so a rejection here has
       // nothing to catch it. Keep the commits already shown and say why they are stale.
-      setHistError(error instanceof Error ? error.message : String(error))
+      if (request === historyRequest.current) setHistError(error instanceof Error ? error.message : String(error))
     } finally {
-      setHistLoading(false)
+      if (request === historyRequest.current) setHistLoading(false)
     }
-  }, [repoPath, opRun, selBranches, defaultBranch, filterBranches, fetchBranchTips])
+  }, [repoPath, opRun, selBranches, defaultBranch, localHistory])
+
+  const loadHistoryRef = useRef(loadHistory)
+  useEffect(() => { loadHistoryRef.current = loadHistory }, [loadHistory])
 
   const handleCommitListScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget
@@ -1844,40 +1850,36 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
 
   // ── Initial load ───────────────────────────────────────────────────────────
   useEffect(() => {
+    let cancelled = false
+    const initialRequest = historyRequest.current
     limitRef.current = INITIAL_LIMIT
+    setSelBranches(null)
+    setNodes([])
+    setTotalLoaded(0)
+    setHasMore(false)
+    setBranchTips(new Map())
     setCenterFile(null); setDiff(null); setBlame([])
     setLeftSel({ kind: 'working-tree' })
-    ipc.getRemoteUrl(repoPath).then(setRemoteUrl).catch(() => {})
-    Promise.all([ipc.branchList(repoPath), ipc.gitDefaultBranch(repoPath)]).then(async ([bl, def]) => {
-      setBranches(bl)
+    ipc.getRemoteUrl(repoPath).then(url => { if (!cancelled) setRemoteUrl(url) }).catch(() => {})
+    Promise.all([ipc.branchList(repoPath), ipc.gitDefaultBranch(repoPath).catch(() => 'main')]).then(([bl, def]) => {
+      if (cancelled) return
       setDefaultBranch(def)
-      const liveBranches = timelineBranches(bl)
-      const nextSel = new Set(liveBranches.map(b => b.name))
-      fetchBranchTips(selectedGraphBranches(nextSel, bl, liveBranches))
-      setSelBranches(nextSel)
-      limitRef.current = INITIAL_LIMIT
-      loadHistory(INITIAL_LIMIT, nextSel, def, liveBranches, bl)
-    }).catch(() => {})
-  }, [repoPath])
+      const branchSnapshot = initialRequest === historyRequest.current ? bl : undefined
+      loadHistoryRef.current(limitRef.current, { mainBranch: def, branchSnapshot })
+    }).catch(() => { if (!cancelled) loadHistoryRef.current(limitRef.current) })
+    return () => {
+      cancelled = true
+      historyRequest.current = null
+    }
+  }, [repoPath, limitRef])
 
   // ── Refresh history when a git operation changes HEAD (fetch, pull, push, checkout, merge, commit) ──
   const historyTickRef   = useRef(historyTick)
-  const loadHistoryRef   = useRef(loadHistory)
-  useEffect(() => { loadHistoryRef.current = loadHistory }, [loadHistory])
   useEffect(() => {
     if (historyTick === historyTickRef.current) return
     historyTickRef.current = historyTick
-    ipc.branchList(repoPath)
-      .then(bl => {
-        setBranches(bl)
-        const liveBranches = timelineBranches(bl)
-        fetchBranchTips(selectedGraphBranches(selBranches, bl, liveBranches))
-        loadHistoryRef.current(limitRef.current, selBranches, defaultBranch, liveBranches, bl)
-      })
-      .catch(() => {
-        loadHistoryRef.current(limitRef.current)
-      })
-  }, [historyTick, repoPath, selBranches, defaultBranch, fetchBranchTips])
+    loadHistoryRef.current(limitRef.current)
+  }, [historyTick, limitRef])
 
   useEffect(() => {
     let cancelled = false
@@ -1969,23 +1971,37 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     }
   }
 
+  const toggleHistoryScope = () => {
+    const local = !localHistory
+    setLocalHistory(local)
+    setFilterOpen(false)
+    setUserFilterOpen(false)
+    setHoveredBranchKey(null)
+    setNodes([])
+    setTotalLoaded(0)
+    setHasMore(false)
+    setBranchTips(new Map())
+    selectWorkingTree()
+    limitRef.current = INITIAL_LIMIT
+    loadHistory(INITIAL_LIMIT, { local })
+  }
+
   const toggleBranch = (name: string) => {
     const branch = filterBranches.find(b => b.name === name)
     if (!branch) return
-    const next = new Set(selBranches)
+    const next = new Set(selectedBranchNames)
     if (next.has(name)) next.delete(name)
     else next.add(name)
     setSelBranches(next)
     limitRef.current = INITIAL_LIMIT
-    loadHistory(INITIAL_LIMIT, next)
+    loadHistory(INITIAL_LIMIT, { selected: next })
   }
 
   const showAllBranches = () => {
-    const next = new Set(branchNames)
-    setSelBranches(next)
+    setSelBranches(null)
     setFilterOpen(false)
     limitRef.current = INITIAL_LIMIT
-    loadHistory(INITIAL_LIMIT, next)
+    loadHistory(INITIAL_LIMIT, { selected: null })
   }
 
   const hideAllBranches = () => {
@@ -1993,7 +2009,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
     setSelBranches(next)
     setFilterOpen(false)
     limitRef.current = INITIAL_LIMIT
-    loadHistory(INITIAL_LIMIT, next)
+    loadHistory(INITIAL_LIMIT, { selected: next })
   }
 
   const toggleUser = (author: string) => {
@@ -2026,11 +2042,11 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
   const selectedCommit = leftSel.kind === 'commit' ? leftSel.commit : null
   const legendHasMain = displayedNodes.some(node => node.isMain)
   const legendHasMerge = displayedNodes.some(node => node.commit.parentHashes.length > 1)
-  const legendHasBranchTip = displayedNodes.some(node => (branchTips.get(node.commit.hash) ?? []).some(branch => branch.displayName !== defaultBranch && branch.name !== defaultBranch))
+  const legendHasBranchTip = displayedNodes.some(node => (branchTips.get(node.commit.hash) ?? []).some(branch => branch.displayName !== graphMainBranch && branch.name !== graphMainBranch))
   const legendHasPush = displayedNodes.some(node => needsPushHashes.has(node.commit.hash))
   const legendHasPull = displayedNodes.some(node => needsPullHashes.has(node.commit.hash))
   // A "checked out" pill only shows when the current branch's tip is on screen
-  // and it isn't the default — the default already has its own ★ entry.
+  // and it isn't the main graph lane, which already has its own ★ entry.
   const legendHasCurrentBranch = displayedNodes.some(node =>
     (branchTips.get(node.commit.hash) ?? []).some(branch =>
       branch.current && branch.name !== defaultBranch && branch.displayName !== defaultBranch))
@@ -2060,20 +2076,20 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
           height: 32, paddingLeft: 12, paddingRight: 8, flexShrink: 0,
           borderBottom: '1px solid #1e2436', background: '#0d0f15', gap: 5,
         }}>
-          <span style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 10, fontWeight: 700, color: '#2a3040', letterSpacing: '0.1em', textTransform: 'uppercase', flexShrink: 0 }}>
-            {(hiddenUsers.size > 0 || showOnlyPushReady)
+          <span style={{ fontFamily: 'var(--lg-font-ui)', fontSize: 10, fontWeight: 700, color: '#2a3040', letterSpacing: '0.1em', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {hiddenUsers.size > 0
               ? `${displayedNodes.length} of ${totalLoaded} Commits`
               : totalLoaded > 0 ? `${totalLoaded} Commits` : 'Commits'}
           </span>
           <div style={{ flex: 1 }} />
           <ActionBtn
-            onClick={() => setShowOnlyPushReady(s => !s)}
+            onClick={toggleHistoryScope}
             size="sm"
-            title={showOnlyPushReady ? 'Showing only commits ready to push — click to show all' : 'Show only commits ready to push'}
-            color={showOnlyPushReady ? '#7dd3fc' : undefined}
+            title={localHistory ? 'Current branch history. Switch to Global.' : 'All-branches history. Switch to Local.'}
+            color={localHistory ? '#7dd3fc' : undefined}
             style={{ height: 22, paddingLeft: 8, paddingRight: 8, fontSize: 10.5, gap: 4, flexShrink: 0 }}
           >
-            <span>↑ {needsPushHashes.size}</span>
+            {localHistory ? 'Local' : 'Global'}
           </ActionBtn>
           <TLUserDropdown
             open={userFilterOpen}
@@ -2084,17 +2100,17 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
             onShowAll={showAllUsers}
             onHideAll={hideAllUsers}
           />
-          <TLBranchDropdown
+          {!localHistory && <TLBranchDropdown
             open={filterOpen}
             onToggleOpen={() => setFilterOpen(o => !o)}
             branches={filterBranches}
-            selectedBranches={selBranches}
+            selectedBranches={selectedBranchNames}
             defaultBranch={defaultBranch}
             branchColors={branchColors}
             onToggleBranch={toggleBranch}
             onShowAll={showAllBranches}
             onHideAll={hideAllBranches}
-          />
+          />}
           <ActionBtn
             onClick={() => loadHistory(limitRef.current)}
             disabled={histLoading}
@@ -2169,7 +2185,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
           )}
           {!histLoading && nodes.length > 0 && displayedNodes.length === 0 && (
             <p style={{ fontFamily: 'var(--lg-font-mono)', fontSize: 11, color: '#2a3040', padding: '16px 12px' }}>
-              {showOnlyPushReady ? 'No commits ready to push.' : 'No commits match the user filter.'}
+              No commits match the user filter.
             </p>
           )}
           {displayedNodes.map(node => (
@@ -2218,7 +2234,7 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
         }}>
           <span>Legend:</span>
           {legendHasMain && (
-            <LegendItem label="main path">
+            <LegendItem label={localHistory ? 'local path' : 'main path'}>
               <line x1={1} y1={8} x2={15} y2={8}
                 stroke={MAIN_BRANCH_COLOR} strokeWidth={2.7} strokeOpacity={0.86} strokeLinecap="round" />
             </LegendItem>
@@ -2241,8 +2257,8 @@ export function TimelinePanel({ repoPath }: { repoPath: string }) {
           </LegendItem>
           {legendHasPush && <LegendBadge dir="up" label="to push" />}
           {legendHasPull && <LegendBadge dir="down" label="to pull" />}
-          {legendHasMain && <BranchPill label="default" color={MAIN_BRANCH_COLOR} icon="★" isDefault />}
-          {legendHasCurrentBranch && <BranchPill label="checked out" color={LEGEND_NEUTRAL} icon="◉" />}
+          {legendHasMain && (!localHistory || graphMainBranch === defaultBranch) && <BranchPill label="default" color={MAIN_BRANCH_COLOR} icon="★" isDefault />}
+          {legendHasCurrentBranch && <BranchPill label="checked out" color={localHistory ? MAIN_BRANCH_COLOR : LEGEND_NEUTRAL} icon="◉" />}
           <span style={{ opacity: 0.75 }}>colour = branch</span>
         </div>
         <div

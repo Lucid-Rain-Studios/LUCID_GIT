@@ -19,7 +19,10 @@ function harness(files, ipc, options = {}) {
     } }) },
     '@/stores/repoStore': { useRepoStore: store({ error: null }) },
   }, { alert: error => errors.push(error) })
-  const props = { files, repoPath: options.repo || 'repo', locks: files.map(file => ({ path: file.path, owner: { login: 'me' } })), currentUserName: null, onRefresh() {} }
+  const props = { files, repoPath: options.repo || 'repo', locks: options.locks || files.map(file => ({ path: file.path, owner: { login: 'me' } })), currentUserName: null, onRefresh() {} }
+  if (options.timeline) Object.assign(props, {
+    deferredStagePaths: new Set(), onToggleDeferredStagePath() {}, onSetDeferredStagePaths() {},
+  })
   const render = () => c.render('FileTree', props)
   return { c, render, confirmations, unlocked, errors, batches }
 }
@@ -27,6 +30,7 @@ const changed = { path: 'changed.txt', indexStatus: 'M', workingStatus: 'M', sta
 const staged = { path: 'staged.txt', indexStatus: 'A', workingStatus: ' ', staged: true }
 const added = { path: 'added.txt', indexStatus: '?', workingStatus: '?', staged: false }
 const files = [changed, staged, added]
+const level = { path: 'Content/Maps/Harbour.umap', indexStatus: ' ', workingStatus: 'M', staged: false }
 const discardButton = tree => find(tree, node => node.props?.label === 'Discard')
 const select = tree => {
   const dropdown = find(tree, node => node.type?.name === 'DiscardDropdown')
@@ -54,6 +58,50 @@ test('discard reports partial bulk-unlock failures without retrying the successf
   expect(discards).toBe(1); expect(h.batches).toHaveLength(1)
   expect(h.errors[0]).toContain('Changes were discarded, but unlocking needs attention')
   expect(h.errors[0]).toContain('staged.txt: offline')
+})
+
+test('toolbar discard matches the level owner without regard to login casing and leaves other locks alone', async () => {
+  const otherLevel = { ...level, path: 'Content/Maps/Other.umap' }
+  const h = harness([level, otherLevel], { discardAll: async () => {} }, { timeline: true, locks: [
+    { id: 'level-lock', path: level.path, owner: { login: 'Me' } },
+    { id: 'other-lock', path: otherLevel.path, owner: { login: 'teammate' } },
+  ] })
+  discardButton(h.render()).props.onClick(); await flush()
+  expect(h.errors).toEqual([])
+  expect(h.batches).toEqual([[{ filePath: level.path, lockId: 'level-lock' }]])
+})
+
+test('right-click discard awaits the owned level unlock with its lock ID and reports a failed release', async () => {
+  const calls = [], alerts = []
+  let rejectUnlock
+  const pendingUnlock = new Promise((_, reject) => { rejectUnlock = reject })
+  const panel = component('src/components/changes/FileRow.tsx', {
+    '@/ipc': { ipc: { discard: async (...args) => calls.push(['discard', ...args]) } },
+    '@/stores/forecastStore': { useForecastStore: store({ conflicts: [] }) },
+    '@/stores/assetViewerStore': { useAssetViewerStore: store({}) },
+    '@/stores/lockStore': { useLockStore: store({ unlockFile: (...args) => {
+      calls.push(['unlock', ...args])
+      return pendingUnlock
+    } }) },
+    '@/stores/authStore': { useAuthStore: store({ isAdmin: () => false }) },
+    '@/stores/dialogStore': { useDialogStore: store({ confirm: async () => true, alert: async args => alerts.push(args) }) },
+  })
+  const props = {
+    repoPath: 'repo', currentUserName: 'me', file: level,
+    lock: { id: 'level-lock', owner: { login: 'Me' } },
+    onRefresh: () => calls.push(['refresh']),
+  }
+  const tree = panel.render('FileRow', props)
+  find(tree, node => node.props?.onContextMenu).props.onContextMenu({ preventDefault() {}, clientX: 0, clientY: 0 })
+  const menu = panel.render('FileRow', props)
+  const discard = find(menu, node => node.props?.onClick?.name === 'doDiscard').props.onClick()
+  await flush()
+  expect(calls).toEqual([['discard', 'repo', [level.path], false], ['unlock', 'repo', level.path, false, 'level-lock']])
+  rejectUnlock(Error('offline'))
+  await discard
+  expect(calls.at(-1)).toEqual(['refresh'])
+  expect(alerts[0].message).toContain('offline')
+  expect(alerts[0].message).toContain(level.path)
 })
 
 test('dropdown Changed and Added keep the opposite group intact, and cancellation performs no mutation', async () => {

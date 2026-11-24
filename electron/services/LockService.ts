@@ -1,3 +1,4 @@
+import { isGitHubLockOwner } from '../util/github-login'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -127,7 +128,7 @@ class LockService {
     const cached = this.authoritative.get(repoPath)
     const locks = cached && cached.accountId === accountId && Date.now() - cached.at < 30_000 ? cached.locks : await this.listLocks(repoPath)
     const login = this.currentUserLogin()
-    const blocked = locks.filter(lock => lfsPaths.has(lock.path) && lock.owner.login !== login)
+    const blocked = locks.filter(lock => lfsPaths.has(lock.path) && !isGitHubLockOwner(lock, login))
     if (blocked.length) throw new Error('Cannot stage files locked by another owner: ' + blocked.map(lock => lock.path + ' (' + lock.owner.name + ')').join(', '))
   }
 
@@ -526,7 +527,7 @@ class LockService {
     const login = this.currentUserLogin()
     const currentLocks = await this.listLocks(repoPath)
     const mine = currentLocks.filter(l =>
-      login && l.owner.login === login && this.filesUnderFolder([l.path], folderPath).length > 0,
+      isGitHubLockOwner(l, login) && this.filesUnderFolder([l.path], folderPath).length > 0,
     )
     const result = await this.unlockFiles(
       repoPath,
@@ -619,7 +620,7 @@ class LockService {
         // disappeared and you didn't initiate the unlock yourself within the
         // grace window, collect it for a single bundled toast below so a
         // batch force-unlock doesn't spam the OS notification center.
-        if (currentUserLogin && lock.owner.login === currentUserLogin) {
+        if (isGitHubLockOwner(lock, currentUserLogin)) {
           const key = `${repoPath}::${lock.path}`
           const selfUnlockedAt = this.recentSelfUnlocks.get(key)
           if (selfUnlockedAt !== undefined && now - selfUnlockedAt < SELF_UNLOCK_GRACE_MS) {

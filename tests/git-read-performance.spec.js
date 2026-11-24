@@ -21,7 +21,7 @@ function watcherHarness(platform = 'win32', linked = false) {
     }, gitOpActivity: () => ({ inFlight: busy ? 1 : 0, ranDuring: () => false }) },
     './LogService': { logService: { warn() {} } }, './PerformanceService': { performanceService: { get: () => ({ watcherDelayMs: 100 }) } },
   }, { process: { platform }, setTimeout: fn => { timers.set(++next, fn); return next }, clearTimeout: id => timers.delete(id) }).exports.watcherService
-  return { service, watchers, repo, gitDir, common, busy: value => { busy = value }, stage: () => { index = index.replace('abc', 'def') }, start: () => service.watch(repo, () => changes++),
+  return { service, watchers, repo, gitDir, common, busy: value => { busy = value }, stage: () => { index = index.replace('abc', 'def') }, start: isWriting => service.watch(repo, () => changes++, isWriting),
     indexReads: () => indexReads,
     holdRead: () => { heldRead = deferred(); return heldRead },
     flush: async () => { for (let round = 0; round < 5; round++) { const pending = [...timers.values()]; timers.clear(); pending.forEach(fn => fn()); await new Promise(resolve => setImmediate(resolve)) }; return changes },
@@ -49,6 +49,22 @@ for (const platform of ['win32', 'linux']) test(`${platform} watcher ignores met
   h.emit(0, 'Content/Asset.uasset'); h.emit(0, 'Intermediate/tracked.uasset'); expect(await h.flush()).toBe(3)
   h.service.unwatchAll(); expect(h.watchers.every(w => w.closed)).toBe(true)
   h.emit(0, 'Content/late.uasset'); expect(await h.flush()).toBe(3)
+})
+
+test('pull watcher bursts wait for the writer and refresh once after release', async () => {
+  const h = watcherHarness()
+  let writing = true
+  await h.start(() => writing)
+  for (let i = 0; i < 10; i++) {
+    h.emit(0, 'Content/Asset.uasset')
+    h.emit(1, 'index')
+    expect(await h.flush()).toBe(0)
+  }
+  expect(h.indexReads()).toBe(1)
+  writing = false
+  expect(await h.flush()).toBe(1)
+  expect(h.indexReads()).toBe(2)
+  h.service.unwatchAll()
 })
 
 test('index changes during verification get a fresh follow-up, and failed checks still request refresh', async () => {

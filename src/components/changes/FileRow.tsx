@@ -1,3 +1,4 @@
+import { isGitHubLockOwner } from '../../../electron/util/github-login'
 import React, { useState, useEffect, useRef } from 'react'
 import { FileStatus, Lock, ipc } from '@/ipc'
 import { useLockStore } from '@/stores/lockStore'
@@ -73,7 +74,7 @@ export function FileRow({
     : ''
 
   const fullPath   = `${repoPath.replace(/\\/g, '/')}/${file.path.replace(/\\/g, '/')}`
-  const isLockedByMe    = lock !== null && lock.owner.login === currentUserName
+  const isLockedByMe    = isGitHubLockOwner(lock, currentUserName)
   const isLockedByOther = lock !== null && !isLockedByMe
 
   const [ctx, setCtx]   = useState<{ x: number; y: number } | null>(null)
@@ -115,10 +116,18 @@ export function FileRow({
     if (!ok) return
     try {
       await ipc.discard(repoPath, [file.path], isUntracked)
+    } catch (e) {
+      await dialog.alert({ title: 'Error', message: String(e) })
+      return
+    }
+    try {
+      if (lock && isLockedByMe) await unlockFile(repoPath, file.path, false, lock.id)
+    } catch (e) {
       onRefresh()
-      // Release my lock when I explicitly discard this file's local changes.
-      if (isLockedByMe) unlockFile(repoPath, file.path).catch(() => {})
-    } catch (e) { await dialog.alert({ title: 'Error', message: String(e) }) }
+      await dialog.alert({ title: 'Changes discarded', message: `Could not unlock "${file.path}": ${String(e)}` })
+      return
+    }
+    onRefresh()
   }
   const doIgnoreFile   = async () => { close(); try { await ipc.addToGitignore(repoPath, file.path); onRefresh() } catch (e) { await dialog.alert({ title: 'Error', message: String(e) }) } }
   const doIgnoreFolder = async () => { close(); if (!dir) return; try { await ipc.addToGitignore(repoPath, dir + '/'); onRefresh() } catch (e) { await dialog.alert({ title: 'Error', message: String(e) }) } }

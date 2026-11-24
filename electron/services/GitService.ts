@@ -770,7 +770,7 @@ class GitService {
   }
 
   /** Push current branch to its upstream. Streams progress and returns the pre-push metadata. */
-  async push(repoPath: string, onProgress?: ProgressCallback, force = false, lockOverride?: PushLockOverride): Promise<{ branch: string; filesAhead: string[] }> {
+  async push(repoPath: string, onProgress?: ProgressCallback, force = false, lockOverride?: PushLockOverride): Promise<{ branch: string; filesAhead: string[]; unlockScanError?: string }> {
     if (lockOverride && force) throw new Error('Lock overrides cannot be combined with force push.')
     if (!force) {
       onProgress?.({ id: 'push-fetch', label: 'Fetching before push', status: 'running', progress: 4 })
@@ -797,10 +797,24 @@ class GitService {
     onProgress?.({ id: 'push-scan', label: 'Scanning outgoing changes', status: 'running', progress: 8 })
 
     let filesAhead: string[] = []
-    if (hasPublishedBranch && upstreamRes.exitCode === 0 && upstreamRes.stdout.trim()) {
-      const diffRes = await execSafe(['diff', '--name-only', '-z', `${upstreamRes.stdout.trim()}..HEAD`], repoPath)
-      if (diffRes.exitCode === 0) {
-        filesAhead = nulPaths(diffRes.stdout)
+    let unlockScanError: string | undefined
+    let scannedHead: string | undefined
+    const upstream = upstreamRes.stdout.trim()
+    const destinationRef = `refs/remotes/origin/${branch}`
+    if (!lockOverride && hasPublishedBranch && upstreamRes.exitCode === 0 && upstream) {
+      try {
+        const tips = await exec(['rev-parse', destinationRef, 'HEAD'], repoPath)
+        const [base, head] = tips.stdout.trim().split(/\s+/)
+        scannedHead = head
+        const range = `${base}..${head}`
+        // Keep the final tree delta and include paths changed only in intermediate commits.
+        const [net, outgoing] = await Promise.all([
+          exec(['diff', '--name-only', '--no-renames', '-z', range], repoPath),
+          force ? Promise.resolve([]) : this.changedPathsInCommits(repoPath, [range]),
+        ])
+        filesAhead = [...new Set([...nulPaths(net.stdout), ...outgoing])]
+      } catch (error) {
+        unlockScanError = 'Could not check which pushed files are eligible to unlock. ' + String(error)
       }
     }
 
@@ -831,7 +845,22 @@ class GitService {
     onProgress?.({ id: 'push-connect', label: 'Connecting to remote', status: 'running', progress: 12 })
     // Push is idempotent, so replaying a partially-completed push is safe.
     await this.withRemote(repoPath, () => this.withStalePackRetry(repoPath, () => execWithProgress(pushArgs, repoPath, onProgress), onProgress))
-    return { branch, filesAhead }
+    if (filesAhead.length) {
+      try {
+        const [tips, urls] = await Promise.all([
+          exec(['rev-parse', destinationRef, 'HEAD'], repoPath),
+          exec(['remote', 'get-url', '--push', '--all', 'origin'], repoPath),
+        ])
+        const [published, current] = tips.stdout.trim().split(/\s+/)
+        if (published !== scannedHead || current !== scannedHead || urls.stdout.trim() !== remoteUrl) {
+          throw new Error('Could not confirm the scanned commit on the expected origin branch.')
+        }
+      } catch (error) {
+        filesAhead = []
+        unlockScanError = String(error)
+      }
+    }
+    return { branch, filesAhead, unlockScanError }
   }
 
   /**
@@ -980,6 +1009,10 @@ class GitService {
     const range = published && upstreamRes.exitCode === 0 && upstreamRes.stdout.trim()
       ? [`${upstreamRes.stdout.trim()}..HEAD`]
       : ['HEAD', '--not', '--remotes=origin']
+    return this.changedPathsInCommits(repoPath, range)
+  }
+
+  private async changedPathsInCommits(repoPath: string, range: string[]): Promise<string[]> {
     const commits = await exec(['rev-list', '--max-count=10001', ...range], repoPath)
     const hashes = commits.stdout.trim().split(/\s+/).filter(Boolean)
     if (hashes.length > 10000) throw new Error('Too many outgoing commits to check locks. Fetch the destination and retry checks.')

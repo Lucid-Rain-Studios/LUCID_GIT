@@ -1,3 +1,4 @@
+import { sameGitHubLogin } from '../../../electron/util/github-login'
 import React, { useEffect, useState } from 'react'
 import { ipc, UESetupStatus, UEPluginStatus, UEConfigStatus, GitIdentity } from '@/ipc'
 import { useRepoStore } from '@/stores/repoStore'
@@ -87,7 +88,7 @@ export function UnrealPanel({ repoPath }: UnrealPanelProps) {
   }
 
   const identityMismatch = identity && currentAccount &&
-    identity.name !== currentAccount.login
+    !sameGitHubLogin(identity.name, currentAccount.login)
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden text-[11px] font-mono">
@@ -247,7 +248,7 @@ export function UnrealPanel({ repoPath }: UnrealPanelProps) {
               </div>
             )}
 
-            {identity && currentAccount && identity.name === currentAccount.login && (
+            {identity && currentAccount && sameGitHubLogin(identity.name, currentAccount.login) && (
               <div className="flex items-center gap-1.5 text-[10px] text-lg-success">
                 <span>✓</span>
                 <span>Identity linked — locks will reconcile with UE editor.</span>

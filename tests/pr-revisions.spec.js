@@ -135,8 +135,9 @@ for (const available of [true, false]) {
       },
       githubMergePR: async args => merges.push(args),
     }
-    const h = component('src/components/overview/OverviewPanel.tsx', {
-      '@/ipc': { ipc: api }, '@/stores/operationStore': { useOperationStore: store({ run: (_, fn) => fn() }) },
+    const h = component('src/components/pr/PRReviewTask.tsx', {
+      '@/ipc': { ipc: api, prTaskIpc: api }, '@/stores/operationStore': { useOperationStore: store({ run: (_, fn) => fn() }) },
+      '@/stores/prReviewStore': { usePRReviewStore: Object.assign(store({busy:false}), {setState:noop}) },
       '@/lib/useDialogOverlayDismiss': { useDialogOverlayDismiss: () => ({}) },
       '@/stores/repoStore': { useRepoStore: store({ currentBranch: 'main', refreshStatus: noop,
         bumpSyncTick: noop, bumpHistoryTick: noop, bumpPrTick: noop }) },

@@ -32,6 +32,65 @@ test('first-publication checks find outgoing locked paths and do not swallow Git
   await expect(gitService.aheadFilePaths(path.join(repo, 'missing'))).rejects.toThrow()
 })
 
+for (const pullFirst of [false, true]) {
+  test(`main push catches renamed and restored lock paths (${pullFirst ? 'after pull' : 'direct'})`, async () => {
+    const { repo, remote } = repoFixture()
+    git(repo, 'checkout', '-q', 'main')
+    git(repo, 'config', 'diff.renames', 'true')
+    fs.writeFileSync(path.join(repo, 'restored.uasset'), 'original')
+    git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'track second asset'); git(repo, 'push', '-q')
+
+    git(repo, 'mv', 'asset.uasset', 'moved.uasset')
+    fs.writeFileSync(path.join(repo, 'restored.uasset'), 'temporary edit')
+    git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'rename and edit assets')
+    fs.writeFileSync(path.join(repo, 'restored.uasset'), 'original')
+    git(repo, 'commit', '-qam', 'restore second asset')
+
+    if (pullFirst) {
+      const teammate = tmpDir('lg-lock-teammate-')
+      git(teammate, 'clone', '-q', remote, '.')
+      git(teammate, 'config', 'user.name', 'Teammate'); git(teammate, 'config', 'user.email', 'peer@example.com')
+      fs.writeFileSync(path.join(teammate, 'incoming.uasset'), 'teammate asset')
+      git(teammate, 'add', '.'); git(teammate, 'commit', '-qm', 'incoming asset'); git(teammate, 'push', '-q')
+      git(repo, 'pull', '-q', '--no-rebase', '--no-edit')
+    }
+
+    if (pullFirst) fs.writeFileSync(path.join(repo, 'moved.uasset'), 'more local work')
+    const { CHANNELS } = require(path.join(DIST, 'ipc/channels'))
+    const handlers = new Map(), unlocked = []
+    component('electron/ipc/handlers.ts', {
+      electron: { ipcMain: { handle: (name, fn) => handlers.set(name, fn) } }, './channels': { CHANNELS },
+      '../util/repo-gate': { withRepoSlot: (_, __, fn) => fn() },
+      '../services/GitService': { gitService },
+      '../services/AuthService': { authService: { listAccounts: () => ({ currentAccountId: '1', accounts: [{ userId: '1', login: 'me' }] }) } },
+      '../services/LockService': { lockService: {
+        listLocks: async () => ['asset.uasset', 'moved.uasset', 'restored.uasset', 'incoming.uasset'].map(file => ({
+          id: file, path: file, owner: { login: 'me' },
+        })),
+        unlockFiles: async (_, targets) => { unlocked.push(...targets.map(target => target.filePath)); return { failed: [] } },
+      } },
+    }).exports.registerHandlers()
+    await handlers.get(CHANNELS.GIT_PUSH)({ sender: { isDestroyed: () => true } }, repo)
+    expect(unlocked.sort()).toEqual(pullFirst
+      ? ['asset.uasset', 'restored.uasset']
+      : ['asset.uasset', 'moved.uasset', 'restored.uasset'])
+    expect(git(remote, 'rev-parse', 'main')).toBe(git(repo, 'rev-parse', 'HEAD'))
+  })
+}
+
+test('a successful push redirected away from main retains its locks', async () => {
+  const { repo, remote } = repoFixture()
+  git(repo, 'checkout', '-q', 'main')
+  git(repo, 'merge', '--ff-only', 'topic')
+  const previousMain = git(remote, 'rev-parse', 'main')
+  git(repo, 'config', 'remote.origin.push', 'refs/heads/main:refs/heads/review')
+  const result = await gitService.push(repo)
+  expect(git(remote, 'rev-parse', 'review')).toBe(git(repo, 'rev-parse', 'HEAD'))
+  expect(git(remote, 'rev-parse', 'main')).toBe(previousMain)
+  expect(result.filesAhead).toEqual([])
+  expect(result.unlockScanError).toContain('expected origin branch')
+})
+
 test('override publishes once with URL-specific verification disabled and keeps config, hooks and default branch intact', async () => {
   const { repo, remote } = repoFixture()
   const urlKey = 'lfs.https://example.com/assets.git/info/lfs.locksverify'
@@ -78,8 +137,13 @@ function dialogFixture(options = {}) {
   const calls = []
   const lock = { id: '1', path: 'asset.uasset', owner: { login: 'peer', name: 'Peer' }, lockedAt: new Date().toISOString() }
   const repo = { repoPath: 'repo', refreshStatus: async () => {} }
+  const api = { currentBranch: async () => check.branch, pushLockCheck: async () => { if (options.fail) throw Error('offline'); return check }, listLocks: async () => options.locks || [lock], push: async (...args) => { calls.push(args); if (options.push) await options.push() } }
+  const taskState = { repoPath: null }
+  const task = Object.assign(store(taskState), { setState: update => Object.assign(taskState, update) })
   const h = component('src/components/locks/PushBlockedByLocksDialog.tsx', {
-    '@/ipc': { ipc: { pushLockCheck: async () => { if (options.fail) throw Error('offline'); return check }, listLocks: async () => options.locks || [lock], push: async (...args) => { calls.push(args); if (options.push) await options.push() } } },
+    '@/stores/backgroundRepoTaskStore': { useBackgroundRepoTaskStore: task },
+    '@/stores/prReviewStore': { usePRReviewStore: store({ busy: false }) },
+    '@/ipc': { ipc: api, backgroundTaskIpc: api },
     '@/stores/repoStore': { useRepoStore: store(repo) },
     '@/stores/authStore': { useAuthStore: store({ accounts: [{ userId: 'me', login: 'me' }], currentAccountId: 'me' }) },
     '@/stores/operationStore': { useOperationStore: store({ run: async (_, fn) => fn() }) },
@@ -123,7 +187,7 @@ test('override requires explicit confirmation, keeps normal retry separate and s
   const confirm = d.button(tree, 'Publish branch with locks retained')
   const pending = confirm.props.onClick(); await confirm.props.onClick()
   expect(d.calls).toEqual([['repo', false, { branch: 'topic', head: 'abc', remoteUrl: 'url', targetBranch: 'topic' }]])
-  expect(d.button(d.render(), 'Cancel').props.disabled).toBe(true)
+  expect(d.button(d.render(), 'Hide progress')).toBeTruthy()
   finish(); await pending
   expect(d.calls).toContain('pushed')
   const retry = dialogFixture(); retry.render(); await settle(retry.h)

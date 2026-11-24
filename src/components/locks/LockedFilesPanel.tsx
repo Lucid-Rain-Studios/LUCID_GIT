@@ -1,3 +1,4 @@
+import { isGitHubLockOwner } from '../../../electron/util/github-login'
 import { AppRightSelectionItem } from '@/components/ui/AppRightSelectionOptions'
 import { useBlueprintFileMenu } from '@/lib/useBlueprintFileMenu'
 import React, { useState, useCallback, useRef, useMemo } from 'react'
@@ -58,11 +59,11 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
   const lastSelectedIdRef = useRef<string | null>(null)
 
   const myLocks = useMemo(
-    () => locks.filter(l => currentLogin && l.owner.login === currentLogin),
+    () => locks.filter(l => isGitHubLockOwner(l, currentLogin)),
     [locks, currentLogin]
   )
   const teamLocks = useMemo(
-    () => locks.filter(l => !currentLogin || l.owner.login !== currentLogin),
+    () => locks.filter(l => !isGitHubLockOwner(l, currentLogin)),
     [locks, currentLogin]
   )
   const source = tab === 'mine' ? myLocks : teamLocks
@@ -79,7 +80,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
 
   const selectableLocks = useMemo(() => filtered.filter(lock => {
     if (lock.prOverlay) return false
-    const isOwn = currentLogin && lock.owner.login === currentLogin
+    const isOwn = isGitHubLockOwner(lock, currentLogin)
     return Boolean(isOwn || isAdmin)
   }), [filtered, currentLogin, isAdmin])
   const selectedLocks = useMemo(
@@ -108,7 +109,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
     const seen = new Map<string, typeof groups[0]>()
     for (const l of filtered) {
       // Predicted-PR rows group per PR, not under one shared "ghost" owner.
-      const key = l.prOverlay ? `pr-${l.prOverlay.number}` : l.owner.login
+      const key = l.prOverlay ? `pr:${l.prOverlay.number}` : l.owner.login.toLowerCase()
       if (!seen.has(key)) {
         const name = l.prOverlay ? `${l.owner.name} · PR #${l.prOverlay.number}` : l.owner.name
         const group = { key, login: l.owner.login, name, locks: [] as typeof teamLocks }
@@ -186,7 +187,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
 
   const doBulkUnlock = async () => {
     if (selectedLocks.length === 0) return
-    const hasForce = selectedLocks.some(lock => !currentLogin || lock.owner.login !== currentLogin)
+    const hasForce = selectedLocks.some(lock => !isGitHubLockOwner(lock, currentLogin))
     if (hasForce) {
       const ok = await dialog.confirm({
         title: 'Force unlock selected files',
@@ -202,7 +203,7 @@ export function LockedFilesPanel({ repoPath, resolveRequest, onResolvedViewed }:
     try {
       op.start(`Unlocking ${selectedLocks.length} file${selectedLocks.length === 1 ? '' : 's'}`)
       const result = await unlockFiles(repoPath, selectedLocks.map(lock => {
-        const force = !currentLogin || lock.owner.login !== currentLogin
+        const force = !isGitHubLockOwner(lock, currentLogin)
         return { filePath: lock.path, force, lockId: lock.id }
       }))
       setBulkUnlock(state => state?.repoPath === repoPath ? { ...state, result } : state)
@@ -638,7 +639,7 @@ function LockRow({
 }) {
   const [hover, setHover] = useState(false)
 
-  const isOwn     = currentLogin && lock.owner.login === currentLogin
+  const isOwn     = isGitHubLockOwner(lock, currentLogin)
   const isBusy    = unlocking === lock.path
   const canUnlock = (isOwn || isAdmin) && !disableActions && !lock.prOverlay
   const force     = !isOwn

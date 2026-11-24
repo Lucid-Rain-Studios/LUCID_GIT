@@ -11,13 +11,13 @@ app.whenReady().then(async () => {
   const { MergeWindowService } = require(path.join(dist, 'services/MergeWindowService'))
   const { logService } = require(path.join(dist, 'services/LogService'))
   logService.init(app.getPath('userData'), app.getVersion())
-  registerHandlers()
   global.mergeTestGitService = require(path.join(dist, 'services/GitService')).gitService
   const parent = new BrowserWindow({
     width: 1000, height: 700, show: false,
     webPreferences: { preload: path.join(dist, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false },
   })
   const service = new MergeWindowService(() => parent, () => quitting)
+  registerHandlers((sender, repoPath) => service.blocksWrite(sender, repoPath))
   service.register()
   parent.on('close', event => service.closeWithParent(event))
   await parent.loadURL('data:text/html,<title>Merge test parent</title><h1>Repository</h1>')

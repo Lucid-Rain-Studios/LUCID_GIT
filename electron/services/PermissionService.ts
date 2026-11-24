@@ -1,3 +1,4 @@
+import { sameGitHubLogin } from '../util/github-login'
 import { readJson, writeJson, isRecord } from '../util/json-store'
 import { boundedFetch } from '../util/network'
 import { app } from 'electron'
@@ -138,7 +139,7 @@ class PermissionService {
       }
 
       // Fallback: current user is the repo owner (personal repos / org owners)
-      if (currentLogin && data.owner?.login?.toLowerCase() === currentLogin.toLowerCase()) {
+      if (sameGitHubLogin(data.owner?.login, currentLogin)) {
         this.setCache(repoPath, 'admin', currentAccountId)
         return 'admin'
       }

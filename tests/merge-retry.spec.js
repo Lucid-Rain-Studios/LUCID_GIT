@@ -208,31 +208,40 @@ test('merge dialog offers one-click Abort & retry only for a blocked Update from
   const update = mergeDialog({
     mergeInProgress: async () => ({ kind: 'merge', mergedBranch: 'main', conflicts: [], blockingReason: reason, retryOperation: 'update-from-main' }),
     mergeAbortRetryUpdate: async () => { calls.push('retry') },
+    onMergeWindowCloseRequest: () => () => {},
+    reportMergeWindowProgress: async (progress, hide) => calls.push([progress.phase, hide]),
   })
+  update.props.standalone = true
   const tree = await open(update)
   const retry = find(tree, n => n.type === 'button' && n.props.onClick?.name === 'abortAndRetryUpdate')
   expect(retry.props.disabled).toBe(false)
   await retry.props.onClick()
-  expect(calls).toEqual(['retry'])
+  expect(calls).toEqual([['running', true], 'retry', ['complete', false]])
   expect(update.closed).toEqual(['merged', 'closed'])
 
   const other = mergeDialog({ mergeInProgress: async () => ({ kind: 'merge', mergedBranch: 'main', conflicts: [], blockingReason: reason }) })
   expect(JSON.stringify(await open(other))).not.toContain('Abort & retry update')
 })
 
-test('merge dialog stays open with the new recovery message when the retry fails again', async () => {
+test('merge dialog preserves the new recovery message when a background retry fails again', async () => {
   const first = 'Merge completion blocked: first failure.'
   const second = 'Merge completion blocked: second failure.'
   let retried = false
+  const reported = []
   const d = mergeDialog({
     mergeInProgress: async () => ({ kind: 'merge', mergedBranch: 'main', conflicts: [], retryOperation: 'update-from-main', blockingReason: retried ? second : first }),
     mergeAbortRetryUpdate: async () => { retried = true; throw new Error(second) },
+    onMergeWindowCloseRequest: () => () => {},
+    reportMergeWindowProgress: async (progress, hide) => reported.push([progress, hide]),
   })
+  d.props.standalone = true
   let tree = await open(d)
   await find(tree, n => n.type === 'button' && n.props.onClick?.name === 'abortAndRetryUpdate').props.onClick()
   tree = d.view.render('MergePreviewDialog', d.props)
   expect(find(tree, n => n.props?.role === 'alert').props.children).toContain(second)
   expect(d.closed).toEqual([])
+  expect(reported[0]).toMatchObject([{ phase: 'running' }, true])
+  expect(reported[1]).toMatchObject([{ phase: 'attention', error: expect.stringContaining(second) }, false])
   expect(find(tree, n => n.type === 'button' && n.props.onClick?.name === 'finalizeMerge').props.disabled).toBe(true)
 })
 
