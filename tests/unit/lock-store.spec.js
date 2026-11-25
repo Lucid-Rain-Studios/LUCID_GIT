@@ -16,6 +16,29 @@ function setup(ipc) {
   return { locks, reopen: () => { session++; locks.getState().clearLocks() } }
 }
 
+test('an unavailable first lock listing is distinct from a verified empty repository', async () => {
+  const { locks, reopen } = setup({ listLocks: async () => { throw Error('offline') } })
+  await locks.getState().loadLocks('repo')
+  expect(locks.getState().hasLockSnapshot).toBe(false)
+  locks.getState().setLocks([])
+  expect(locks.getState().hasLockSnapshot).toBe(true)
+  reopen()
+  expect(locks.getState().hasLockSnapshot).toBe(false)
+})
+
+test('verified locks appear before PR overlays finish and a newer poll wins', async () => {
+  let finish
+  const waiting = new Promise(resolve => { finish = resolve })
+  const { locks } = setup({ listLocks: async () => [first], getRemoteUrl: () => waiting })
+  const loading = locks.getState().loadLocks('repo')
+  await new Promise(resolve => setImmediate(resolve))
+  expect(locks.getState()).toMatchObject({ hasLockSnapshot: true, locks: [first] })
+  locks.getState().setLocks([second])
+  finish(null)
+  await loading
+  expect(locks.getState().locks).toEqual([second])
+})
+
 test('synthetic PR locks never reach the LFS unlock API', async () => {
   const calls = []
   const { locks } = setup({

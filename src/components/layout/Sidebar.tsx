@@ -123,9 +123,9 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
   const { accounts, currentAccountId } = useAuthStore()
   const currentLogin = accounts.find(a => a.userId === currentAccountId)?.login ?? null
   const lockedFileCount = useLockStore(s =>
-    currentLogin
+    currentLogin && s.hasLockSnapshot && !s.error
       ? s.locks.filter(lock => isGitHubLockOwner(lock, currentLogin)).length
-      : 0,
+      : null,
   )
   const isAdmin = useAuthStore(s => s.isAdmin(repoPath ?? ''))
   const totalChanges = fileStatus.length
@@ -469,7 +469,7 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
                         item.id === 'timeline'
                           ? totalChanges
                           : item.id === 'locks'
-                            ? lockedFileCount
+                            ? lockedFileCount ?? '—'
                             : item.id === 'overview'
                               ? openPrCount
                               : 0
@@ -721,7 +721,7 @@ export function Sidebar({ active, onChange, collapsed, onToggle, width, onWidthC
 
 function NavBtn({ item, isActive, collapsed, badge, showBadge, timelineAhead, timelineBehind, disabled, onClick }: {
   item: NavItem; isActive: boolean; collapsed: boolean
-  badge: number; showBadge: boolean; timelineAhead: number; timelineBehind: number; disabled: boolean; onClick: () => void
+  badge: number | '—'; showBadge: boolean; timelineAhead: number; timelineBehind: number; disabled: boolean; onClick: () => void
 }) {
   const [hover, setHover] = React.useState(false)
   const { Icon } = item
@@ -794,7 +794,7 @@ function NavBtn({ item, isActive, collapsed, badge, showBadge, timelineAhead, ti
               }}
             >↓</span>
           )}
-          <span style={{
+          <span title={badge === '—' ? 'Current lock count unavailable' : undefined} style={{
             background: isActive ? 'rgba(var(--lg-accent-rgb), 0.25)' : 'rgba(255,255,255,0.07)',
             color: isActive ? 'var(--lg-accent)' : 'var(--lg-text-secondary)',
             fontFamily: 'var(--lg-font-mono)', fontSize: 10, fontWeight: 700,

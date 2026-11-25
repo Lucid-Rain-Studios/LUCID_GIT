@@ -15,6 +15,7 @@ function parseGitHubSlug(url: string): string | null {
 
 interface LockState {
   locks: Lock[]
+  hasLockSnapshot: boolean
   prLocks: Lock[]
   isLoading: boolean
   error: string | null
@@ -30,6 +31,7 @@ interface LockState {
 
 export const useLockStore = create<LockState>((set, get) => ({
   locks:     [],
+  hasLockSnapshot: false,
   prLocks: [],
   isLoading: false,
   error:     null,
@@ -42,6 +44,8 @@ export const useLockStore = create<LockState>((set, get) => ({
     try {
       const locks = await ipc.listLocks(repoPath)
       if (!active(repoPath, session) || request !== loadRequest) return
+      // The sidebar can show verified ownership while PR file lists are loading.
+      get().setLocks(locks)
 
       // PR "ghost lock" overlay: all files in open PRs are treated as locked by a synthetic user.
       // This keeps ownership stable until the PR is resolved:
@@ -78,12 +82,11 @@ export const useLockStore = create<LockState>((set, get) => ({
         // Best-effort overlay; if GitHub is unavailable, show authoritative LFS locks only.
       }
 
-      const realPaths = new Set(locks.map(l => l.path.replace(/\\/g, '/')))
-      const mergedLocks = [
-        ...locks,
-        ...ghostLocks.filter(l => !realPaths.has(l.path)),
-      ]
-      if (active(repoPath, session) && request === loadRequest) set({ locks: mergedLocks, prLocks: ghostLocks, isLoading: false })
+      if (active(repoPath, session) && request === loadRequest) set(state => {
+        const real = state.locks.filter(lock => !lock.prOverlay && !lock.id.startsWith('ghost-pr-'))
+        const realPaths = new Set(real.map(lock => lock.path))
+        return { locks: [...real, ...ghostLocks.filter(lock => !realPaths.has(lock.path))], prLocks: ghostLocks, isLoading: false }
+      })
     } catch (error) {
       if (active(repoPath, session) && request === loadRequest) set({ error: 'Lock data is stale: ' + String(error), isLoading: false })
     }
@@ -168,6 +171,6 @@ export const useLockStore = create<LockState>((set, get) => ({
     await ipc.watchLock(repoPath, filePath)
   },
 
-  setLocks: (locks) => set(state => ({ locks: [...locks, ...state.prLocks.filter(lock => !locks.some(real => real.path === lock.path))], error: null })),
-  clearLocks: ()      => { loadRequest++; set({ locks: [], prLocks: [], isLoading: false, error: null }) },
+  setLocks: (locks) => set(state => ({ locks: [...locks, ...state.prLocks.filter(lock => !locks.some(real => real.path === lock.path))], hasLockSnapshot: true, error: null })),
+  clearLocks: ()      => { loadRequest++; set({ locks: [], hasLockSnapshot: false, prLocks: [], isLoading: false, error: null }) },
 }))

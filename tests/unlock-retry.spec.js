@@ -39,6 +39,14 @@ test('any other failure of the post-repair retry still reaches the caller', asyn
   await expect(lockService.unlockFile('repo', 'Content/Gone.uasset', false, '59218582')).rejects.toThrow('lock belongs to someone else')
 })
 
+test('cache recovery cannot redirect a stale force-unlock to a replacement lock', async () => {
+  const { lockService, calls } = lockServiceWith([missingFile])
+  lockService.listLocksUnguarded = async () => [{ id: 'new-lock', path: 'Content/Gone.uasset' }]
+  await expect(lockService.unlockFile('repo', 'Content/Gone.uasset', true, '59218582')).rejects.toThrow('new lock')
+  expect(calls).toHaveLength(1)
+  expect(calls[0]).toContain('--id=59218582')
+})
+
 test('only superseded review work counts as a cancellation', () => {
   const { isCancellation } = component('electron/cancellation.ts').exports
   expect(isCancellation(new Error('Blueprint review cancelled.'))).toBe(true)

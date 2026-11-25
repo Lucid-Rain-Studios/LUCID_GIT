@@ -46,6 +46,7 @@ type ProgressCallback = (step: OperationStep) => void
 class LockService {
   private pollTimers  = new Map<string, ReturnType<typeof setInterval>>()
   private prevLocks   = new Map<string, Lock[]>()
+  private pendingReleaseAlerts = new Map<string, { login: string | null; paths: string[] }>()
   private watchedFiles: Array<{ repoPath: string; filePath: string }> = []
   // Server IDs distinguish separate lock intervals on the same file.
   private lockTimestamps = new Map<string, number>()  // `${repoPath}::${lockId}` → timestamp
@@ -139,7 +140,7 @@ class LockService {
     // The deadline belongs to the listing, not time spent waiting for an
     // existing LFS operation. Share refreshes without reusing stale results.
     const promise = this.withLfsLock(repoPath, () => withGitTimeout(
-      () => this.listLocksUnguarded(repoPath), 30_000, 'lock:list',
+      () => this.listLocksUnguarded(repoPath, undefined, true), 30_000, 'lock:list',
     ))
     const entry = { accountId, promise }
     this.pendingLists.set(repoPath, entry)
@@ -150,32 +151,45 @@ class LockService {
     }
   }
 
-  private async listLocksUnguarded(repoPath: string, context?: { token: string | null; remoteUrl: string | null; verify: boolean }): Promise<Lock[]> {
+  private async listLocksUnguarded(repoPath: string, context?: { token: string | null; remoteUrl: string | null; verify: boolean }, repairOwnedPermissions = false): Promise<Lock[]> {
     const token = context ? context.token : await authService.getCurrentToken()
     const remoteUrl = context ? context.remoteUrl : await gitService.getRemoteUrl(repoPath)
     const accountId = authService.listAccounts().currentAccountId
-    const { stdout } = await exec([...gitAuthArgs(token, remoteUrl), 'lfs', 'locks', '--json', ...(context?.verify ? ['--verify'] : [])], repoPath)
+    const verify = context?.verify || repairOwnedPermissions
+    const { stdout } = await exec([...gitAuthArgs(token, remoteUrl), 'lfs', 'locks', '--json', ...(verify ? ['--verify'] : [])], repoPath)
     try {
       const parsed = JSON.parse(stdout)
-      const raw = (context?.verify && Array.isArray(parsed.ours) && Array.isArray(parsed.theirs)
-        ? [...parsed.ours, ...parsed.theirs] : parsed) as Array<{
+      if (verify && !['ours', 'theirs'].every(side => parsed?.[side] === null || Array.isArray(parsed?.[side]))) {
+        throw new Error('Invalid verified Git LFS lock response')
+      }
+      const ours = verify ? parsed.ours ?? [] : []
+      const raw = (verify ? [...ours, ...(parsed.theirs ?? [])] : parsed) as Array<{
         id: string
         path: string
         owner: { name: string }
         locked_at: string
       }>
       if (!Array.isArray(raw) || raw.some(l => !l || typeof l.id !== 'string' || typeof l.path !== 'string' || typeof l.owner?.name !== 'string')) throw new Error('Invalid Git LFS lock response')
-      const locks = raw.map(l => {
+      const readOnlyOwned: string[] = []
+      const locks = raw.map((l, index) => {
         const normalizedPath = l.path.replace(/\\/g, '/')
         const fullPath = path.join(repoPath, normalizedPath)
+        const stat = fs.lstatSync(fullPath, { throwIfNoEntry: false })
+        if (repairOwnedPermissions && index < ours.length && stat?.isFile() && !(stat.mode & 0o200)) {
+          readOnlyOwned.push(normalizedPath)
+        }
         return {
           id:       l.id,
           path:     normalizedPath,
           owner:    { name: l.owner.name, login: l.owner.name },
           lockedAt: l.locked_at,
-          isGhost:  !fs.existsSync(fullPath),
+          isGhost:  !stat,
         }
       })
+      if (readOnlyOwned.length) {
+        const permissions = await prepareUnlockPermissions(repoPath, readOnlyOwned)
+        for (const file of readOnlyOwned) await permissions.apply(file, true)
+      }
       this.authoritative.set(repoPath, { locks, at: Date.now(), accountId })
       return locks
     } catch (error) {
@@ -232,6 +246,7 @@ class LockService {
       // same lockcache.db. Keep the repository queue held through reconciliation.
       const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'lucid-unlock-'))
       const result: BulkUnlockResult = { unlocked: [], failed: [] }
+      const staleTargets: Array<{ target: UnlockTarget; stepId: string }> = []
       let next = 0, completed = 0
       try {
         const permissions = await prepareUnlockPermissions(repoPath, targets.map(target => target.filePath))
@@ -255,6 +270,11 @@ class LockService {
                 await execWithStdin(args, repoPath, '', { GIT_OPTIONAL_LOCKS: '0' })
               } catch (error) {
                 if (!/Lock not found/i.test(String(error))) throw error
+                // The path may already have a new lock. Resolve the stale ID
+                // against the single final verification before changing its mode.
+                staleTargets.push({ target, stepId: id })
+                completed++
+                continue
               }
               await permissions.apply(target.filePath)
               this.recordUnlock(repoPath, target.filePath, target.force ?? false, target.lockId, actorLogin, actorName)
@@ -293,10 +313,26 @@ class LockService {
             }
           }, 30_000, 'lock:batch-refresh')
           result.locks = refreshed
+          const lockedPaths = new Set(refreshed.map(lock => lock.path))
+          for (const { target, stepId } of staleTargets) {
+            try {
+              if (lockedPaths.has(target.filePath)) throw new Error('The file is still locked. Refresh and review its current lock.')
+              await permissions.apply(target.filePath)
+              result.unlocked.push(target.filePath)
+              onProgress?.({ id: stepId, label: 'File unlocked', status: 'done', detail: target.filePath })
+            } catch (error) {
+              result.failed.push({ filePath: target.filePath, error: String(error) })
+              onProgress?.({ id: stepId, label: 'Unlock failed', status: 'error', detail: String(error) })
+            }
+          }
           this.prevLocks.set(repoPath, refreshed)
           this.broadcastLocks(repoPath, refreshed)
         } catch (error) {
           result.refreshError = `Lock data is stale: ${String(error)}`
+          for (const { target, stepId } of staleTargets) {
+            result.failed.push({ filePath: target.filePath, error: result.refreshError })
+            onProgress?.({ id: stepId, label: 'Unlock unconfirmed', status: 'error', detail: result.refreshError })
+          }
           this.broadcastLocks(repoPath, this.prevLocks.get(repoPath) ?? [], result.refreshError)
         }
         onProgress?.({ id: 'unlock-batch', label: result.failed.length || result.refreshError ? 'Unlock batch needs attention' : 'Files unlocked',
@@ -355,6 +391,11 @@ class LockService {
       ...unlockOpts,
       ...(id ? [`--id=${id}`] : [normalized]),
     ]
+    const confirmMissing = async () => {
+      if (!fileExists) return
+      const locks = await this.listLocksUnguarded(repoPath, { token, remoteUrl: remoteUrl ?? null, verify: true })
+      if (locks.some(lock => lock.path === normalized)) throw new Error('The file is still locked. Refresh and review its current lock.')
+    }
     try {
       await exec(makeArgs(resolvedLockId), repoPath)
     } catch (error) {
@@ -362,20 +403,25 @@ class LockService {
       // Treat stale lock records as already unlocked; Git LFS can return
       // "Lock not found" when another client has already released it.
       if (/Lock not found/i.test(msg)) {
-        // already unlocked
+        await confirmMissing()
       } else if (this.isLockCacheCorruptError(msg) || this.isMissingFileUnlockCacheError(msg)) {
         // Both failures mean the local lock cache is unusable. Rebuild it from
         // the server and retry once; if the retry fails too, the error carries
         // the original message so callers can recognise a corrupt cache.
         await repairLockCache()
         const refreshedLocks = await this.listLocksUnguarded(repoPath)
-        const refreshedLockId = refreshedLocks.find(l => l.path === normalized)?.id ?? resolvedLockId
+        const currentId = refreshedLocks.find(l => l.path === normalized)?.id
+        if (resolvedLockId && currentId && currentId !== resolvedLockId) {
+          throw new Error('The file has a new lock. Refresh and review its current lock.')
+        }
+        const refreshedLockId = currentId ?? resolvedLockId
         try {
           await exec(makeArgs(refreshedLockId), repoPath)
         } catch (retryError) {
           // The first attempt may have released the lock on the server before it
           // failed on the missing file, so the retry finds nothing left to release.
           if (!/Lock not found/i.test(String(retryError))) throw retryError
+          await confirmMissing()
         }
         resolvedLockId = refreshedLockId
       } else {
@@ -440,6 +486,8 @@ class LockService {
 
   stopPolling(repoPath: string): void {
     this.pollTokens.delete(repoPath)
+    this.pendingReleaseAlerts.delete(repoPath)
+    this.prevLocks.delete(repoPath)
     const id = this.pollTimers.get(repoPath)
     if (id !== undefined) {
       clearInterval(id)
@@ -599,7 +647,11 @@ class LockService {
 
     // Released locks since last poll
     const currentUserLogin = this.currentUserLogin()
-    const externalUnlocksOfMine: string[] = []
+    const ownedPaths = new Set(current.filter(lock => isGitHubLockOwner(lock, currentUserLogin)).map(lock => lock.path))
+    const pending = this.pendingReleaseAlerts.get(repoPath)
+    const externalUnlocksOfMine = pending && pending.login === currentUserLogin
+      ? pending.paths.filter(file => !ownedPaths.has(file)) : []
+    const missing: string[] = []
     for (const lock of previous) {
       if (!current.find(l => l.id === lock.id)) {
         const title = 'File unlocked'
@@ -625,8 +677,8 @@ class LockService {
           const selfUnlockedAt = this.recentSelfUnlocks.get(key)
           if (selfUnlockedAt !== undefined && now - selfUnlockedAt < SELF_UNLOCK_GRACE_MS) {
             this.recentSelfUnlocks.delete(key)
-          } else {
-            externalUnlocksOfMine.push(lock.path)
+          } else if (!ownedPaths.has(lock.path)) {
+            missing.push(lock.path)
           }
         }
 
@@ -640,11 +692,14 @@ class LockService {
       }
     }
 
+    // Confirm loss of ownership on the next scheduled successful poll. A
+    // transient omission or replacement ID alone should not raise an OS alert.
+    this.pendingReleaseAlerts.set(repoPath, { login: currentUserLogin, paths: missing })
     if (externalUnlocksOfMine.length === 1) {
       desktopNotificationService.notify({
         event:  'forceUnlock',
         title:  'Your lock was released',
-        body:   `${externalUnlocksOfMine[0]} was unlocked by another user`,
+        body:   `You no longer hold the lock on ${externalUnlocksOfMine[0]}`,
         urgent: true,
       })
     } else if (externalUnlocksOfMine.length > 1) {

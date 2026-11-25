@@ -122,6 +122,35 @@ test('LG-038 lock polling reports failure without inventing removals or unlock n
   expect(lockService.prevLocks.get('repo')).toEqual(original); expect(notifications).toEqual([]); lockService.stopPolling('repo')
 })
 
+test('13 missing locks require sustained ownership loss before notifying the owner', async () => {
+  const notifications = []
+  const { lockService } = component('electron/services/LockService.ts', {
+    electron: { BrowserWindow: { getAllWindows: () => [] } },
+    './AuthService': { authService: { listAccounts: () => ({ accounts: [{ userId: 'me', login: 'fieryben' }], currentAccountId: 'me' }) } },
+    './NotificationService': { notificationService: { push: noop } },
+    './DesktopNotificationService': { desktopNotificationService: { notify: opts => notifications.push(opts) } },
+    './WebhookService': { webhookService: { send: async () => {} } },
+    './HeatmapService': { heatmapService: { recordLockEvent: noop } },
+  }, { setInterval: () => 1, clearInterval: noop }).exports
+  const original = Array.from({ length: 13 }, (_, i) => ({ id: String(i), path: i + '.uasset', owner: { login: 'fieryben', name: 'fieryben' } }))
+  let snapshot = original
+  lockService.listLocks = async () => snapshot
+  lockService.startPolling('repo')
+  await flush()
+  snapshot = []
+  await lockService.poll('repo')
+  snapshot = original.map(lock => ({ ...lock, id: 'new-' + lock.id }))
+  await lockService.poll('repo')
+  expect(notifications).toEqual([])
+  snapshot = []
+  await lockService.poll('repo')
+  expect(notifications).toEqual([])
+  await lockService.poll('repo')
+  await lockService.poll('repo')
+  expect(notifications.map(item => item.body)).toEqual(['13 of your files were unlocked'])
+  lockService.stopPolling('repo')
+})
+
 test('LG-043/045 forecast skips occupied gates, retains freshness on failed fetch and drops stopped-repo results', async () => {
   const events = []; let busy = true, fetched = 0, pending
   const { forecastService: service } = component('electron/services/ForecastService.ts', {

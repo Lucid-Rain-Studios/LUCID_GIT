@@ -23,6 +23,64 @@ function service(runnerMock, remote = 'https://github.com/owner/repo.git', maint
 const targets = n => Array.from({ length: n }, (_, i) => ({ filePath: `file-${i}.txt`, lockId: String(i) }))
 test.afterAll(cleanup)
 
+async function withBonfireLock(run) {
+  const repo = tmpDir('bonfire-lock-')
+  git(repo, 'init', '-qb', 'main')
+  fs.writeFileSync(path.join(repo, '.gitattributes'), '*.uasset lockable\n')
+  const files = ['Bonfire.uasset', 'Team.uasset', 'Unlocked.uasset', 'Notes.txt']
+  for (const file of files) {
+    fs.writeFileSync(path.join(repo, file), 'saved asset')
+    if (file !== files[0]) fs.chmodSync(path.join(repo, file), 0o444)
+  }
+  const record = (file, id, owner) => ({ id, path: file, owner: { name: owner }, locked_at: new Date().toISOString() })
+  const ours = [record(files[0], '1', 'fieryben'), record(files[3], '3', 'fieryben')]
+  const theirs = [record(files[1], '2', 'teammate')]
+  const server = http.createServer((req, res) => {
+    res.setHeader('Content-Type', 'application/vnd.git-lfs+json')
+    if (req.url.endsWith('/locks/verify')) return res.end(JSON.stringify({ ours, theirs }))
+    if (req.url.endsWith('/locks/999/unlock')) {
+      res.writeHead(404).end(JSON.stringify({ message: 'Lock not found' }))
+      return
+    }
+    if (req.method === 'GET') return res.end(JSON.stringify({ locks: [...ours, ...theirs] }))
+    res.writeHead(405).end()
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const remote = `http://127.0.0.1:${server.address().port}/repo.git`
+    git(repo, 'remote', 'add', 'origin', remote)
+    git(repo, 'config', 'lfs.url', remote + '/info/lfs')
+    await run(service(runner, remote).lockService, repo, files)
+  } finally {
+    await new Promise(resolve => server.close(resolve))
+    for (const file of files) fs.chmodSync(path.join(repo, file), 0o644)
+  }
+}
+
+test('refresh repairs a retained Bonfire lock using verified ownership and preserves other assets', async () => {
+  await withBonfireLock(async (svc, repo, files) => {
+    const asset = path.join(repo, files[0])
+    fs.chmodSync(asset, 0o444)
+    expect((await svc.listLocks(repo)).map(lock => lock.id).sort()).toEqual(['1', '2', '3'])
+    expect(fs.statSync(asset).mode & 0o200).not.toBe(0)
+    for (const file of files.slice(1)) expect(fs.statSync(path.join(repo, file)).mode & 0o222).toBe(0)
+    expect(fs.readFileSync(asset, 'utf8')).toBe('saved asset')
+  })
+})
+
+test('an obsolete unlock ID cannot turn a writable replacement checkout read-only', async () => {
+  await withBonfireLock(async (svc, repo, [file]) => {
+    const asset = path.join(repo, file)
+    const single = await Promise.allSettled([svc.unlockFile(repo, file, false, '999')])
+    expect(fs.statSync(asset).mode & 0o200).not.toBe(0)
+    expect(String(single[0].reason)).toContain('still locked')
+    const batch = await svc.unlockFiles(repo, [{ filePath: file, lockId: '999' }])
+    expect(batch.unlocked).toEqual([])
+    expect(batch.failed[0].error).toContain('still locked')
+    expect(fs.statSync(asset).mode & 0o200).not.toBe(0)
+  })
+})
+
 test('40 unlocks use four isolated workers, report every outcome, and reconcile only once', async () => {
   let active = 0, peak = 0, refreshes = 0, released = false
   const storages = new Set(), steps = [], pending = []
